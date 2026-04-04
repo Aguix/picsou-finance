@@ -28,7 +28,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -282,15 +284,29 @@ public class TradeRepublicSyncService {
 
         if (!data.positions().isEmpty()) {
             holdingRepository.deleteByAccountId(account.getId());
+            // Deduplicate by ticker: when multiple ISINs convert to the same ticker,
+            // aggregate them to avoid unique constraint violations
+            Map<String, HoldingAgg> deduped = new HashMap<>();
             for (TrPosition p : data.positions()) {
-                // Convert ISIN to Yahoo ticker symbol for price lookups
                 String ticker = isinConverter.isinToYahooTicker(p.isin());
+                deduped.merge(ticker, new HoldingAgg(p.quantity(), p.averageBuyIn(), p.currentPrice()),
+                    (prev, newPos) -> {
+                        // When same ticker appears multiple times, combine quantities
+                        return new HoldingAgg(
+                            prev.quantity.add(newPos.quantity),
+                            prev.averageBuyIn,
+                            prev.currentPrice
+                        );
+                    });
+            }
+            for (Map.Entry<String, HoldingAgg> entry : deduped.entrySet()) {
+                HoldingAgg agg = entry.getValue();
                 holdingRepository.save(AccountHolding.builder()
                     .account(account)
-                    .ticker(ticker)
-                    .quantity(p.quantity())
-                    .averageBuyIn(p.averageBuyIn())
-                    .currentPrice(p.currentPrice())
+                    .ticker(entry.getKey())
+                    .quantity(agg.quantity)
+                    .averageBuyIn(agg.averageBuyIn)
+                    .currentPrice(agg.currentPrice)
                     .lastSyncedAt(Instant.now())
                     .build());
             }
@@ -314,4 +330,8 @@ public class TradeRepublicSyncService {
     public record AuthInitResponse(String processId) {}
 
     public record SessionStatusResponse(boolean isActive, Instant expiresAt) {}
+
+    // ─── Helper records ────────────────────────────────────────────────────────
+
+    private record HoldingAgg(BigDecimal quantity, BigDecimal averageBuyIn, BigDecimal currentPrice) {}
 }
