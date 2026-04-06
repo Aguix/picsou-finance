@@ -1,0 +1,282 @@
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/lib/api-client'
+import { formatDate } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
+import { EmptyState } from '@/components/shared/EmptyState'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import {
+  Add01Icon,
+  RefreshIcon,
+  Delete02Icon,
+  Wallet01Icon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
+import type { WalletStatus, ChainType } from '@/types/api'
+
+const CHAIN_COLORS: Record<ChainType, string> = {
+  BITCOIN: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
+  ETHEREUM: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  SOLANA: 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
+}
+
+function truncateAddress(address: string): string {
+  if (address.length <= 12) return address
+  return `${address.slice(0, 8)}...${address.slice(-4)}`
+}
+
+function useWallets() {
+  return useQuery<WalletStatus[]>({
+    queryKey: ['crypto', 'wallets'],
+    queryFn: () => api.get('/crypto/wallet').then(r => r.data),
+    refetchInterval: 60_000,
+  })
+}
+
+function useAddWallet() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { chain: ChainType; address: string; label?: string }) =>
+      api.post('/crypto/wallet', body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'wallets'] })
+    },
+  })
+}
+
+function useSyncWallet() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.post(`/crypto/wallet/${id}/sync`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'wallets'] })
+    },
+  })
+}
+
+function useRemoveWallet() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/crypto/wallet/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'wallets'] })
+    },
+  })
+}
+
+export function CryptoWalletTab() {
+  const { t } = useTranslation()
+  const { data: wallets, isLoading, error, refetch } = useWallets()
+  const addMutation = useAddWallet()
+  const syncMutation = useSyncWallet()
+  const removeMutation = useRemoveWallet()
+
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [chain, setChain] = useState<ChainType>('ETHEREUM')
+  const [address, setAddress] = useState('')
+  const [label, setLabel] = useState('')
+  const [removingId, setRemovingId] = useState<number | null>(null)
+
+  function handleAdd(e: React.FormEvent) {
+    e.preventDefault()
+    addMutation.mutate(
+      { chain, address, label: label || undefined },
+      {
+        onSuccess: () => {
+          setAddress('')
+          setLabel('')
+          setShowAddForm(false)
+        },
+      },
+    )
+  }
+
+  function handleRemove() {
+    if (removingId == null) return
+    removeMutation.mutate(removingId, {
+      onSuccess: () => setRemovingId(null),
+    })
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <Card key={i} size="sm">
+            <CardContent className="flex items-center justify-between p-4">
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-36" />
+                <Skeleton className="h-3 w-52" />
+              </div>
+              <div className="flex gap-2">
+                <Skeleton className="size-8" />
+                <Skeleton className="size-8" />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <p className="text-sm text-muted-foreground">{error.message}</p>
+        <Button variant="outline" onClick={() => refetch()} className="mt-4">
+          {t('common.retry', 'Retry')}
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Add wallet */}
+      {!showAddForm ? (
+        <Button onClick={() => setShowAddForm(true)}>
+          <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+          {t('sync.wallets.add')}
+        </Button>
+      ) : (
+        <Card size="sm">
+          <CardContent className="space-y-4 p-4">
+            <form onSubmit={handleAdd} className="space-y-4">
+              <div className="space-y-2">
+                <Label>{t('sync.wallets.chain')}</Label>
+                <div className="flex gap-2">
+                  {(['BITCOIN', 'ETHEREUM', 'SOLANA'] as ChainType[]).map(c => (
+                    <Button
+                      key={c}
+                      type="button"
+                      variant={chain === c ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setChain(c)}
+                    >
+                      {c}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="wallet-address">{t('sync.wallets.address')}</Label>
+                <Input
+                  id="wallet-address"
+                  value={address}
+                  onChange={e => setAddress(e.target.value)}
+                  placeholder={t('sync.wallets.address')}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="wallet-label">{t('sync.wallets.label')}</Label>
+                <Input
+                  id="wallet-label"
+                  value={label}
+                  onChange={e => setLabel(e.target.value)}
+                  placeholder={t('sync.wallets.label')}
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Button type="submit" disabled={addMutation.isPending}>
+                  <HugeiconsIcon icon={Wallet01Icon} strokeWidth={2} />
+                  {t('sync.wallets.track')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowAddForm(false)
+                    setAddress('')
+                    setLabel('')
+                  }}
+                >
+                  {t('common.cancel')}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Wallet list */}
+      {!wallets || wallets.length === 0 ? (
+        <EmptyState
+          title={t('sync.wallets.noWallets')}
+          action={
+            showAddForm
+              ? undefined
+              : {
+                  label: t('sync.wallets.add'),
+                  onClick: () => setShowAddForm(true),
+                }
+          }
+        />
+      ) : (
+        <div className="space-y-3">
+          {wallets.map(wallet => (
+            <Card key={wallet.id} size="sm">
+              <CardContent className="flex items-center justify-between p-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    {wallet.label && (
+                      <span className="font-medium">{wallet.label}</span>
+                    )}
+                    <Badge className={CHAIN_COLORS[wallet.chain]}>
+                      {wallet.chain}
+                    </Badge>
+                  </div>
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {truncateAddress(wallet.address)}
+                  </p>
+                  {wallet.lastSyncedAt && (
+                    <p className="text-xs text-muted-foreground">
+                      {t('sync.wallets.lastSync')}: {formatDate(wallet.lastSyncedAt)}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => syncMutation.mutate(wallet.id)}
+                    disabled={syncMutation.isPending}
+                  >
+                    <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setRemovingId(wallet.id)}
+                  >
+                    <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Remove confirmation */}
+      <ConfirmDialog
+        open={removingId != null}
+        onOpenChange={open => !open && setRemovingId(null)}
+        title={t('sync.wallets.remove')}
+        description={t('sync.wallets.removeConfirm')}
+        onConfirm={handleRemove}
+        loading={removeMutation.isPending}
+      />
+    </div>
+  )
+}

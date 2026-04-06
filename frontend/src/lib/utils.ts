@@ -1,3 +1,35 @@
+import { clsx } from 'clsx'
+import type { ClassValue } from 'clsx'
+import { twMerge } from 'tailwind-merge'
+
+export function cn(...inputs: ClassValue[]): string {
+  return twMerge(clsx(inputs))
+}
+
+export function formatCurrency(value: number, currency: string = 'EUR', locale: string = 'fr-FR'): string {
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+export function formatPercent(value: number, decimals = 2): string {
+  return (value * 100).toFixed(decimals) + '%'
+}
+
+export function formatTimeAgo(dateStr: string, locale: string = 'fr-FR'): string {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
+  if (seconds < 60) return locale.startsWith('fr') ? "à l'instant" : 'just now'
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60)
+    return locale.startsWith('fr') ? `il y a ${m}m` : `${m}m ago`
+  }
+  const h = Math.floor(seconds / 3600)
+  return locale.startsWith('fr') ? `il y a ${h}h` : `${h}h ago`
+}
+
 /** Format a number as EUR currency */
 export function formatEur(value: number, opts?: { compact?: boolean }): string {
   if (opts?.compact && Math.abs(value) >= 1000) {
@@ -17,8 +49,8 @@ export function formatEur(value: number, opts?: { compact?: boolean }): string {
 }
 
 /** Format a date string as "12 mars 2026" */
-export function formatDate(dateStr: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+export function formatDate(dateStr: string, locale: string = 'fr-FR'): string {
+  return new Intl.DateTimeFormat(locale, {
     day: 'numeric',
     month: 'long',
     year: 'numeric',

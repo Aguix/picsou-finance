@@ -1,14 +1,51 @@
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'motion/react'
-import { Plus, Target, TrendingUp, TrendingDown, X, Loader2, Pencil, Clock, CalendarDays } from 'lucide-react'
-import { useGoals, useCreateGoal, useDeleteGoal, useUpdateGoal } from '../../hooks/useGoals'
-import { useAccounts } from '../../hooks/useAccounts'
-import { GlassCard, GlowBackground, PageHeader } from '../../components/shared'
-import { formatEur, formatLocalDate } from '../../lib/utils'
-import type { GoalProgress } from '../../lib/api'
-import { GoalCalendarModal } from './GoalCalendarModal'
+import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { useGoals, useCreateGoal, useUpdateGoal, useDeleteGoal } from '@/features/goals/hooks'
+import { useAccounts } from '@/features/accounts/hooks'
+import { GoalProgressBar } from '@/components/shared/GoalProgressBar'
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
+import { EmptyState } from '@/components/shared/EmptyState'
+import { PageHeader } from '@/components/shared/PageHeader'
+import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { HugeiconsIcon } from '@hugeicons/react'
+import {
+  Target01Icon,
+  Add01Icon,
+  Edit02Icon,
+  Delete02Icon,
+  Calendar01Icon,
+  TrendingUp,
+  TrendingDown,
+  Loading01Icon,
+} from '@hugeicons/core-free-icons'
+import { formatLocalDate } from '@/lib/utils'
+import type { GoalProgress } from '@/types/api'
+
+const emptyForm = {
+  name: '',
+  targetAmount: '',
+  deadline: '',
+  accountIds: [] as number[],
+}
 
 export function GoalsPage() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+
   const { data: goals, isLoading } = useGoals()
   const { data: accounts } = useAccounts()
   const createGoal = useCreateGoal()
@@ -17,29 +54,30 @@ export function GoalsPage() {
 
   const [showForm, setShowForm] = useState(false)
   const [editingGoal, setEditingGoal] = useState<GoalProgress | null>(null)
-  const [calendarGoal, setCalendarGoal] = useState<GoalProgress | null>(null)
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
-  const [form, setForm] = useState({
-    name: '',
-    targetAmount: '',
-    deadline: '',
-    accountIds: [] as number[],
-  })
+  const [deleteId, setDeleteId] = useState<number | null>(null)
+  const [form, setForm] = useState(emptyForm)
 
-  const emptyForm = { name: '', targetAmount: '', deadline: '', accountIds: [] as number[] }
+  const openCreate = () => {
+    setEditingGoal(null)
+    setForm(emptyForm)
+    setShowForm(true)
+  }
 
-  const openCreate = () => { setEditingGoal(null); setForm(emptyForm); setShowForm(true) }
   const openEdit = (goal: GoalProgress) => {
     setEditingGoal(goal)
     setForm({
       name: goal.name,
       targetAmount: String(goal.targetAmount),
       deadline: goal.deadline,
-      accountIds: goal.accounts.map(a => a.id),
+      accountIds: goal.accounts.map((a) => a.id),
     })
     setShowForm(true)
   }
-  const closeForm = () => { setShowForm(false); setEditingGoal(null) }
+
+  const closeForm = () => {
+    setShowForm(false)
+    setEditingGoal(null)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,359 +96,292 @@ export function GoalsPage() {
   }
 
   const toggleAccount = (id: number) => {
-    setForm(f => ({
+    setForm((f) => ({
       ...f,
       accountIds: f.accountIds.includes(id)
-        ? f.accountIds.filter(a => a !== id)
+        ? f.accountIds.filter((a) => a !== id)
         : [...f.accountIds, id],
     }))
   }
 
+  const handleConfirmDelete = () => {
+    if (deleteId != null) {
+      deleteGoal.mutate(deleteId)
+      setDeleteId(null)
+    }
+  }
+
+  if (isLoading) return <LoadingSkeleton />
+
+  const goalList = goals ?? []
+
   return (
-    <GlowBackground
-      glows={[
-        { color: 'bg-violet-200/15', size: 380, blur: 120, position: '-top-10 right-1/4' },
-        { color: 'bg-purple-100/20', size: 260, blur: 90, position: 'bottom-5 left-1/3' },
-      ]}
-    >
+    <div className="space-y-6">
       <PageHeader
-        surtitle="Planification"
-        title="Objectifs"
+        title={t('goals.title')}
         actions={
-          <motion.button
-            whileTap={{ scale: 0.96 }}
-            onClick={openCreate}
-            className="flex items-center gap-1.5 h-8 px-3 bg-gray-900 text-white rounded-[10px]"
-            style={{ fontSize: 12, fontWeight: 600 }}
-          >
-            <Plus size={14} /> Objectif
-          </motion.button>
+          <Button onClick={openCreate} size="sm" className="gap-1.5">
+            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-4" />
+            {t('goals.addGoal')}
+          </Button>
         }
       />
 
-      {isLoading ? (
-        <div className="flex flex-col gap-4 animate-pulse">
-          {[...Array(2)].map((_, i) => <div key={i} className="h-48 bg-white/60 rounded-[20px]" />)}
-        </div>
+      {goalList.length === 0 ? (
+        <EmptyState
+          icon={<HugeiconsIcon icon={Target01Icon} strokeWidth={2} className="size-12" />}
+          title={t('goals.noGoals')}
+          action={{ label: t('goals.addGoal'), onClick: openCreate }}
+        />
       ) : (
         <div className="flex flex-col gap-4">
-          <AnimatePresence>
-            {(goals ?? []).map((goal, i) => {
-              const pct = Math.min(100, goal.percentComplete)
-              return (
-                <motion.div
-                  key={goal.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.97 }}
-                  transition={{ delay: i * 0.08, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                >
-                  <GlassCard>
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-[12px] bg-violet-500/10 flex items-center justify-center">
-                          <Target size={16} className="text-violet-600" />
-                        </div>
-                        <div>
-                          <p className="text-gray-900" style={{ fontSize: 15, fontWeight: 600 }}>
-                            {goal.name}
-                          </p>
-                          <p className="text-gray-400" style={{ fontSize: 11, fontWeight: 500 }}>
-                            Échéance : {formatLocalDate(goal.deadline)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <div className="flex items-center gap-2">
-                          {(() => {
-                            const noData = goal.avgMonthlyContribution == null && goal.monthlyNeeded > 0
-                            const reached = goal.monthlyNeeded <= 0
-                            return (
-                              <div
-                                className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${
-                                  reached
-                                    ? 'bg-green-500/[0.08] text-green-600'
-                                    : noData
-                                      ? 'bg-gray-500/[0.08] text-gray-400'
-                                      : goal.isOnTrack
-                                        ? 'bg-green-500/[0.08] text-green-600'
-                                        : 'bg-red-500/[0.08] text-red-500'
-                                }`}
-                                style={{ fontSize: 11, fontWeight: 600 }}
-                              >
-                                {reached
-                                  ? <><TrendingUp size={11} /> Atteint</>
-                                  : noData
-                                    ? <><Clock size={11} /> En cours</>
-                                    : goal.isOnTrack
-                                      ? <><TrendingUp size={11} /> En avance</>
-                                      : <><TrendingDown size={11} /> En retard</>
-                                }
-                              </div>
-                            )
-                          })()}
-                          <button
-                            onClick={() => openEdit(goal)}
-                            className="text-gray-300 hover:text-gray-600 transition-colors p-2 rounded-[8px]"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            onClick={() => setCalendarGoal(goal)}
-                            className="text-gray-300 hover:text-violet-500 transition-colors p-2 rounded-[8px]"
-                          >
-                            <CalendarDays size={13} />
-                          </button>
-                          {confirmDeleteId === goal.id ? (
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => { deleteGoal.mutate(goal.id); setConfirmDeleteId(null) }}
-                                disabled={deleteGoal.isPending}
-                                className="h-7 px-2 rounded-[8px] bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors disabled:opacity-60"
-                                style={{ fontSize: 11, fontWeight: 600 }}
-                              >
-                                {deleteGoal.isPending ? <Loader2 size={10} className="animate-spin" /> : 'Supprimer'}
-                              </button>
-                              <button
-                                onClick={() => setConfirmDeleteId(null)}
-                                className="h-7 px-2 rounded-[8px] bg-black/[0.04] text-gray-500 hover:bg-black/[0.07] transition-colors"
-                                style={{ fontSize: 11, fontWeight: 500 }}
-                              >
-                                Annuler
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setConfirmDeleteId(goal.id)}
-                              className="text-gray-300 hover:text-red-400 transition-colors p-2 rounded-[8px]"
-                            >
-                              <X size={14} />
-                            </button>
-                          )}
-                        </div>
-                        <p className="text-gray-400 text-right max-w-[200px]" style={{ fontSize: 10, fontWeight: 500 }}>
-                          {goal.monthlyNeeded <= 0
-                            ? `${formatEur(goal.currentTotal)} ≥ objectif ${formatEur(goal.targetAmount)}`
-                            : goal.avgMonthlyContribution == null
-                              ? '2 relevés sur mois distincts requis pour calculer'
-                              : goal.isOnTrack
-                                ? `Épargne moy. ${formatEur(goal.avgMonthlyContribution)}/mois ≥ ${formatEur(goal.monthlyNeeded)}/mois requis`
-                                : `Épargne moy. ${formatEur(goal.avgMonthlyContribution)}/mois — manque ${formatEur(goal.monthlyNeeded - goal.avgMonthlyContribution)}/mois`
-                          }
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Progress bar */}
-                    <div className="mb-3">
-                      <div className="flex justify-between mb-1.5">
-                        <span className="text-gray-700" style={{ fontSize: 13, fontWeight: 600 }}>
-                          {formatEur(goal.currentTotal)}
-                        </span>
-                        <span className="text-gray-400" style={{ fontSize: 13, fontWeight: 500 }}>
-                          {formatEur(goal.targetAmount)}
-                        </span>
-                      </div>
-                      <div className="w-full bg-gray-100 rounded-full h-2">
-                        <motion.div
-                          className="h-2 rounded-full"
-                          style={{ background: goal.isOnTrack ? '#22c55e' : '#f43f5e' }}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${pct}%` }}
-                          transition={{ duration: 0.8, delay: i * 0.08, ease: [0.22, 1, 0.36, 1] }}
-                        />
-                      </div>
-                      <p className="text-gray-400 mt-1" style={{ fontSize: 11, fontWeight: 500 }}>
-                        {pct.toFixed(1)}% atteint
-                      </p>
-                    </div>
-
-                    {/* Stats grid */}
-                    <div className="grid grid-cols-3 gap-3 pt-3 border-t border-black/[0.04]">
-                      <Stat
-                        label="Mois restants"
-                        value={String(goal.monthsLeft)}
-                      />
-                      <Stat
-                        label="À épargner /mois"
-                        value={formatEur(goal.monthlyNeeded)}
-                        highlight={!goal.isOnTrack}
-                      />
-                      <Stat
-                        label="Contribution moy."
-                        value={goal.avgMonthlyContribution != null ? formatEur(goal.avgMonthlyContribution) + '/mois' : '–'}
-                        hint={goal.avgMonthlyContribution == null ? 'Min. 2 relevés requis' : undefined}
-                        positive={goal.isOnTrack && goal.avgMonthlyContribution != null}
-                      />
-                    </div>
-
-                    {/* Accounts */}
-                    {goal.accounts.length > 0 && (
-                      <div className="flex gap-1.5 mt-3 flex-wrap">
-                        {goal.accounts.map(a => (
-                          <span
-                            key={a.id}
-                            className="px-2 py-0.5 rounded-full text-white"
-                            style={{ fontSize: 10, fontWeight: 600, background: a.color }}
-                          >
-                            {a.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </GlassCard>
-                </motion.div>
-              )
-            })}
-          </AnimatePresence>
-
-          {(goals ?? []).length === 0 && (
-            <p className="text-gray-400 py-8 text-center" style={{ fontSize: 13 }}>
-              Aucun objectif. Cliquez sur "Objectif" pour en créer un.
-            </p>
-          )}
+          {goalList.map((goal) => (
+            <GoalCard
+              key={goal.id}
+              goal={goal}
+              onEdit={() => openEdit(goal)}
+              onDelete={() => setDeleteId(goal.id)}
+              onCalendar={() => navigate(`/goals/${goal.id}/calendar`)}
+            />
+          ))}
         </div>
       )}
 
-      {/* Calendar modal */}
-      <AnimatePresence>
-        {calendarGoal && (
-          <GoalCalendarModal goal={calendarGoal} onClose={() => setCalendarGoal(null)} />
-        )}
-      </AnimatePresence>
+      {/* Create / Edit dialog */}
+      <Dialog open={showForm} onOpenChange={(open) => { if (!open) closeForm() }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editingGoal ? t('goals.editGoal') : t('goals.addGoal')}
+            </DialogTitle>
+          </DialogHeader>
 
-      {/* Create / Edit modal */}
-      <AnimatePresence>
-        {showForm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-            onClick={closeForm}
-          >
-            <motion.div
-              initial={{ scale: 0.95, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-              onClick={e => e.stopPropagation()}
-              className="w-full max-w-md"
-            >
-              <GlassCard rounded="2xl">
-                <div className="flex items-center justify-between mb-5">
-                  <h2 className="text-gray-900" style={{ fontSize: 17, fontWeight: 600 }}>
-                    {editingGoal ? 'Modifier l\'objectif' : 'Nouvel objectif'}
-                  </h2>
-                  <button onClick={closeForm} className="text-gray-400 hover:text-gray-600">
-                    <X size={18} />
-                  </button>
-                </div>
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="goal-name">{t('goals.title')}</Label>
+              <Input
+                id="goal-name"
+                required
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Apport immobilier"
+              />
+            </div>
 
-                <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-gray-500" style={{ fontSize: 11, fontWeight: 600 }}>NOM</label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="goal-target">{t('goals.targetAmount')}</Label>
+                <Input
+                  id="goal-target"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  value={form.targetAmount}
+                  onChange={(e) => setForm((f) => ({ ...f, targetAmount: e.target.value }))}
+                  placeholder="50000"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="goal-deadline">{t('goals.deadline')}</Label>
+                <Input
+                  id="goal-deadline"
+                  type="date"
+                  required
+                  value={form.deadline}
+                  onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label>Comptes inclus</Label>
+              <div className="flex flex-col gap-2 max-h-40 overflow-y-auto">
+                {(accounts ?? []).map((a) => (
+                  <label
+                    key={a.id}
+                    className="flex items-center gap-2.5 cursor-pointer select-none"
+                  >
                     <input
-                      required value={form.name}
-                      onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                      placeholder="Apport immobilier"
-                      className="h-8 px-3 w-full rounded-[10px] bg-black/[0.03] text-[13px] border-none outline-none focus:ring-2 focus:ring-gray-900/10"
+                      type="checkbox"
+                      checked={form.accountIds.includes(a.id)}
+                      onChange={() => toggleAccount(a.id)}
+                      className="rounded accent-primary"
                     />
-                  </div>
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ background: a.color }}
+                    />
+                    <span className="text-sm flex-1">{a.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      <CurrencyDisplay value={a.currentBalanceEur} />
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-gray-500" style={{ fontSize: 11, fontWeight: 600 }}>MONTANT CIBLE (€)</label>
-                      <input
-                        type="number" step="0.01" min="0.01" required
-                        value={form.targetAmount}
-                        onChange={e => setForm(f => ({ ...f, targetAmount: e.target.value }))}
-                        placeholder="50000"
-                        className="h-8 px-3 w-full rounded-[10px] bg-black/[0.03] text-[13px] border-none outline-none focus:ring-2 focus:ring-gray-900/10"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-gray-500" style={{ fontSize: 11, fontWeight: 600 }}>ÉCHÉANCE</label>
-                      <input
-                        type="date" required
-                        value={form.deadline}
-                        onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))}
-                        className="h-8 px-3 w-full rounded-[10px] bg-black/[0.03] text-[13px] border-none outline-none focus:ring-2 focus:ring-gray-900/10"
-                      />
-                    </div>
-                  </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeForm}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  createGoal.isPending ||
+                  updateGoal.isPending ||
+                  form.accountIds.length === 0
+                }
+              >
+                {(createGoal.isPending || updateGoal.isPending) && (
+                  <HugeiconsIcon
+                    icon={Loading01Icon}
+                    strokeWidth={2}
+                    className="size-4 animate-spin mr-1"
+                  />
+                )}
+                {t('common.save')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-gray-500" style={{ fontSize: 11, fontWeight: 600 }}>COMPTES INCLUS</label>
-                    <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto">
-                      {(accounts ?? []).map(a => (
-                        <label key={a.id} className="flex items-center gap-2.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={form.accountIds.includes(a.id)}
-                            onChange={() => toggleAccount(a.id)}
-                            className="rounded-[4px] accent-gray-900"
-                          />
-                          <div
-                            className="w-2 h-2 rounded-full flex-shrink-0"
-                            style={{ background: a.color }}
-                          />
-                          <span className="text-gray-700" style={{ fontSize: 12, fontWeight: 500 }}>
-                            {a.name}
-                          </span>
-                          <span className="text-gray-400 ml-auto" style={{ fontSize: 11, fontWeight: 500 }}>
-                            {formatEur(a.currentBalanceEur)}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3 mt-1">
-                    <button
-                      type="button" onClick={closeForm}
-                      className="flex-1 h-9 bg-black/[0.04] text-gray-500 rounded-[10px] text-[12px]"
-                    >
-                      Annuler
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={createGoal.isPending || updateGoal.isPending || form.accountIds.length === 0}
-                      className="flex-1 h-9 bg-gray-900 text-white rounded-[10px] flex items-center justify-center gap-1.5 text-[12px] font-[600] disabled:opacity-60"
-                    >
-                      {(createGoal.isPending || updateGoal.isPending) ? <Loader2 size={12} className="animate-spin" /> : null}
-                      {editingGoal ? 'Enregistrer' : 'Créer'}
-                    </button>
-                  </div>
-                </form>
-              </GlassCard>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </GlowBackground>
+      {/* Delete confirm dialog */}
+      <ConfirmDialog
+        open={deleteId != null}
+        onOpenChange={(open) => { if (!open) setDeleteId(null) }}
+        title={t('goals.deleteGoal')}
+        description={t('goals.deleteGoal')}
+        onConfirm={handleConfirmDelete}
+        loading={deleteGoal.isPending}
+        variant="destructive"
+      />
+    </div>
   )
 }
 
-function Stat({ label, value, hint, highlight, positive }: {
-  label: string; value: string; hint?: string; highlight?: boolean; positive?: boolean
-}) {
+interface GoalCardProps {
+  goal: GoalProgress
+  onEdit: () => void
+  onDelete: () => void
+  onCalendar: () => void
+}
+
+function GoalCard({ goal, onEdit, onDelete, onCalendar }: GoalCardProps) {
+  const { t } = useTranslation()
+
+  const statusBadge = (() => {
+    if (goal.monthlyNeeded <= 0) {
+      return (
+        <Badge className="bg-green-500/10 text-green-600 border-green-500/20 gap-1">
+          <HugeiconsIcon icon={TrendingUp} strokeWidth={2} className="size-3" />
+          {t('goals.achieved')}
+        </Badge>
+      )
+    }
+    if (goal.avgMonthlyContribution == null) {
+      return (
+        <Badge variant="secondary" className="gap-1">
+          {t('goals.waiting')}
+        </Badge>
+      )
+    }
+    if (goal.isOnTrack) {
+      return (
+        <Badge className="bg-green-500/10 text-green-600 border-green-500/20 gap-1">
+          <HugeiconsIcon icon={TrendingUp} strokeWidth={2} className="size-3" />
+          {t('goals.onTrack')}
+        </Badge>
+      )
+    }
+    return (
+      <Badge variant="destructive" className="gap-1">
+        <HugeiconsIcon icon={TrendingDown} strokeWidth={2} className="size-3" />
+        {t('goals.behind')}
+      </Badge>
+    )
+  })()
+
   return (
-    <div>
-      <p className="text-gray-400 mb-0.5" style={{ fontSize: 10, fontWeight: 600 }}>
-        {label.toUpperCase()}
-      </p>
-      <p
-        className={highlight ? 'text-red-500' : positive ? 'text-green-600' : 'text-gray-900'}
-        style={{ fontSize: 13, fontWeight: 600 }}
-      >
-        {value}
-      </p>
-      {hint && (
-        <p className="text-gray-300 mt-0.5" style={{ fontSize: 9, fontWeight: 500 }}>
-          {hint}
-        </p>
-      )}
-    </div>
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <HugeiconsIcon icon={Target01Icon} strokeWidth={2} className="size-4 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-base">{goal.name}</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {t('goals.deadline')}: {formatLocalDate(goal.deadline)}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            {statusBadge}
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
+              <HugeiconsIcon icon={Edit02Icon} strokeWidth={2} className="size-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onCalendar}>
+              <HugeiconsIcon icon={Calendar01Icon} strokeWidth={2} className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              onClick={onDelete}
+            >
+              <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} className="size-4" />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {/* Progress bar */}
+        <GoalProgressBar goal={goal} />
+
+        {/* Stats grid */}
+        <div className="grid grid-cols-3 gap-3 pt-3 border-t">
+          <div>
+            <p className="text-xs text-muted-foreground mb-0.5">{t('goals.monthsLeft')}</p>
+            <p className="text-sm font-semibold">{goal.monthsLeft}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-0.5">{t('goals.monthlyNeeded')}</p>
+            <p className="text-sm font-semibold">
+              <CurrencyDisplay value={goal.monthlyNeeded} />
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-0.5">{t('goals.avgContribution')}</p>
+            <p className="text-sm font-semibold">
+              {goal.avgMonthlyContribution != null ? (
+                <CurrencyDisplay value={goal.avgMonthlyContribution} />
+              ) : (
+                '–'
+              )}
+            </p>
+          </div>
+        </div>
+
+        {/* Account chips */}
+        {goal.accounts.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {goal.accounts.map((a) => (
+              <span
+                key={a.id}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white"
+                style={{ background: a.color }}
+              >
+                {a.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

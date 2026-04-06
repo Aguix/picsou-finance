@@ -1,0 +1,47 @@
+import type { GoalProgress } from '@/types/api'
+import { mockAccounts } from './accounts'
+
+export const mockGoals: GoalProgress[] = [
+  {
+    id: 1,
+    name: 'Vacances été 2025',
+    targetAmount: 3000,
+    deadline: '2025-08-01',
+    accounts: [mockAccounts[4]],
+    currentTotal: 1580.9,
+    percentComplete: 52.7,
+    monthsLeft: 4,
+    monthlyNeeded: 354.78,
+    avgMonthlyContribution: 320.0,
+    isOnTrack: true,
+    surplus: -34.78,
+  },
+  {
+    id: 2,
+    name: 'Apport immobilier',
+    targetAmount: 50000,
+    deadline: '2027-06-01',
+    accounts: [mockAccounts[0], mockAccounts[6]],
+    currentTotal: 12920,
+    percentComplete: 25.8,
+    monthsLeft: 27,
+    monthlyNeeded: 1373.33,
+    avgMonthlyContribution: 1450.0,
+    isOnTrack: true,
+    surplus: 76.67,
+  },
+  {
+    id: 3,
+    name: 'Nouvelle voiture',
+    targetAmount: 15000,
+    deadline: '2026-03-01',
+    accounts: [mockAccounts[3]],
+    currentTotal: 5800,
+    percentComplete: 38.7,
+    monthsLeft: 11,
+    monthlyNeeded: 836.36,
+    avgMonthlyContribution: 750.0,
+    isOnTrack: false,
+    surplus: -86.36,
+  },
+]

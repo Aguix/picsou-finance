@@ -1,0 +1,275 @@
+import { useMemo, useRef, useState } from 'react'
+import { Cell, Pie, PieChart, Label } from 'recharts'
+import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { useTranslation } from 'react-i18next'
+
+interface DistributionItem {
+  accountId: number
+  name: string
+  color: string
+  balanceEur: number
+  percentage: number
+}
+
+interface DistributionPieProps {
+  data: DistributionItem[]
+}
+
+interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+  item: DistributionItem
+}
+
+const chartConfig = {
+  balanceEur: {
+    label: 'Balance',
+  },
+} satisfies ChartConfig
+
+function squarify(items: DistributionItem[]): Rect[] {
+  if (items.length === 0) return []
+
+  const sorted = [...items].sort((a, b) => b.balanceEur - a.balanceEur)
+  const total = sorted.reduce((s, i) => s + i.balanceEur, 0)
+  if (total === 0) return []
+
+  const rects: Rect[] = []
+
+  // Simple slice-and-dice: alternate horizontal/vertical splits
+  function sliceAndDice(items: DistributionItem[], x: number, y: number, w: number, h: number, horizontal: boolean) {
+    if (items.length === 0 || w <= 0 || h <= 0) return
+    if (items.length === 1) {
+      rects.push({ x, y, w, h, item: items[0] })
+      return
+    }
+
+    // Split at the point that gives the best aspect ratio
+    const itemTotal = items.reduce((s, i) => s + i.balanceEur, 0)
+    if (itemTotal === 0) return
+
+    // Binary search for the best split point
+    let bestSplit = 1
+    let bestRatio = Infinity
+
+    let runningSum = 0
+    for (let i = 0; i < items.length - 1; i++) {
+      runningSum += items[i].balanceEur
+      const ratio = runningSum / itemTotal
+      if (horizontal) {
+        const rw = w * ratio
+        const rh = h
+        const r = Math.max(rw / rh, rh / rw)
+        if (r < bestRatio) {
+          bestRatio = r
+          bestSplit = i + 1
+        }
+      } else {
+        const rw = w
+        const rh = h * ratio
+        const r = Math.max(rw / rh, rh / rw)
+        if (r < bestRatio) {
+          bestRatio = r
+          bestSplit = i + 1
+        }
+      }
+    }
+
+    const leftItems = items.slice(0, bestSplit)
+    const rightItems = items.slice(bestSplit)
+    const leftTotal = leftItems.reduce((s, i) => s + i.balanceEur, 0)
+    const leftRatio = leftTotal / itemTotal
+
+    if (horizontal) {
+      const leftW = w * leftRatio
+      sliceAndDice(leftItems, x, y, leftW, h, !horizontal)
+      sliceAndDice(rightItems, x + leftW, y, w - leftW, h, !horizontal)
+    } else {
+      const leftH = h * leftRatio
+      sliceAndDice(leftItems, x, y, w, leftH, !horizontal)
+      sliceAndDice(rightItems, x, y + leftH, w, h - leftH, !horizontal)
+    }
+  }
+
+  sliceAndDice(sorted, 0, 0, 100, 100, true)
+
+  return rects
+}
+
+function TooltipAnchor({ rect }: { rect: Rect }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [style, setStyle] = useState<React.CSSProperties>({})
+
+  const cx = rect.x + rect.w / 2
+  const cy = rect.y + rect.h / 2
+
+  // Determine anchor strategy: stick to block but flip if near edge
+  const anchorLeft = cx > 65 ? rect.x : cx < 35 ? rect.x + rect.w : cx
+  const anchorTop = cy > 75 ? rect.y : cy < 25 ? rect.y + rect.h : cy
+  const translateX = cx > 65 ? '-100%' : cx < 35 ? '0' : '-50%'
+  const translateY = cy > 75 ? '-100%' : cy < 25 ? '0' : '-50%'
+
+  useMemo(() => {
+    setStyle({
+      left: `${anchorLeft}%`,
+      top: `${anchorTop}%`,
+      transform: `translate(${translateX}, ${translateY})`,
+      whiteSpace: 'nowrap',
+    })
+  }, [anchorLeft, anchorTop, translateX, translateY])
+
+  return (
+    <div
+      ref={ref}
+      className="absolute z-30 flex flex-col items-center pointer-events-none"
+      style={style}
+    >
+      <span className="text-white font-semibold text-sm bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded">
+        {rect.item.name}
+      </span>
+      <span className="text-white/80 text-xs bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded mt-0.5">
+        {rect.item.percentage}%
+      </span>
+    </div>
+  )
+}
+
+function AllocationTreemap({ data }: { data: DistributionItem[] }) {
+  const rects = useMemo(() => squarify(data), [data])
+  const [hoveredId, setHoveredId] = useState<number | null>(null)
+
+  const hoveredRect = hoveredId !== null ? rects.find(r => r.item.accountId === hoveredId) : null
+
+  return (
+    <div className="relative w-full overflow-hidden" style={{ height: 310 }}
+      onMouseLeave={() => setHoveredId(null)}
+    >
+      {rects.map(({ x, y, w, h, item }) => {
+        const isSmall = w < 12 || h < 18
+        const isHovered = hoveredId === item.accountId
+        const isDimmed = hoveredId !== null && !isHovered
+        return (
+          <div
+            key={item.accountId}
+            className={`absolute flex flex-col items-center justify-center rounded-md cursor-default transition-all duration-300 ${isHovered ? 'z-10' : ''}`}
+            style={{
+              left: `calc(${x}% + 2px)`,
+              top: `calc(${y}% + 2px)`,
+              width: `calc(${w}% - 4px)`,
+              height: `calc(${h}% - 4px)`,
+              backgroundColor: item.color,
+              filter: isDimmed ? 'brightness(0.5) blur(2px)' : undefined,
+            }}
+            onMouseEnter={() => setHoveredId(item.accountId)}
+          >
+            {/* Invisible larger hitbox to prevent flickering in gaps */}
+            <div className="absolute -inset-1 z-20" onMouseEnter={() => setHoveredId(item.accountId)} />
+            <div className={`absolute inset-0 rounded-md transition-all duration-300 pointer-events-none ${isHovered ? 'bg-black/30 backdrop-blur-[1px] ring-1 ring-white/20' : ''}`} />
+            {!isSmall && !isDimmed && (
+              <div className="relative z-10 flex flex-col items-center pointer-events-none">
+                <span className="truncate text-white font-semibold text-sm px-1 text-center leading-tight">
+                  {item.name}
+                </span>
+                <span className="text-white/80 text-xs mt-0.5">
+                  {item.percentage}%
+                </span>
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {/* Tooltip anchored near the block, clamped to stay inside container */}
+      {hoveredRect && (hoveredRect.w < 12 || hoveredRect.h < 18) && (
+        <TooltipAnchor rect={hoveredRect} />
+      )}
+    </div>
+  )
+}
+
+export function DistributionPie({ data }: DistributionPieProps) {
+  const { t } = useTranslation()
+
+  return (
+    <Card>
+      <Tabs defaultValue="distribution" className="w-full">
+        <CardHeader>
+          <TabsList>
+            <TabsTrigger value="distribution">{t('dashboard.distribution')}</TabsTrigger>
+            <TabsTrigger value="allocation">{t('dashboard.allocation')}</TabsTrigger>
+          </TabsList>
+        </CardHeader>
+        <CardContent>
+          <TabsContent value="distribution">
+            <ChartContainer config={chartConfig} className="mx-auto h-[250px] w-full">
+              <PieChart>
+                <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+                <Pie
+                  data={data}
+                  dataKey="balanceEur"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={2}
+                  strokeWidth={0}
+                >
+                  {data.map((entry) => (
+                    <Cell key={entry.accountId} fill={entry.color} />
+                  ))}
+                  <Label
+                    content={({ viewBox }) => {
+                      if (viewBox && 'cx' in viewBox && 'cy' in viewBox) {
+                        return (
+                          <text
+                            x={viewBox.cx}
+                            y={viewBox.cy}
+                            textAnchor="middle"
+                            dominantBaseline="middle"
+                          >
+                            <tspan
+                              x={viewBox.cx}
+                              y={viewBox.cy}
+                              className="fill-foreground text-2xl font-bold"
+                            >
+                              {data.length}
+                            </tspan>
+                            <tspan
+                              x={viewBox.cx}
+                              y={(viewBox.cy || 0) + 20}
+                              className="fill-muted-foreground text-xs"
+                            >
+                              comptes
+                            </tspan>
+                          </text>
+                        )
+                      }
+                    }}
+                  />
+                </Pie>
+              </PieChart>
+            </ChartContainer>
+            <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
+              {data.map(item => (
+                <div key={item.accountId} className="flex items-center gap-2 text-sm">
+                  <div className="size-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="truncate">{item.name}</span>
+                  <span className="ml-auto text-muted-foreground">{item.percentage}%</span>
+                </div>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="allocation">
+            <AllocationTreemap data={data} />
+          </TabsContent>
+        </CardContent>
+      </Tabs>
+    </Card>
+  )
+}
