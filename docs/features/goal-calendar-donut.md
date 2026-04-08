@@ -22,9 +22,13 @@ L'objectif est de les remplacer par des donuts plus lisibles, avec montant + pou
 
 ### 1. Layout
 
-- Grille **3 colonnes** (au lieu de 6) dans la carte année existante
-- Chaque mois = un `<button>` avec `border`, `border-radius: rounded-xl`, fond `background` légèrement distinct
-- Structure verticale de la carte :
+**Carte année** — une `<Card>` par année (composant shadcn existant) :
+- `CardHeader` : label année en uppercase muted (`2024`, `2025`…), identique à l'existant
+- `CardContent` : grille 3 colonnes de cartes mois
+
+**Carte mois** — chaque mois = un `<button>` :
+- `border`, `border-radius: rounded-xl`, fond légèrement distinct du fond de la carte année
+- Structure verticale :
   1. Label mois en haut (`JANV.`, `FÉVR.`…)
   2. Donut SVG au centre avec texte superposé
   3. `obj. XXX` en bas
