@@ -12,12 +12,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
-  Add01Icon,
-  RefreshIcon,
-  Delete02Icon,
-  Wallet01Icon,
-} from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
+  Plus,
+  RefreshCw,
+  Trash2,
+  Wallet,
+} from 'lucide-react'
 import type { WalletStatus, ChainType } from '@/types/api'
 
 const CHAIN_COLORS: Record<ChainType, string> = {
@@ -141,7 +140,7 @@ export function CryptoWalletTab() {
       {/* Add wallet */}
       {!showAddForm ? (
         <Button onClick={() => setShowAddForm(true)}>
-          <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+          <Plus />
           {t('sync.wallets.add')}
         </Button>
       ) : (
@@ -188,7 +187,7 @@ export function CryptoWalletTab() {
 
               <div className="flex gap-2">
                 <Button type="submit" disabled={addMutation.isPending}>
-                  <HugeiconsIcon icon={Wallet01Icon} strokeWidth={2} />
+                  <Wallet />
                   {t('sync.wallets.track')}
                 </Button>
                 <Button
@@ -252,14 +251,14 @@ export function CryptoWalletTab() {
                     onClick={() => syncMutation.mutate(wallet.id)}
                     disabled={syncMutation.isPending}
                   >
-                    <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
+                    <RefreshCw />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon-sm"
                     onClick={() => setRemovingId(wallet.id)}
                   >
-                    <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                    <Trash2 />
                   </Button>
                 </div>
               </CardContent>

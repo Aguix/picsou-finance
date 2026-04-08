@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { type Theme, applyTheme, getStoredTheme } from '@/lib/theme'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { useAppStore } from '@/stores/app-store'
@@ -16,14 +17,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
-  PaintBrush01Icon,
-  Globe02Icon,
-  UserIcon,
-  InformationCircleIcon,
-  Logout03Icon,
-} from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
-import type { IconSvgElement } from '@hugeicons/react'
+  Paintbrush,
+  Globe,
+  User,
+  Info,
+  LogOut,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Toggle group button (theme / language)
@@ -73,7 +73,7 @@ function SectionCard({
   description,
   children,
 }: {
-  icon: IconSvgElement
+  icon: LucideIcon
   title: string
   description: string
   children: React.ReactNode
@@ -82,7 +82,7 @@ function SectionCard({
     <Card className="rounded-4xl bg-card shadow-md">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <HugeiconsIcon icon={icon} className="size-5 text-muted-foreground" />
+          {React.createElement(icon, { className: "size-5 text-muted-foreground" })}
           {title}
         </CardTitle>
         <CardDescription>{description}</CardDescription>
@@ -90,33 +90,6 @@ function SectionCard({
       <CardContent>{children}</CardContent>
     </Card>
   )
-}
-
-// ---------------------------------------------------------------------------
-// Theme helpers
-// ---------------------------------------------------------------------------
-
-type Theme = 'light' | 'dark' | 'system'
-
-function getStoredTheme(): Theme {
-  return (localStorage.getItem('theme') as Theme) ?? 'system'
-}
-
-function applyTheme(theme: Theme) {
-  const root = document.documentElement
-  if (theme === 'dark') {
-    root.classList.add('dark')
-  } else if (theme === 'light') {
-    root.classList.remove('dark')
-  } else {
-    // system
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      root.classList.add('dark')
-    } else {
-      root.classList.remove('dark')
-    }
-  }
-  localStorage.setItem('theme', theme)
 }
 
 // ---------------------------------------------------------------------------
@@ -135,16 +108,6 @@ export function SettingsPage() {
   useEffect(() => {
     applyTheme(theme)
   }, [theme])
-
-  // Listen for system preference changes when theme is 'system'
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = () => {
-      if (getStoredTheme() === 'system') applyTheme('system')
-    }
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
-  }, [])
 
   // Language --------------------------------------------------------------
   const [locale, setLocale] = useState(i18n.language)
@@ -179,7 +142,7 @@ export function SettingsPage() {
 
       {/* Appearance ------------------------------------------------------- */}
       <SectionCard
-        icon={PaintBrush01Icon}
+        icon={Paintbrush}
         title={t('settings.appearance')}
         description={t('settings.appearanceDescription')}
       >
@@ -208,7 +171,7 @@ export function SettingsPage() {
 
       {/* Demo Mode -------------------------------------------------------- */}
       <SectionCard
-        icon={InformationCircleIcon}
+        icon={Info}
         title={t('settings.demoMode')}
         description={t('settings.demoModeDesc')}
       >
@@ -226,7 +189,7 @@ export function SettingsPage() {
 
       {/* Account ---------------------------------------------------------- */}
       <SectionCard
-        icon={UserIcon}
+        icon={User}
         title={t('settings.account')}
         description={t('settings.accountDescription')}
       >
@@ -243,7 +206,7 @@ export function SettingsPage() {
           </div>
           <div className="flex justify-end">
             <Button variant="destructive" onClick={handleLogout}>
-              <HugeiconsIcon icon={Logout03Icon} className="mr-2 size-4" />
+              <LogOut className="mr-2 size-4" />
               {t('settings.logout')}
             </Button>
           </div>
@@ -252,7 +215,7 @@ export function SettingsPage() {
 
       {/* About ------------------------------------------------------------ */}
       <SectionCard
-        icon={Globe02Icon}
+        icon={Globe}
         title={t('settings.about')}
         description={t('settings.aboutDescription')}
       >

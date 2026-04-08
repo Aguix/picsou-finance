@@ -10,13 +10,12 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
 import {
-  Upload01Icon,
-  ArrowLeft01Icon,
-  ArrowRight01Icon,
-  CheckmarkCircle02Icon,
-  Cancel01Icon,
-} from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
+  Upload,
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  X,
+} from 'lucide-react'
 import type {
   Account,
   FinaryPreviewResponse,
@@ -261,7 +260,7 @@ export function FinaryTab() {
               }`}
             >
               {step > s ? (
-                <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} className="size-4" />
+                <CheckCircle2 className="size-4" />
               ) : (
                 s
               )}
@@ -281,10 +280,10 @@ export function FinaryTab() {
       {/* Error banner */}
       {error && (
         <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-4 shrink-0" />
+          <X className="size-4 shrink-0" />
           <span className="flex-1">{error}</span>
           <Button variant="ghost" size="icon-xs" onClick={() => setError(null)}>
-            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-3" />
+            <X className="size-3" />
           </Button>
         </div>
       )}
@@ -303,9 +302,7 @@ export function FinaryTab() {
             onDragLeave={() => setDragOver(false)}
             onDrop={onDrop}
           >
-            <div className="flex size-12 items-center justify-center rounded-full bg-muted">
-              <HugeiconsIcon icon={Upload01Icon} strokeWidth={2} className="size-6 text-muted-foreground" />
-            </div>
+            <Upload className="size-6 text-muted-foreground" />
             <div>
               <p className="font-medium">{t('sync.finary.uploadFile')}</p>
               <p className="mt-1 text-sm text-muted-foreground">{t('sync.finary.uploadHint')}</p>
@@ -315,7 +312,7 @@ export function FinaryTab() {
               onClick={() => fileInputRef.current?.click()}
               disabled={loading}
             >
-              <HugeiconsIcon icon={Upload01Icon} strokeWidth={2} />
+              <Upload />
               {t('sync.finary.uploadFile')}
             </Button>
             <input
@@ -342,7 +339,7 @@ export function FinaryTab() {
               onClick={checkApiConfigured}
               disabled={loading}
             >
-              <HugeiconsIcon icon={Upload01Icon} strokeWidth={2} />
+              <Upload />
               {t('sync.finary.apiSync')}
             </Button>
 
@@ -365,7 +362,7 @@ export function FinaryTab() {
                   disabled={totpCode.length !== 6 || loading}
                 >
                   {t('sync.finary.next')}
-                  <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} />
+                  <ArrowRight />
                 </Button>
               </div>
             )}
@@ -378,12 +375,12 @@ export function FinaryTab() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <Button variant="ghost" size="sm" onClick={() => { setStep(1); setPreviewData(null) }}>
-              <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} />
+              <ArrowLeft />
               {t('sync.finary.back')}
             </Button>
             <Button onClick={handleImport} disabled={loading || hasSkipAll}>
               {loading ? t('common.loading') : t('sync.finary.import')}
-              <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} />
+              <ArrowRight />
             </Button>
           </div>
 
@@ -454,7 +451,7 @@ export function FinaryTab() {
 
           <div className="flex justify-center">
             <Button onClick={resetWizard}>
-              <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} />
+              <CheckCircle2 />
               {t('sync.finary.done')}
             </Button>
           </div>

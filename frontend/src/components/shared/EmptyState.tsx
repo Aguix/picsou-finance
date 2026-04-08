@@ -1,5 +1,4 @@
-import { PackageIcon } from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
+import { Package } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface EmptyStateProps {
@@ -16,7 +15,7 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center">
       <div className="text-muted-foreground/50 mb-4">
-        {icon || <HugeiconsIcon icon={PackageIcon} strokeWidth={2} className="size-12" />}
+        {icon || <Package className="size-12" />}
       </div>
       <h3 className="text-lg font-medium">{title}</h3>
       {description && (

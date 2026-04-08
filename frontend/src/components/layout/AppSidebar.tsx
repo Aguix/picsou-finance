@@ -1,15 +1,16 @@
+import React from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { HugeiconsIcon } from '@hugeicons/react'
 import {
-  DashboardSquare01Icon,
-  Wallet01Icon,
-  Target01Icon,
-  RefreshIcon,
-  Setting06Icon,
-  Logout03Icon,
-  TranslateIcon,
-} from '@hugeicons/core-free-icons'
+  LayoutDashboard,
+  Wallet,
+  Target,
+  RefreshCw,
+  Settings,
+  LogOut,
+  Languages,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -26,7 +27,6 @@ import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAppStore } from '@/stores/app-store'
 import { useLogout } from '@/features/auth/hooks'
-import type { IconSvgElement } from '@hugeicons/react'
 
 function NavButton({
   to,
@@ -37,7 +37,7 @@ function NavButton({
 }: {
   to: string
   end?: boolean
-  icon: IconSvgElement
+  icon: LucideIcon
   tooltip: string
   label: string
 }) {
@@ -49,7 +49,7 @@ function NavButton({
   return (
     <SidebarMenuButton asChild tooltip={tooltip} isActive={isActive}>
       <NavLink to={to} end={end}>
-        <HugeiconsIcon icon={icon} />
+        {React.createElement(icon)}
         <span>{label}</span>
       </NavLink>
     </SidebarMenuButton>
@@ -57,11 +57,11 @@ function NavButton({
 }
 
 const NAV_ITEMS = [
-  { path: '/', icon: DashboardSquare01Icon, labelKey: 'nav.dashboard' },
-  { path: '/accounts', icon: Wallet01Icon, labelKey: 'nav.accounts' },
-  { path: '/goals', icon: Target01Icon, labelKey: 'nav.goals' },
-  { path: '/sync', icon: RefreshIcon, labelKey: 'nav.sync' },
-  { path: '/settings', icon: Setting06Icon, labelKey: 'nav.settings' },
+  { path: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+  { path: '/accounts', icon: Wallet, labelKey: 'nav.accounts' },
+  { path: '/goals', icon: Target, labelKey: 'nav.goals' },
+  { path: '/sync', icon: RefreshCw, labelKey: 'nav.sync' },
+  { path: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ] as const
 
 export function AppSidebar() {
@@ -79,18 +79,23 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="px-4 py-3">
+      <SidebarHeader className="overflow-hidden">
         <div className="flex items-center gap-2">
-          <span className="text-lg font-bold tracking-tight">Picsou</span>
+          <span className="text-lg font-bold tracking-tight group-data-[collapsible=icon]:hidden">
+            Picsou
+          </span>
           {demoMode && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+            <Badge
+              variant="secondary"
+              className="text-[10px] px-1.5 py-0 group-data-[collapsible=icon]:hidden"
+            >
               DEMO
             </Badge>
           )}
         </div>
       </SidebarHeader>
 
-      <SidebarSeparator />
+      <SidebarSeparator className="data-horizontal:w-auto" />
 
       <SidebarContent>
         <SidebarMenu>
@@ -108,9 +113,10 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarContent>
 
+      <SidebarSeparator className="data-horizontal:w-auto" />
+
       <SidebarFooter>
-        <SidebarSeparator />
-        <div className="flex items-center gap-2 px-2 py-1">
+        <div className="flex items-center gap-2 py-1">
           <Avatar size="sm">
             <AvatarFallback className="text-xs font-medium">
               {initial}
@@ -128,7 +134,7 @@ export function AppSidebar() {
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-1 px-2">
+        <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
           <Button
             variant="ghost"
             size="icon-sm"
@@ -136,7 +142,7 @@ export function AppSidebar() {
             className="shrink-0"
             aria-label={t('common.language')}
           >
-            <HugeiconsIcon icon={TranslateIcon} />
+            <Languages />
           </Button>
           <Button
             variant="ghost"
@@ -146,7 +152,7 @@ export function AppSidebar() {
             className="shrink-0"
             aria-label={t('auth.logout')}
           >
-            <HugeiconsIcon icon={Logout03Icon} />
+            <LogOut />
           </Button>
         </div>
       </SidebarFooter>

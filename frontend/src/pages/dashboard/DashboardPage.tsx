@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { useDashboard } from '@/features/dashboard/hooks'
@@ -7,18 +6,15 @@ import { PageHeader } from '@/components/shared/PageHeader'
 import { NetWorthChart } from '@/components/shared/NetWorthChart'
 import { DistributionPie } from '@/components/shared/DistributionPie'
 import { GoalProgressBar } from '@/components/shared/GoalProgressBar'
-import { TimeRangeSelector, type TimeRange } from '@/components/shared/TimeRangeSelector'
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { HugeiconsIcon } from '@hugeicons/react'
-import { TrendingUp, TrendingDown } from '@hugeicons/core-free-icons'
+import { TrendingUp, TrendingDown } from 'lucide-react'
 import { todayLabel } from '@/lib/utils'
 
 export function DashboardPage() {
   const { t } = useTranslation()
-  const [range, setRange] = useState<TimeRange>('1Y')
-  const { data, isLoading } = useDashboard(range)
+  const { data, isLoading } = useDashboard()
 
   if (isLoading || !data) {
     return <LoadingSkeleton />
@@ -34,7 +30,6 @@ export function DashboardPage() {
       <PageHeader
         surtitle={todayLabel()}
         title={t('dashboard.title')}
-        actions={<TimeRangeSelector value={range} onChange={setRange} />}
       />
 
       {/* Net worth hero */}
@@ -44,11 +39,9 @@ export function DashboardPage() {
           <CurrencyDisplay value={data.totalNetWorth} className="text-4xl font-bold" />
 
           <div className="mt-3 flex items-center gap-2">
-            <HugeiconsIcon
-              icon={trendPositive ? TrendingUp : TrendingDown}
-              className={trendPositive ? 'text-emerald-500' : 'text-red-500'}
-              size={18}
-            />
+            {trendPositive
+              ? <TrendingUp className="text-emerald-500" size={18} />
+              : <TrendingDown className="text-red-500" size={18} />}
             <span
               className={`text-sm font-medium ${trendPositive ? 'text-emerald-500' : 'text-red-500'}`}
             >

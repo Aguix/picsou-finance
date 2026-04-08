@@ -9,8 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { cn } from '@/lib/utils'
-import { Search01Icon } from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
+import { Search } from 'lucide-react'
 
 type SortBy = 'value' | 'pnl'
 
@@ -164,9 +163,7 @@ export function PortfolioView() {
         {/* Search + sort */}
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative max-w-sm flex-1">
-            <HugeiconsIcon
-              icon={Search01Icon}
-              strokeWidth={2}
+            <Search
               className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
             />
             <Input

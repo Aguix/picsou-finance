@@ -148,7 +148,7 @@ Components in `components/ui/` are **generated** — never edit them directly. C
 
 ### Icons
 
-Use `HugeiconsIcon` from `@hugeicons/react` with icons from `@hugeicons/core-free-icons`. No other icon libraries.
+Use icons from `lucide-react` as direct JSX components (e.g., `<Pencil className="size-4" />`). No other icon libraries.
 
 ## Internationalization
 
@@ -185,6 +185,6 @@ npx vitest run       # Vitest unit tests
 - **Never create hooks outside `features/`** — domain hooks live in `features/*/hooks.ts`. Only generic UI hooks (like `use-mobile`) go in `hooks/`.
 - **Never use Redux, Context, or global state for server data** — TanStack Query only.
 - **Never edit files in `components/ui/`** — these are shadcn/ui generated. Customize via theme tokens or the shadcn CLI.
-- **Never use icon libraries other than `@hugeicons/react`** with `@hugeicons/core-free-icons`.
+- **Never use icon libraries other than `lucide-react`.**
 - **Never hardcode user-visible strings** — always use `useTranslation()`.
 - **Never use CSS modules, styled-components, or inline style objects** — Tailwind only.

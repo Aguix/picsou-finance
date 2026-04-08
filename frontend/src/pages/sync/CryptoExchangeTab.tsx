@@ -12,13 +12,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
-  Add01Icon,
-  RefreshIcon,
-  Delete02Icon,
-  ViewIcon,
-  ViewOffIcon,
-} from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
+  Plus,
+  RefreshCw,
+  Trash2,
+  Eye,
+  EyeOff,
+} from 'lucide-react'
 import type { ExchangeStatus, ExchangeType } from '@/types/api'
 
 function useExchanges() {
@@ -133,7 +132,7 @@ export function CryptoExchangeTab() {
       {/* Add exchange */}
       {!showAddForm ? (
         <Button onClick={() => setShowAddForm(true)}>
-          <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+          <Plus />
           {t('sync.exchanges.add')}
         </Button>
       ) : (
@@ -185,11 +184,7 @@ export function CryptoExchangeTab() {
                     onClick={() => setShowSecret(prev => !prev)}
                     className="absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
-                    <HugeiconsIcon
-                      icon={showSecret ? ViewOffIcon : ViewIcon}
-                      strokeWidth={2}
-                      className="size-4"
-                    />
+                    {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                   </button>
                 </div>
               </div>
@@ -258,14 +253,14 @@ export function CryptoExchangeTab() {
                     onClick={() => syncMutation.mutate(exchange.id)}
                     disabled={syncMutation.isPending}
                   >
-                    <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
+                    <RefreshCw />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon-sm"
                     onClick={() => setRemovingId(exchange.id)}
                   >
-                    <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                    <Trash2 />
                   </Button>
                 </div>
               </CardContent>

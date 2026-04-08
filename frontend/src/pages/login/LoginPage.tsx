@@ -8,8 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { HugeiconsIcon } from '@hugeicons/react'
-import { Coins01Icon, ViewIcon, ViewOffSlashIcon, Loading01Icon } from '@hugeicons/core-free-icons'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
 export function LoginPage() {
   const { t } = useTranslation()
@@ -38,14 +37,9 @@ export function LoginPage() {
     <div className="min-h-screen bg-background flex items-center justify-center">
       <div className="max-w-sm w-full mx-4 flex flex-col gap-4">
         <Card>
-          <CardHeader className="items-center text-center gap-3">
-            <div className="flex items-center justify-center bg-foreground rounded-xl w-12 h-12">
-              <HugeiconsIcon icon={Coins01Icon} size={24} className="text-background" />
-            </div>
-            <div>
-              <CardTitle className="text-xl">{t('auth.login')}</CardTitle>
-              <CardDescription className="mt-0.5">{t('auth.loginTagline', 'Picsou')}</CardDescription>
-            </div>
+          <CardHeader className="items-center text-center">
+            <CardTitle className="text-xl">{t('auth.login')}</CardTitle>
+            <CardDescription className="mt-0.5">{t('auth.loginTagline', 'Picsou')}</CardDescription>
           </CardHeader>
 
           <CardContent>
@@ -82,7 +76,7 @@ export function LoginPage() {
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                     aria-label={showPw ? t('auth.hidePassword', 'Hide password') : t('auth.showPassword', 'Show password')}
                   >
-                    <HugeiconsIcon icon={showPw ? ViewOffSlashIcon : ViewIcon} size={16} />
+                    {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
               </div>
@@ -93,7 +87,7 @@ export function LoginPage() {
 
               <Button type="submit" disabled={loginMutation.isPending} className="w-full mt-1">
                 {loginMutation.isPending && (
-                  <HugeiconsIcon icon={Loading01Icon} size={16} className="animate-spin" />
+                  <Loader2 size={16} className="animate-spin" />
                 )}
                 {loginMutation.isPending ? t('auth.loggingIn') : t('auth.loginButton')}
               </Button>

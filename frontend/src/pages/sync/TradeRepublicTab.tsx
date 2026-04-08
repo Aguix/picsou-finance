@@ -8,15 +8,14 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import {
-  RefreshIcon,
-  Upload01Icon,
-  Logout03Icon,
-  SmartPhoneIcon,
-  LockKeyIcon,
-  ShieldKeyIcon,
-  Alert01Icon,
-} from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
+  RefreshCw,
+  Upload,
+  LogOut,
+  Smartphone,
+  Lock,
+  ShieldCheck,
+  AlertTriangle,
+} from 'lucide-react'
 import type { TrSessionStatus } from '@/types/api'
 
 type AuthState = 'IDLE' | 'AWAITING_TAN' | 'CONNECTED' | 'ERROR'
@@ -210,7 +209,7 @@ export function TradeRepublicTab() {
         <Card size="sm" className="border-destructive/30">
           <CardContent className="py-4">
             <div className="flex items-center gap-3">
-              <HugeiconsIcon icon={Alert01Icon} strokeWidth={2} className="size-5 text-destructive shrink-0" />
+              <AlertTriangle className="size-5 text-destructive shrink-0" />
               <p className="text-sm text-destructive flex-1">{errorMsg}</p>
               <Button size="sm" variant="outline" onClick={handleRetry}>
                 {t('sync.banks.retry')}
@@ -224,17 +223,17 @@ export function TradeRepublicTab() {
       {effectiveState === 'CONNECTED' && (
         <div className="flex flex-wrap gap-3">
           <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
-            <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
+            <RefreshCw />
             {t('sync.tr.sync')}
           </Button>
 
           <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importCsvMutation.isPending}>
-            <HugeiconsIcon icon={Upload01Icon} strokeWidth={2} />
+            <Upload />
             {t('sync.tr.importCsv')}
           </Button>
 
           <Button variant="destructive" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>
-            <HugeiconsIcon icon={Logout03Icon} strokeWidth={2} />
+            <LogOut />
             {t('sync.tr.clearSession')}
           </Button>
 
@@ -255,7 +254,7 @@ export function TradeRepublicTab() {
             <CardContent className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label htmlFor="tr-phone">
-                  <HugeiconsIcon icon={SmartPhoneIcon} strokeWidth={2} className="size-4 inline-block mr-1" />
+                  <Smartphone className="size-4 inline-block mr-1" />
                   {t('sync.tr.phone')}
                 </Label>
                 <Input
@@ -270,7 +269,7 @@ export function TradeRepublicTab() {
 
               <div className="space-y-2">
                 <Label htmlFor="tr-pin">
-                  <HugeiconsIcon icon={LockKeyIcon} strokeWidth={2} className="size-4 inline-block mr-1" />
+                  <Lock className="size-4 inline-block mr-1" />
                   {t('sync.tr.pin')}
                 </Label>
                 <Input
@@ -297,7 +296,7 @@ export function TradeRepublicTab() {
             <CardContent className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label htmlFor="tr-tan">
-                  <HugeiconsIcon icon={ShieldKeyIcon} strokeWidth={2} className="size-4 inline-block mr-1" />
+                  <ShieldCheck className="size-4 inline-block mr-1" />
                   {t('sync.tr.tan')}
                 </Label>
                 <Input

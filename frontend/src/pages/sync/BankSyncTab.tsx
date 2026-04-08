@@ -10,15 +10,14 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { EmptyState } from '@/components/shared/EmptyState'
 import {
-  Search01Icon,
-  ReloadIcon,
-  Delete02Icon,
-  BankIcon,
-  Loading01Icon,
-  CheckmarkCircle01Icon,
-  Alert02Icon,
-} from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
+  Search,
+  RefreshCw,
+  Trash2,
+  Landmark,
+  Loader2,
+  CheckCircle,
+  AlertTriangle,
+} from 'lucide-react'
 import type { Institution } from '@/types/api'
 
 type CallbackStatus = 'completing' | 'done' | 'error'
@@ -45,7 +44,7 @@ function statusClasses(status: string): string {
   switch (status) {
     case 'LINKED': return 'bg-green-500/10 text-green-600 dark:text-green-400'
     case 'CREATED': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-    case 'EXPIRED': return 'bg-gray-500/10 text-gray-600 dark:text-gray-400'
+    case 'EXPIRED': return 'bg-muted text-muted-foreground'
     case 'FAILED': return 'bg-red-500/10 text-red-600 dark:text-red-400'
     default: return ''
   }
@@ -146,13 +145,13 @@ export function BankSyncTab() {
         }>
           <CardContent className="flex items-center gap-3 py-3">
             {callbackStatus === 'completing' && (
-              <HugeiconsIcon icon={Loading01Icon} strokeWidth={2} className="size-4 animate-spin text-blue-600 dark:text-blue-400" />
+              <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" />
             )}
             {callbackStatus === 'done' && (
-              <HugeiconsIcon icon={CheckmarkCircle01Icon} strokeWidth={2} className="size-4 text-green-600 dark:text-green-400" />
+              <CheckCircle className="size-4 text-green-600 dark:text-green-400" />
             )}
             {callbackStatus === 'error' && (
-              <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-4 text-destructive" />
+              <AlertTriangle className="size-4 text-destructive" />
             )}
             <span className="text-sm font-medium">
               {callbackStatus === 'completing' && t('sync.banks.callbackCompleting')}
@@ -167,9 +166,7 @@ export function BankSyncTab() {
       <div className="space-y-3">
         <label className="text-sm font-medium">{t('sync.banks.search')}</label>
         <div className="relative">
-          <HugeiconsIcon
-            icon={Search01Icon}
-            strokeWidth={2}
+          <Search
             className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
           />
           <Input
@@ -189,7 +186,7 @@ export function BankSyncTab() {
               <Card key={inst.id} size="sm">
                 <CardContent className="flex items-center justify-between py-2">
                   <div className="flex items-center gap-3">
-                    <HugeiconsIcon icon={BankIcon} strokeWidth={2} className="size-5 text-muted-foreground" />
+                    <Landmark className="size-5 text-muted-foreground" />
                     <span className="text-sm font-medium">{inst.name}</span>
                     <span className="text-xs text-muted-foreground">{inst.country}</span>
                   </div>
@@ -222,7 +219,7 @@ export function BankSyncTab() {
         {!connectionsLoading && (!connections || connections.length === 0) && (
           <EmptyState
             title={t('sync.banks.noConnections')}
-            icon={<HugeiconsIcon icon={BankIcon} strokeWidth={2} className="size-12" />}
+            icon={<Landmark className="size-12" />}
           />
         )}
 
@@ -248,7 +245,7 @@ export function BankSyncTab() {
                         onClick={() => retryMutation.mutate(conn.id)}
                         disabled={retryMutation.isPending}
                       >
-                        <HugeiconsIcon icon={ReloadIcon} strokeWidth={2} className="size-4" />
+                        <RefreshCw className="size-4" />
                       </Button>
                     )}
                     <Button
@@ -256,7 +253,7 @@ export function BankSyncTab() {
                       variant="ghost"
                       onClick={() => setDeleteId(conn.id)}
                     >
-                      <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} className="size-4 text-destructive" />
+                      <Trash2 className="size-4 text-destructive" />
                     </Button>
                   </div>
                 </CardContent>

@@ -21,17 +21,16 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { HugeiconsIcon } from '@hugeicons/react'
 import {
-  Target01Icon,
-  Add01Icon,
-  Edit02Icon,
-  Delete02Icon,
-  Calendar01Icon,
+  Target,
+  Plus,
+  Pencil,
+  Trash2,
+  Calendar,
+  Loader2,
   TrendingUp,
   TrendingDown,
-  Loading01Icon,
-} from '@hugeicons/core-free-icons'
+} from 'lucide-react'
 import { formatLocalDate } from '@/lib/utils'
 import type { GoalProgress } from '@/types/api'
 
@@ -121,7 +120,7 @@ export function GoalsPage() {
         title={t('goals.title')}
         actions={
           <Button onClick={openCreate} size="sm" className="gap-1.5">
-            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-4" />
+            <Plus className="size-4" />
             {t('goals.addGoal')}
           </Button>
         }
@@ -129,7 +128,7 @@ export function GoalsPage() {
 
       {goalList.length === 0 ? (
         <EmptyState
-          icon={<HugeiconsIcon icon={Target01Icon} strokeWidth={2} className="size-12" />}
+          icon={<Target className="size-12" />}
           title={t('goals.noGoals')}
           action={{ label: t('goals.addGoal'), onClick: openCreate }}
         />
@@ -234,9 +233,7 @@ export function GoalsPage() {
                 }
               >
                 {(createGoal.isPending || updateGoal.isPending) && (
-                  <HugeiconsIcon
-                    icon={Loading01Icon}
-                    strokeWidth={2}
+                  <Loader2
                     className="size-4 animate-spin mr-1"
                   />
                 )}
@@ -274,8 +271,8 @@ function GoalCard({ goal, onEdit, onDelete, onCalendar }: GoalCardProps) {
   const statusBadge = (() => {
     if (goal.monthlyNeeded <= 0) {
       return (
-        <Badge className="bg-green-500/10 text-green-600 border-green-500/20 gap-1">
-          <HugeiconsIcon icon={TrendingUp} strokeWidth={2} className="size-3" />
+        <Badge className="gap-1">
+          <TrendingUp className="size-3" />
           {t('goals.achieved')}
         </Badge>
       )
@@ -289,15 +286,15 @@ function GoalCard({ goal, onEdit, onDelete, onCalendar }: GoalCardProps) {
     }
     if (goal.isOnTrack) {
       return (
-        <Badge className="bg-green-500/10 text-green-600 border-green-500/20 gap-1">
-          <HugeiconsIcon icon={TrendingUp} strokeWidth={2} className="size-3" />
+        <Badge className="gap-1">
+          <TrendingUp className="size-3" />
           {t('goals.onTrack')}
         </Badge>
       )
     }
     return (
       <Badge variant="destructive" className="gap-1">
-        <HugeiconsIcon icon={TrendingDown} strokeWidth={2} className="size-3" />
+        <TrendingDown className="size-3" />
         {t('goals.behind')}
       </Badge>
     )
@@ -308,9 +305,6 @@ function GoalCard({ goal, onEdit, onDelete, onCalendar }: GoalCardProps) {
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-              <HugeiconsIcon icon={Target01Icon} strokeWidth={2} className="size-4 text-primary" />
-            </div>
             <div>
               <CardTitle className="text-base">{goal.name}</CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">
@@ -322,10 +316,10 @@ function GoalCard({ goal, onEdit, onDelete, onCalendar }: GoalCardProps) {
           <div className="flex items-center gap-1 shrink-0">
             {statusBadge}
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
-              <HugeiconsIcon icon={Edit02Icon} strokeWidth={2} className="size-4" />
+              <Pencil className="size-4" />
             </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onCalendar}>
-              <HugeiconsIcon icon={Calendar01Icon} strokeWidth={2} className="size-4" />
+              <Calendar className="size-4" />
             </Button>
             <Button
               variant="ghost"
@@ -333,7 +327,7 @@ function GoalCard({ goal, onEdit, onDelete, onCalendar }: GoalCardProps) {
               className="h-8 w-8 text-muted-foreground hover:text-destructive"
               onClick={onDelete}
             >
-              <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} className="size-4" />
+              <Trash2 className="size-4" />
             </Button>
           </div>
         </div>
@@ -371,13 +365,7 @@ function GoalCard({ goal, onEdit, onDelete, onCalendar }: GoalCardProps) {
         {goal.accounts.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {goal.accounts.map((a) => (
-              <span
-                key={a.id}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white"
-                style={{ background: a.color }}
-              >
-                {a.name}
-              </span>
+              <Badge key={a.id} variant="secondary">{a.name}</Badge>
             ))}
           </div>
         )}

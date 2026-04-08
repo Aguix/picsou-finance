@@ -19,8 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from '@/components/ui/dialog'
-import { HugeiconsIcon } from '@hugeicons/react'
-import { ArrowLeft01Icon, Calendar03Icon, Loading01Icon } from '@hugeicons/core-free-icons'
+import { ArrowLeft, Calendar, Loader2 } from 'lucide-react'
 import { formatLocalDate, accountTypeLabel } from '@/lib/utils'
 import type { BalanceSnapshot } from '@/types/api'
 
@@ -127,14 +126,14 @@ export function AccountDetailPage() {
               size="sm"
               onClick={() => navigate('/accounts')}
             >
-              <HugeiconsIcon icon={ArrowLeft01Icon} size={14} className="mr-1.5" />
+              <ArrowLeft size={14} className="mr-1.5" />
               {t('common.back')}
             </Button>
             <Button
               size="sm"
               onClick={openHistory}
             >
-              <HugeiconsIcon icon={Calendar03Icon} size={14} className="mr-1.5" />
+              <Calendar size={14} className="mr-1.5" />
               {t('accounts.snapshots')}
             </Button>
           </div>
@@ -153,12 +152,7 @@ export function AccountDetailPage() {
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-3 mb-1">
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{ backgroundColor: account.color + '20' }}
-              >
-                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: account.color }} />
-              </div>
+              <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: account.color }} />
               <div>
                 <div className="flex items-center gap-2 mb-0.5">
                   <span className="text-sm text-muted-foreground font-medium">{account.name}</span>
@@ -284,7 +278,7 @@ export function AccountDetailPage() {
               disabled={saving || modified.size === 0}
             >
               {saving && (
-                <HugeiconsIcon icon={Loading01Icon} size={12} className="mr-1.5 animate-spin" />
+                <Loader2 size={12} className="mr-1.5 animate-spin" />
               )}
               {t('accounts.addSnapshot')}
               {modified.size > 0 && ` (${modified.size})`}

@@ -13,8 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
-import { HugeiconsIcon } from '@hugeicons/react'
-import { ArrowLeft01Icon, Calendar03Icon, GridViewIcon, TimeManagementIcon, Loading01Icon } from '@hugeicons/core-free-icons'
+import { ArrowLeft, Calendar, LayoutGrid, Clock, Loader2 } from 'lucide-react'
 import type { GoalMonthEntry } from '@/types/api'
 
 // ---------------------------------------------------------------------------
@@ -74,7 +73,7 @@ function ProgressRing({ pct, color, size = 80, stroke = 9 }: {
   const bonusIsFullCircle = bonusFilled >= circ - 0.1
 
   return (
-    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+    <svg width={size} height={size} overflow="visible" style={{ transform: 'rotate(-90deg)' }}>
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
       <circle
         cx={size / 2} cy={size / 2} r={r} fill="none"
@@ -241,7 +240,7 @@ function TimelineView({ months, selectedYm, onSelect }: {
                 <Badge variant="secondary" className="text-[10px] px-1.5 py-0">manu.</Badge>
               )}
               {entry.override != null && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-violet-500 border-violet-300">modif.</Badge>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">modif.</Badge>
               )}
             </button>
           )
@@ -339,7 +338,7 @@ function MonthDetailPanel({ goalId, entry, onClose }: {
           <div className="flex items-center gap-2">
             <CardTitle className="text-base capitalize">{fullMonthName(entry.yearMonth)}</CardTitle>
             {entry.override != null && (
-              <Badge variant="outline" className="text-[10px] text-violet-500 border-violet-300">{t('goals.modified')}</Badge>
+              <Badge variant="outline" className="text-[10px]">{t('goals.modified')}</Badge>
             )}
             {entry.manualActual != null && (
               <Badge variant="secondary" className="text-[10px]">{t('goals.declared')}</Badge>
@@ -388,7 +387,7 @@ function MonthDetailPanel({ goalId, entry, onClose }: {
                   setOverride.mutate({ id: goalId, ym: entry.yearMonth, amount })
                 }}
               >
-                {setOverride.isPending && <HugeiconsIcon icon={Loading01Icon} strokeWidth={2} className="size-3 animate-spin" />}
+                {setOverride.isPending && <Loader2 className="size-3 animate-spin" />}
                 {t('goals.saveOverride')}
               </Button>
               {entry.override != null && (
@@ -441,7 +440,7 @@ function MonthDetailPanel({ goalId, entry, onClose }: {
                   setManual.mutate({ id: goalId, ym: entry.yearMonth, amount })
                 }}
               >
-                {setManual.isPending && <HugeiconsIcon icon={Loading01Icon} strokeWidth={2} className="size-3 animate-spin" />}
+                {setManual.isPending && <Loader2 className="size-3 animate-spin" />}
                 {t('goals.saveManual')}
               </Button>
               {entry.manualActual != null && (
@@ -524,7 +523,7 @@ export function GoalCalendarPage() {
         title={t('goals.calendarTitle', { name: goal.name })}
         actions={
           <Button variant="outline" size="sm" onClick={() => navigate('/goals')}>
-            <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} className="size-4" />
+            <ArrowLeft className="size-4" />
             {t('goals.title')}
           </Button>
         }
@@ -546,15 +545,15 @@ export function GoalCalendarPage() {
       <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as typeof viewMode)}>
         <TabsList>
           <TabsTrigger value="grid" className="gap-1.5">
-            <HugeiconsIcon icon={GridViewIcon} strokeWidth={2} className="size-4" />
+            <LayoutGrid className="size-4" />
             <span className="hidden sm:inline">{t('goals.viewGrid')}</span>
           </TabsTrigger>
           <TabsTrigger value="timeline" className="gap-1.5">
-            <HugeiconsIcon icon={TimeManagementIcon} strokeWidth={2} className="size-4" />
+            <Clock className="size-4" />
             <span className="hidden sm:inline">{t('goals.viewTimeline')}</span>
           </TabsTrigger>
           <TabsTrigger value="calendar" className="gap-1.5">
-            <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} className="size-4" />
+            <Calendar className="size-4" />
             <span className="hidden sm:inline">{t('goals.viewCalendar')}</span>
           </TabsTrigger>
         </TabsList>

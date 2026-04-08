@@ -9,8 +9,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { HugeiconsIcon } from '@hugeicons/react'
-import { Add01Icon, Wallet01Icon, Edit02Icon, Delete02Icon } from '@hugeicons/core-free-icons'
+import { Plus, Wallet, Pencil, Trash2 } from 'lucide-react'
 import type { Account, AccountRequest } from '@/types/api'
 
 type AccountFormData = {
@@ -101,7 +100,7 @@ export function AccountsPage() {
         title={t('accounts.title')}
         actions={
           <Button onClick={handleOpenCreate} size="sm">
-            <HugeiconsIcon icon={Add01Icon} className="size-4" />
+            <Plus className="size-4" />
             {t('accounts.addAccount')}
           </Button>
         }
@@ -115,7 +114,7 @@ export function AccountsPage() {
         </div>
       ) : (accounts ?? []).length === 0 ? (
         <EmptyState
-          icon={<HugeiconsIcon icon={Wallet01Icon} strokeWidth={2} className="size-12" />}
+          icon={<Wallet className="size-12" />}
           title={t('accounts.noAccounts')}
           action={{ label: t('accounts.addAccount'), onClick: handleOpenCreate }}
         />
@@ -137,7 +136,7 @@ export function AccountsPage() {
                     handleOpenEdit(account)
                   }}
                 >
-                  <HugeiconsIcon icon={Edit02Icon} className="size-3.5" />
+                  <Pencil className="size-3.5" />
                 </Button>
                 <Button
                   variant="ghost"
@@ -148,7 +147,7 @@ export function AccountsPage() {
                     setDeleteId(account.id)
                   }}
                 >
-                  <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />
+                  <Trash2 className="size-3.5" />
                 </Button>
               </div>
             </div>
