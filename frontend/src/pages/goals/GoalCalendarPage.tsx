@@ -56,9 +56,9 @@ function groupByYear(months: GoalMonthEntry[]): { year: number; entries: GoalMon
 // ---------------------------------------------------------------------------
 
 const COLORS = {
-  success: 'var(--primary)',
-  warning: 'color-mix(in oklch, var(--primary) 60%, transparent)',
-  destructive: 'color-mix(in oklch, var(--destructive) 70%, transparent)',
+  success: 'oklch(from var(--primary) calc(l + 0.2) c h)',
+  warning: '#f59e0b',
+  destructive: 'oklch(from var(--destructive) calc(l + 0.15) c h)',
   muted: 'var(--muted)',
   mutedFg: 'var(--muted-foreground)',
 } as const
@@ -75,7 +75,7 @@ function ProgressRing({ pct, color, size = 80, stroke = 9 }: {
 
   return (
     <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--border)" strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
       <circle
         cx={size / 2} cy={size / 2} r={r} fill="none"
         stroke={color} strokeWidth={stroke}
@@ -135,60 +135,62 @@ function YearGridView({ months, selectedYm, onSelect }: {
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-bold tracking-wider uppercase text-muted-foreground">{year}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-6 gap-3">
-              {entries.map(entry => {
-                const isSelected = selectedYm === entry.yearMonth
-                const hasOverride = entry.override != null
-                const hasManual = entry.manualActual != null
-                const { color, pct, textColor } = getProgressColor(entry, true)
-                const effectiveText = entry.effective != null ? formatCompact(entry.effective) : null
-                const percentLabel = effectiveText != null
-                  ? (pct > 1 ? `+${Math.round((pct - 1) * 100)}%` : `${Math.round(pct * 100)}%`)
-                  : null
+          <CardContent className="pb-4 pt-3 px-4">
+            <div className="overflow-x-auto">
+              <div className="flex gap-3 min-w-max">
+                {entries.map(entry => {
+                  const isSelected = selectedYm === entry.yearMonth
+                  const hasOverride = entry.override != null
+                  const hasManual = entry.manualActual != null
+                  const { color, pct, textColor } = getProgressColor(entry, true)
+                  const effectiveText = entry.effective != null ? formatCompact(entry.effective) : null
+                  const percentLabel = effectiveText != null
+                    ? (pct > 1 ? `+${Math.round((pct - 1) * 100)}%` : `${Math.round(pct * 100)}%`)
+                    : null
 
-                return (
-                  <button
-                    key={entry.yearMonth}
-                    onClick={() => onSelect(entry.yearMonth)}
-                    className={`flex flex-col items-center gap-2.5 rounded-xl border px-2 py-3 transition-colors cursor-pointer ${
-                      isSelected ? 'border-primary bg-accent' : 'border-border hover:bg-accent/50'
-                    }`}
-                  >
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground leading-none">
-                      {monthAbbr(entry.yearMonth)}
-                    </span>
-                    <div className="relative">
-                      {hasOverride && !hasManual && (
-                        <div className="absolute top-[3px] right-[3px] z-10 w-[9px] h-[9px] rounded-full bg-violet-600 border-2 border-background" />
-                      )}
-                      {hasManual && (
-                        <div className="absolute top-[3px] right-[3px] z-10 w-[9px] h-[9px] rounded-full bg-blue-500 border-2 border-background" />
-                      )}
-                      <ProgressRing pct={pct} color={color} size={80} stroke={9} />
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-[2px]">
-                        {effectiveText != null ? (
-                          <>
-                            <span className="text-[11px] font-bold leading-none" style={{ color: textColor }}>
-                              {effectiveText}
-                            </span>
-                            <span className="text-[9px] leading-none" style={{ color: textColor }}>
-                              {percentLabel}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-[13px] font-bold leading-none" style={{ color: COLORS.mutedFg }}>
-                            –
-                          </span>
+                  return (
+                    <button
+                      key={entry.yearMonth}
+                      onClick={() => onSelect(entry.yearMonth)}
+                      className={`flex flex-col items-center gap-[9px] rounded-xl border px-2 py-3 transition-colors cursor-pointer min-w-[90px] ${
+                        isSelected ? 'border-primary bg-accent' : 'border-border hover:bg-accent/50'
+                      }`}
+                    >
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground leading-none">
+                        {monthAbbr(entry.yearMonth)}
+                      </span>
+                      <div className="relative">
+                        {hasOverride && !hasManual && (
+                          <div className="absolute top-[3px] right-[3px] z-10 w-[9px] h-[9px] rounded-full bg-violet-600 border-2 border-background" />
                         )}
+                        {hasManual && (
+                          <div className="absolute top-[3px] right-[3px] z-10 w-[9px] h-[9px] rounded-full bg-blue-500 border-2 border-background" />
+                        )}
+                        <ProgressRing pct={pct} color={color} />
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-[2px]">
+                          {effectiveText != null ? (
+                            <>
+                              <span className="text-[11px] font-bold leading-none" style={{ color: textColor }}>
+                                {effectiveText}
+                              </span>
+                              <span className="text-[9px] leading-none" style={{ color: textColor }}>
+                                {percentLabel}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-[13px] font-bold leading-none" style={{ color: COLORS.mutedFg }}>
+                              –
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground leading-none">
-                      obj.&nbsp;{formatCompact(entry.objective)}
-                    </span>
-                  </button>
-                )
-              })}
+                      <span className="text-[10px] text-muted-foreground leading-none">
+                        obj.&nbsp;{formatCompact(entry.objective)}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -484,15 +486,17 @@ export function GoalCalendarPage() {
         <PageHeader title={t('goals.calendar')} />
         <Skeleton className="h-9 w-72" />
         <Card>
-          <CardContent className="p-6">
-            <div className="grid grid-cols-6 gap-3">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <div key={i} className="flex flex-col items-center gap-2.5 rounded-xl border border-border px-2 py-3">
-                  <Skeleton className="h-2.5 w-8" />
-                  <Skeleton className="size-[80px] rounded-full" />
-                  <Skeleton className="h-2.5 w-14" />
-                </div>
-              ))}
+          <CardContent className="pb-4 pt-3 px-4">
+            <div className="overflow-x-auto">
+              <div className="flex gap-3 min-w-max">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <div key={i} className="flex flex-col items-center gap-[9px] rounded-xl border border-border px-2 py-3 min-w-[90px]">
+                    <Skeleton className="h-2.5 w-8" />
+                    <Skeleton className="size-[80px] rounded-full" />
+                    <Skeleton className="h-2.5 w-14" />
+                  </div>
+                ))}
+              </div>
             </div>
           </CardContent>
         </Card>

@@ -1,115 +1,88 @@
-# Design — GoalCalendarPage : remplacement des anneaux SVG par des donuts
+# Feature: Goal Calendar — Grid View (donuts)
 
-**Statut : VALIDÉ — prêt pour implémentation**
+> Last updated: 2026-04-08
 
-## Contexte
+## Context
 
-La vue "Grille" de `GoalCalendarPage` (`/goals/:id/calendar`) affiche les mois écoulés sous forme de petits anneaux SVG (52px, stroke 5px) dans une grille 6 colonnes. Le texte intérieur montre uniquement le pourcentage.
+The "Grid" view of `GoalCalendarPage` displays past months as interactive donut cards. Each donut shows the effective amount and the percentage of the monthly savings objective achieved. The original 52px SVG rings (6-column grid, percentage only) were replaced with 80px cards showing amount + percentage, overflow support (>100%), and compact formatting for large amounts.
 
-L'objectif est de les remplacer par des donuts plus lisibles, avec montant + pourcentage à l'intérieur, dans un layout carte 3 colonnes.
+## How it works
 
-## Fichiers concernés
+### Key files
 
-- **Modifier** : `frontend/src/pages/goals/GoalCalendarPage.tsx`
-  - Ajouter helper `formatCompact`
-  - Réécrire `YearGridView`
-  - Mettre à jour le skeleton de chargement
-- **Ne pas toucher** : `TimelineView`, `CalendarGridView`, `MonthDetailPanel`, `GoalsPage`
+- `frontend/src/pages/goals/GoalCalendarPage.tsx` — entire component: `ProgressRing`, `formatCompact`, `getProgressColor`, `YearGridView`, skeleton, `MonthDetailPanel`
 
----
+### Components
 
-## Décisions de design
+**`ProgressRing`** — 80px SVG, stroke 9px, rotated -90° so the arc starts at the top:
+- Background track: `var(--muted)`, stroke 9px
+- Base arc: `min(pct, 1) × circumference`, `stroke-linecap="butt"` on overflow, `"round"` otherwise
+- Bonus arc (overflow > 100%): color `#818cf8` (light indigo), stroke 12px, `min(pct−1, 1) × circumference`, `stroke-linecap="round"` except when full circle → `"butt"` (avoids bump at junction)
 
-### 1. Layout
+**`getProgressColor`** — returns `color` (arc), `textColor` (inner text), `pct` (raw ratio):
 
-**Carte année** — une `<Card>` par année (composant shadcn existant) :
-- `CardHeader` : label année en uppercase muted (`2024`, `2025`…), identique à l'existant
-- `CardContent` : grille 3 colonnes de cartes mois
+| Condition | Arc color |
+|-----------|-----------|
+| No data | `--muted` |
+| ratio < 60% | `oklch(from var(--destructive) calc(l + 0.15) c h)` |
+| 60% ≤ ratio < 100% | `#f59e0b` (amber) |
+| ratio ≥ 100% | `oklch(from var(--primary) calc(l + 0.2) c h)` |
 
-**Carte mois** — chaque mois = un `<button>` :
-- `border`, `border-radius: rounded-xl`, fond légèrement distinct du fond de la carte année
-- Structure verticale :
-  1. Label mois en haut (`JANV.`, `FÉVR.`…)
-  2. Donut SVG au centre avec texte superposé
-  3. `obj. XXX` en bas
+**`formatCompact`** — formats amounts to fit inside the ring (max ~6 chars):
 
-### 2. Donut SVG
+| Value | Output |
+|-------|--------|
+| < 1 000 € | `475 €` |
+| ≥ 1 000 € | `1 k€`, `1,5 k€` |
+| ≥ 10 000 € | `10 k€`, `200 k€` |
+| ≥ 1 000 000 € | `1,5 M€` |
 
-- **Taille** : 80px (`viewBox="0 0 80 80"`, `r=30`)
-- **Stroke de base** : 9px
-- **Implémentation** : SVG custom (deux `<circle>` superposés), pas recharts
-- **Texte** : overlay DOM absolu (`absolute inset-0 flex flex-col items-center justify-center`), pas de `<text>` SVG
+**`YearGridView`** — one `<Card>` per year, `overflow-x-auto` + `flex gap-3 min-w-max` so all 12 months stay on one line (horizontal scroll on narrow viewports). Each month is a `<button>` `min-w-[90px]` with:
+1. Month label (10px uppercase)
+2. `ProgressRing` + absolute text overlay (11px/9px)
+3. `obj. XXX` (10px muted)
 
-### 3. Couleurs de progression
+### Inner text — cases
 
-Conserver la logique `getProgressColor` existante :
+| Situation | Line 1 | Line 2 |
+|-----------|--------|--------|
+| No data | `–` (13px muted, centered) | — |
+| 0–100% | `formatCompact(effective)` | `XX%` |
+| > 100% | `formatCompact(effective)` | `+XX%` |
 
-| Ratio | Couleur | CSS var |
-|-------|---------|---------|
-| Pas de données | muted | `--muted-foreground` |
-| < 60% | rouge | `--destructive` |
-| 60–99% | amber | `f59e0b` |
-| ≥ 100% | indigo primary | `--primary` |
+### Indicator dots
 
-### 4. Cas overflow (> 100%)
+- Violet dot (`bg-violet-600`) at `top-[3px] right-[3px]`: monthly objective manually overridden (`entry.override != null`)
+- Blue dot (`bg-blue-500`): manually declared contribution (`entry.manualActual != null`). Takes priority over violet when both are set.
 
-- Cercle de base **plein** en `--primary` (indigo), `stroke-linecap="butt"`
-- Arc bonus en **`#818cf8`** (indigo clair), stroke **12px** (légèrement plus large que la base)
-- Arc bonus = `min(ratio - 1, 1) × circonférence` → cap à un cercle complet (200% max)
-- Si bonus < 100% → `stroke-linecap="round"` (extrémités arrondies)
-- Si bonus = 100% → `stroke-linecap="butt"` (cercle parfait, pas de bump)
-- Le pourcentage affiché passe à `+X%` (ex. `+10%`, `+100%`)
-- Au-delà de 200% total : même rendu visuel que 200%, le vrai % reste dans le texte
+### Selection state
 
-### 5. Texte intérieur — taille de police
+- Selected: `border-primary bg-accent`
+- Unselected: `border-border hover:bg-accent/50`
 
-- Montant : **11px bold**
-- Pourcentage : **9px**
-- Gap entre les deux lignes : **2px**
-- Valeur nulle : `–` seul, 13px, centré, couleur muted
+## Technical choices
 
-### 6. Formatage du montant (`formatCompact`)
+| Choice | Why | Rejected alternative |
+|--------|-----|----------------------|
+| Custom SVG (two `<circle>`) | Full control over the bonus arc, no dependency | `recharts` (no access to `stroke-dasharray` for overflow) |
+| `oklch(from var(--primary) calc(l + 0.2) c h)` | `var(--primary)` in dark mode is too dark (lightness 0.42); CSS relative color syntax adds 0.2 lightness while staying theme-consistent | Hardcoded `#6366f1` (doesn't follow the theme) |
+| `overflow-x-auto` + `flex min-w-max` | 12 cards × ~96px ≈ 1200px min; horizontal scroll preserves 80px proportions | `grid-cols-12` with smaller cards (too small to read inner text) |
+| `formatCompact` local (not in `lib/utils.ts`) | Very specific to this component (6-char constraint to fit in 80px ring) | Global utility (too specialized to reuse) |
+| Bonus arc capped at 100% bonus | Beyond 200% total, the visual doesn't change; the real % stays readable in the text | Multi-turn arc (complex and unreadable) |
 
-```
-< 1 000 €   → standard sans décimales      "475 €", "999 €"
-≥ 1 000 €   → compact, 1 décimale          "1 k€", "1,5 k€", "9,9 k€"
-≥ 10 000 €  → compact, 0 décimale          "10 k€", "200 k€"
-≥ 1 000 000 € → compact, 2 décimales       "1,5 M€"
-null         → "–"
-```
+## Gotchas / Pitfalls
 
-Résultat max ~6 caractères dans tous les cas → pas de débordement dans le cercle.
+- **Tailwind v4 + CSS vars**: `hsl(var(--primary))` is invalid in Tailwind v4 (vars are in `oklch`). Use `var(--primary)` directly in SVG `stroke` attributes or inline styles. `color-mix(in oklch, ...)` works; wrapping oklch vars in `hsl()` renders as transparent.
+- **`stroke-linecap="butt"` at 100% bonus**: if the bonus arc reaches exactly the circumference with `"round"`, the rounded endpoints overlap and create a visible bump at the top. Detect `bonusFilled >= circ - 0.1` to switch to `"butt"`.
+- **`var(--border)` in dark mode** = `oklch(1 0 0 / 10%)` (white at 10% opacity) — nearly invisible as a background track. Use `var(--muted)` instead.
+- **`textColor` === `color`**: inner text color is the same as the arc color. Colors brightened via CSS relative color syntax read well on dark backgrounds.
+- **Do not touch** `TimelineView`, `CalendarGridView`, `MonthDetailPanel` — these views are independent and do not share `formatCompact` / `ProgressRing`.
 
-### 7. Indicateurs override / saisie manuelle
+## Tests
 
-- Point **9px** en `top: 3px; right: 3px`, `border: 2px solid background`
-- Violet (`#7c3aed`) = objectif du mois modifié manuellement (`entry.override != null`)
-- Bleu (`#3b82f6`) = contribution déclarée manuellement (`entry.manualActual != null`)
-- Le point bleu a priorité si les deux sont présents
+No dedicated frontend unit tests for this component. `getProgressColor` and `formatCompact` are pure functions and straightforward to unit-test if needed.
 
-### 8. État sélectionné
+## Links
 
-- Mois sélectionné : `border-primary bg-accent`
-- Mois non sélectionné : `border-border hover:bg-accent/50`
-
-### 9. Skeleton de chargement
-
-Mettre à jour le skeleton existant pour correspondre au nouveau layout :
-- Grille 3 colonnes
-- Chaque cellule : border + border-radius, avec 3 skeletons (label / cercle 80px / obj label)
-
----
-
-## Logique de rendu par cas
-
-| Situation | Arc base | Arc bonus | Texte ligne 1 | Texte ligne 2 |
-|-----------|----------|-----------|---------------|---------------|
-| Pas de données | muted, vide | aucun | `–` (centré, muted) | — |
-| 0% | destructive, vide | aucun | `0 €` | `0%` |
-| 30% | destructive, 30% | aucun | montant | `30%` |
-| 65% | amber, 65% | aucun | montant | `65%` |
-| 95% | primary, 95% | aucun | montant | `95%` |
-| 100% | primary, plein, butt | aucun | montant | `100%` |
-| 110% | primary, plein, butt | indigo clair 10%, round | montant | `+10%` |
-| 200% | primary, plein, butt | indigo clair plein, butt | montant | `+100%` |
-| 400% | primary, plein, butt | indigo clair plein, butt | montant | `+100%` (cap) |
+- Feature backend: [goals.md](./goals.md)
+- ADR: [2026-04-08-css-relative-color-syntax.md](../decisions/2026-04-08-css-relative-color-syntax.md)
