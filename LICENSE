@@ -1,0 +1,68 @@
+Picsou Finance
+Copyright (c) 2026 Zoeille
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this software except in compliance with the License
+and the following additional restrictions.
+
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+## Commons Clause Use Limitation
+
+"Software" refers to Picsou Finance and any related documentation, configuration
+files, and derivative works.
+
+You may use, copy, modify, and distribute the Software for personal,
+non-commercial, educational, or research purposes without restriction.
+
+You may **not**:
+
+1. **Sell** the Software — including offering it (or any derivative work) as a
+   service, as part of a service, or as a commercial product.
+2. **Use** the Software as the basis for, or as a feature within, a commercial
+   SaaS product, platform, or managed service, except as provided in the
+   Hosting Exception below.
+3. **Distribute** the Software under a commercial license without explicit
+   written permission from the copyright holder.
+
+"Sell" means any commercial exploitation of the Software, including but not
+limited to: (a) offering the Software or derivative works as a paid service
+(SaaS, PaaS, etc.); (b) embedding the Software into a commercial product; or
+(c) using the Software to provide paid consulting or professional services
+that primarily deliver the Software's functionality.
+
+### Hosting Exception
+
+The restrictions above do **not** prevent a hosting provider or individual from
+offering managed hosting of the **unmodified** Software, provided that:
+
+- The Software is made available to end users in its original, unmodified form
+  (configuration changes and deployment adjustments are permitted).
+- The hosting provider does not claim ownership of, rebrand, or present the
+  Software as its own product.
+- The hosting provider does not combine the Software with proprietary
+  modifications that add significant new functionality beyond configuration
+  and deployment.
+- End users retain the same rights to the Software as granted by this License.
+
+### Clarifications
+
+- Contributing back to the original project (pull requests, issues, forks for
+  contribution purposes) is always welcome and encouraged.
+- Using the Software internally within a company for its own employees' personal
+  finance tracking is permitted, provided it is not offered as a service to
+  external customers.
+
+---
+
+For commercial licensing inquiries, please contact the maintainer via GitHub.

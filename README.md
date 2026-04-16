@@ -1,170 +1,159 @@
-# Picsou 💰
+<div align="center">
 
-> Tableau de bord de finances personnelles — suivi d'enveloppes, objectifs, synchronisation bancaire.
+# Picsou
 
-Self-hosted, open-source, single-user. Construit avec Spring Boot + React.
+**Self-hosted personal finance dashboard**
+
+Track bank accounts, brokerage, crypto, and net worth — all in one place.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+[Getting started](#getting-started) · [Features](#features) · [Development](#development) · [Security](SECURITY.md)
+
+</div>
 
 ---
 
-## Statut du projet
+## Disclaimer
 
-> **Pré-release publique** — L'application est partagée en l'état pour permettre à la communauté de contribuer. Elle est fonctionnelle pour un usage personnel mais manque encore de polish et de couverture de tests. Elle s'améliorera avec le temps et les contributions de chacun. N'hésitez pas à ouvrir des issues ou des pull requests !
-> Le projet a été complétement vibecodé sur le frontend et en partie sur le back-end, c'est un projet perso sans prise de tête d'ou mon énorme disclaimer à ce sujet. Le temps fera son travail.
-
----
-
-## ⚠️ DISCLAIMER — À LIRE AVANT TOUT
-
-> **CE PROJET EST UN PROTOTYPE PERSONNEL.**
+> **Picsou is designed for personal, local use.**
 >
-> Picsou a été développé pour un usage strictement **personnel et local**. Il n'a **pas** vocation à être déployé sur un serveur public ou partagé avec d'autres utilisateurs.
+> It stores sensitive financial data (balances, transactions, bank session tokens). Authentication is single-user with no 2FA or audit logging. It has not undergone a professional security audit.
 >
-> **Pourquoi ne pas l'exposer sur internet :**
-> - Il stocke des données bancaires hautement sensibles (soldes, transactions, tokens de session)
-> - L'authentification est mono-utilisateur et basique (pas de 2FA, pas d'audit log)
-> - Il n'a subi **aucun audit de sécurité professionnel**
-> - Il interagit avec vos vraies banques via PSD2 (Enable Banking) et Trade Republic
->
-> **Si vous l'utilisez sur un réseau exposé**, vous le faites à vos propres risques. L'auteur décline toute responsabilité en cas de compromission, perte de données ou accès non autorisé à vos comptes bancaires.
->
-> **Usage recommandé : uniquement en local, sur votre propre machine, derrière votre réseau domestique.**
+> **Do not expose it on the public internet.** Use it on your local machine or home network behind a firewall. If you choose to expose it, you do so at your own risk.
 
 ---
 
-## Fonctionnalités
+## Features
 
-- **Comptes** — LEP, PEA, Compte-titres, Crypto, Livret, Compte courant...
-- **Objectifs** — Cible + deadline sur plusieurs comptes ; suivi de progression
-- **Synchronisation bancaire** — Via Enable Banking (PSD2/OAuth) : Revolut, BoursoBank, et +2000 banques européennes
-- **Prix en temps réel** — CoinGecko (crypto), Yahoo Finance (actions/ETF)
-- **Graphiques** — Évolution du patrimoine, répartition, historique par compte
-- **Trade Republic** — Import CSV ou sync automatique
-
----
-
-## Installation (local uniquement)
-
-### Prérequis
-
-- Docker & Docker Compose v2
-- Un compte Enable Banking (gratuit) si vous souhaitez la sync bancaire → https://enablebanking.com/
-
-### 1. Cloner le dépôt
-
-```bash
-git clone https://github.com/Zoeille/picsou-finance.git
-cd picsou
-```
-
-### 2. Configurer les secrets
-
-```bash
-cp .env.example .env
-```
-
-Éditer `.env` :
-
-| Variable | Description | Commande pour générer |
-|----------|-------------|----------------------|
-| `POSTGRES_PASSWORD` | Mot de passe PostgreSQL | Chaîne aléatoire forte |
-| `JWT_SECRET` | Clé de signature JWT (min. 32 car.) | `openssl rand -base64 48` |
-| `APP_USERNAME` | Identifiant de connexion | Votre choix |
-| `APP_PASSWORD_HASH` | Hash bcrypt du mot de passe | `htpasswd -bnBC 12 "" VOTRE_MDP \| tr -d ':\r\n'` |
-
-> **Important :** le hash bcrypt contient des caractères `$`. Dans le fichier `.env` ils sont écrits tels quels (pas de quotes). Ne jamais faire `export APP_PASSWORD_HASH=$2a$...` dans un shell — les `$` seraient interprétés. Utilisez toujours le fichier `.env` avec Docker Compose, ou exportez avec des guillemets simples : `export APP_PASSWORD_HASH='$2a$12$...'`.
-
-Pour la sync Enable Banking (optionnel) :
-
-| Variable | Description |
-|----------|-------------|
-| `ENABLEBANKING_APPLICATION_ID` | Depuis votre dashboard Enable Banking |
-| `ENABLEBANKING_KEY_ID` | Depuis votre dashboard Enable Banking |
-| `ENABLEBANKING_REDIRECT_URI` | `http://localhost:5173/sync/callback` |
-| `ENABLEBANKING_PRIVATE_KEY_PATH` | Chemin vers votre clé RSA privée |
-
-Générer la paire de clés RSA pour Enable Banking :
-
-```bash
-# Générer la clé privée
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out secrets/enablebanking.pem
-
-# Extraire la clé publique (à uploader dans le dashboard Enable Banking)
-openssl rsa -pubout -in secrets/enablebanking.pem -out enablebanking_public.pem
-```
-
-### 3. Lancer
-
-```bash
-docker compose up --build
-```
-
-Ouvrir http://localhost:5173
-
-> Le premier démarrage télécharge les images Docker et compile le projet — comptez 2-3 minutes.
-
-### 4. Se connecter
-
-Utiliser le `APP_USERNAME` et le mot de passe (non hashé) configurés dans `.env`.
-
----
-
-## Développement
-
-### Backend (Spring Boot)
-
-```bash
-cd backend
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
-```
-
-Nécessite une instance PostgreSQL locale. Le profil `dev` active les logs SQL et devtools.
-
-### Frontend (React + Vite)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Vite proxie automatiquement `/api/*` vers `localhost:8080`.
-
-### Lancer les tests
-
-```bash
-cd backend && ./mvnw test
-cd frontend && npm run lint && npm run build
-```
-
----
+- **Account aggregation** — Bank accounts (LEP, PEA, Livret, current), brokerage, crypto wallets, on-chain addresses
+- **Bank sync** — Enable Banking (PSD2/OAuth, 2000+ EU banks) or Powens/Budget Insight (scraping)
+- **Brokerage sync** — Trade Republic via WebSocket or CSV import
+- **Crypto** — Binance exchange sync, on-chain BTC/ETH/SOL address tracking
+- **Live prices** — CoinGecko (crypto), Yahoo Finance (stocks/ETFs)
+- **Net worth tracking** — Historical snapshots, stacked area charts, per-account breakdown
+- **Savings goals** — Targets with deadlines, progress tracking across accounts
+- **Finary import** — CSV import or direct API sync
+- **i18n** — English and French
+- **Dark mode** — System/light/dark with flash-free theme switching
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────────┐     ┌────────────┐
-│  React Frontend │────▶│  Spring Boot Backend  │────▶│ PostgreSQL │
-│   (Vite :5173)  │◀────│     (Tomcat :8080)    │     │ (:5432)    │
-└─────────────────┘     └──────────┬───────────┘     └────────────┘
-                                   │
-                    ┌──────────────┼──────────────┐
-                    ▼              ▼               ▼
-             Enable Banking    CoinGecko      Yahoo Finance
-             (PSD2/OAuth)    (crypto prices) (stock/ETF prices)
+┌──────────────────┐     ┌───────────────────────┐     ┌────────────┐
+│  React Frontend  │────▶│  Spring Boot Backend   │────▶│ PostgreSQL │
+│   (Vite/Bun)     │◀────│     (Tomcat :8080)     │     │  (:5432)   │
+└──────────────────┘     └───────────┬────────────┘     └────────────┘
+                                     │
+                      ┌──────────────┼──────────────┐
+                      ▼              ▼               ▼
+               Enable Banking   CoinGecko      Yahoo Finance
+               Powens          Binance API    Trade Republic
+               (PSD2/scraping) (crypto)       (WebSocket)
 ```
 
-- **Auth** — JWT en cookies HttpOnly + SameSite=Strict, refresh token rotation
-- **Ports/Adapters** — `BankConnectorPort`, `PriceProviderPort` — swap de provider sans toucher à la logique métier
-- **Flyway** — Migrations de schéma versionnées
-- **Rate limiting** — Bucket4j sur les endpoints sensibles (login, sync)
+- **Ports & Adapters** — `BankConnectorPort`, `PriceProviderPort`, `TradeRepublicPort`, etc. Swap providers without touching business logic.
+- **Flyway** — Versioned database migrations
+- **JWT auth** — HttpOnly cookies, SameSite=Strict, refresh token rotation
+- **AES-256-GCM** — Mandatory encryption for API secrets at rest
+- **Rate limiting** — Bucket4j on login and sync endpoints
 
----
+## Tech stack
 
-## Sécurité
+| Layer | Technology |
+|-------|-----------|
+| Backend | Java 21, Spring Boot 3.4, Maven |
+| Frontend | React 19, TypeScript 5.9, Vite 7, Tailwind v4, Bun |
+| Database | PostgreSQL 16, Flyway |
+| Runtime | Docker (Nginx + Spring Boot + supervisor) |
 
-Voir [SECURITY.md](SECURITY.md) pour la politique de sécurité et le signalement de vulnérabilités.
+## Getting started
 
----
+### Prerequisites
 
-## Licence
+- [Docker](https://docs.docker.com/get-docker/) & Docker Compose v2
+- (Optional) An [Enable Banking](https://enablebanking.com/) account for bank sync
 
-MIT — utilisation personnelle uniquement. Aucune garantie d'aucune sorte.
+### 1. Clone
+
+```bash
+git clone https://github.com/Zoeille/picsou-finance.git
+cd picsou-finance
+```
+
+### 2. Configure
+
+```bash
+cp docker/.env.example docker/.env
+```
+
+Edit `docker/.env` with your credentials:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `POSTGRES_PASSWORD` | Yes | Strong random password |
+| `JWT_SECRET` | Yes | `openssl rand -base64 48` |
+| `APP_USERNAME` | Yes | Your login username |
+| `APP_PASSWORD_HASH` | Yes | `htpasswd -bnBC 12 "" YOUR_PASSWORD \| tr -d ':\r\n'` |
+| `CRYPTO_ENCRYPTION_KEY` | For crypto | `openssl rand -base64 32` |
+| `ENABLEBANKING_*` | For bank sync | From your [Enable Banking dashboard](https://enablebanking.com/) |
+| `TR_PHONE_NUMBER` / `TR_PIN` | For Trade Republic | Your Trade Republic credentials |
+
+> **Note:** The bcrypt hash contains `$` characters. In the `.env` file, write it as-is without quotes. Never export it in a shell without single quotes: `export APP_PASSWORD_HASH='$2a$12$...'`.
+
+### 3. Run
+
+```bash
+docker compose -f docker/docker-compose.yml up --build
+```
+
+Open http://localhost:8080 and log in with the credentials you configured.
+
+### Enable Banking key setup (optional)
+
+```bash
+mkdir -p docker/secrets
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out docker/secrets/enablebanking.pem
+openssl rsa -pubout -in docker/secrets/enablebanking.pem -out enablebanking_public.pem
+```
+
+Upload `enablebanking_public.pem` to your Enable Banking dashboard.
+
+## Development
+
+### Backend
+
+```bash
+cd backend
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev   # Requires PostgreSQL on :5432
+./mvnw test                                              # Run tests
+```
+
+### Frontend
+
+```bash
+cd frontend
+bun install        # Install dependencies
+bun run dev        # Dev server on :5173 (proxies /api/* → localhost:8080)
+bun run build      # TypeScript check + Vite build
+npx vitest run     # Unit tests
+```
+
+## Contributing
+
+Contributions are welcome — bug fixes, features, translations, or documentation.
+
+1. Fork the repository
+2. Create a feature branch (`feat/xxx`, `fix/xxx`)
+3. Write conventional commits
+4. Open a pull request against `main`
+
+Please read the relevant [feature docs](docs/features/) and [conventions](docs/conventions/) before touching existing code.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the vulnerability reporting policy.
+
+## License
+
+[MIT](LICENSE) — provided as-is, with no warranty. For personal use.
