@@ -18,6 +18,10 @@ public class WalletAddress extends AuditableEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "member_id", nullable = false)
+    private FamilyMember member;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Chain chain;

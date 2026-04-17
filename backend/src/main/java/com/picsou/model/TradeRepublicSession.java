@@ -18,6 +18,10 @@ public class TradeRepublicSession extends AuditableEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "member_id", nullable = false)
+    private FamilyMember member;
+
     @Column(name = "session_token", nullable = false, length = 2000)
     private String sessionToken;
 

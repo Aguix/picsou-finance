@@ -18,6 +18,10 @@ public class FinarySession extends AuditableEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "member_id", nullable = false)
+    private FamilyMember member;
+
     @Column(nullable = false, length = 500)
     private String email;
 

@@ -21,6 +21,10 @@ public class GoalManualContribution {
     @JoinColumn(name = "goal_id", nullable = false)
     private Goal goal;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "member_id")
+    private FamilyMember member;
+
     @Column(name = "year_month", nullable = false, length = 7)
     private String yearMonth;
 

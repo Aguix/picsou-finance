@@ -18,6 +18,10 @@ public class Requisition extends AuditableEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "member_id", nullable = false)
+    private FamilyMember member;
+
     /** Enable Banking session ID */
     @Column(name = "requisition_id", nullable = false, unique = true, length = 100)
     private String requisitionId;
