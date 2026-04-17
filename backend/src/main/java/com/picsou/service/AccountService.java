@@ -15,6 +15,7 @@ import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
 import com.picsou.model.BalanceSnapshot;
 import com.picsou.model.Debt;
+import com.picsou.model.FamilyMember;
 import com.picsou.model.RealEstateMetadata;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.AccountRepository;
@@ -61,19 +62,20 @@ public class AccountService {
         this.priceService = priceService;
     }
 
-    public List<AccountResponse> findAll() {
-        return accountRepository.findAllByOrderByCreatedAtAsc().stream()
+    public List<AccountResponse> findAll(Long memberId) {
+        return accountRepository.findAllByMemberIdOrderByCreatedAtAsc(memberId).stream()
             .map(this::toResponse)
             .toList();
     }
 
-    public AccountResponse findById(Long id) {
-        return toResponse(getOrThrow(id));
+    public AccountResponse findById(Long id, Long memberId) {
+        return toResponse(getOrThrow(id, memberId));
     }
 
     @Transactional
-    public AccountResponse create(AccountRequest req) {
+    public AccountResponse create(AccountRequest req, FamilyMember member) {
         Account account = Account.builder()
+            .member(member)
             .name(req.name())
             .type(req.type())
             .provider(req.provider())
@@ -96,8 +98,8 @@ public class AccountService {
     }
 
     @Transactional
-    public AccountResponse update(Long id, AccountRequest req) {
-        Account account = getOrThrow(id);
+    public AccountResponse update(Long id, AccountRequest req, Long memberId) {
+        Account account = getOrThrow(id, memberId);
 
         account.setName(req.name());
         account.setType(req.type());
@@ -119,16 +121,14 @@ public class AccountService {
     }
 
     @Transactional
-    public void delete(Long id) {
-        if (!accountRepository.existsById(id)) {
-            throw ResourceNotFoundException.account(id);
-        }
-        accountRepository.deleteById(id);
+    public void delete(Long id, Long memberId) {
+        Account account = getOrThrow(id, memberId);
+        accountRepository.delete(account);
     }
 
     @Transactional
-    public BalanceSnapshot addManualSnapshot(Long accountId, SnapshotRequest req) {
-        Account account = getOrThrow(accountId);
+    public BalanceSnapshot addManualSnapshot(Long accountId, Long memberId, SnapshotRequest req) {
+        Account account = getOrThrow(accountId, memberId);
 
         // Update current balance if this is the most recent snapshot
         Optional<BalanceSnapshot> latest = snapshotRepository.findLatestByAccountId(accountId);
@@ -141,31 +141,31 @@ public class AccountService {
         return upsertSnapshot(account, req.balance(), req.date());
     }
 
-    public List<BalanceSnapshot> getHistory(Long accountId, LocalDate from, LocalDate to) {
-        getOrThrow(accountId); // validate account exists
+    public List<BalanceSnapshot> getHistory(Long accountId, Long memberId, LocalDate from, LocalDate to) {
+        getOrThrow(accountId, memberId); // validate account exists
         LocalDate effectiveTo = to != null ? to : LocalDate.now();
         LocalDate effectiveFrom = from != null ? from : effectiveTo.minusMonths(12);
         return snapshotRepository.findByAccountIdAndDateBetweenOrderByDateAsc(accountId, effectiveFrom, effectiveTo);
     }
 
-    public List<HoldingResponse> getHoldings(Long accountId) {
-        getOrThrow(accountId); // validate account exists
+    public List<HoldingResponse> getHoldings(Long accountId, Long memberId) {
+        getOrThrow(accountId, memberId); // validate account exists
         return holdingRepository.findByAccountIdOrderByCurrentPriceDesc(accountId).stream()
             .map(this::toHoldingResponse)
             .toList();
     }
 
-    public List<TransactionResponse> getTransactions(Long accountId) {
-        getOrThrow(accountId); // validate account exists
+    public List<TransactionResponse> getTransactions(Long accountId, Long memberId) {
+        getOrThrow(accountId, memberId); // validate account exists
         return transactionRepository.findByAccountIdOrderByDateDesc(accountId).stream()
             .map(TransactionResponse::from)
             .toList();
     }
 
     @Transactional
-    public AccountHolding upsertHolding(Long accountId, String ticker, String name,
+    public AccountHolding upsertHolding(Long accountId, Long memberId, String ticker, String name,
                                          BigDecimal quantity, BigDecimal currentPriceEur) {
-        Account account = getOrThrow(accountId);
+        Account account = getOrThrow(accountId, memberId);
         Optional<AccountHolding> existing = holdingRepository.findByAccountIdAndTicker(accountId, ticker);
         AccountHolding holding;
         if (existing.isPresent()) {
@@ -232,8 +232,8 @@ public class AccountService {
             .build());
     }
 
-    Account getOrThrow(Long id) {
-        return accountRepository.findById(id)
+    Account getOrThrow(Long id, Long memberId) {
+        return accountRepository.findByIdAndMemberId(id, memberId)
             .orElseThrow(() -> ResourceNotFoundException.account(id));
     }
 
@@ -287,8 +287,8 @@ public class AccountService {
     }
 
     @Transactional
-    public RealEstateMetadataResponse updateRealEstateMetadata(Long accountId, RealEstateMetadataRequest req) {
-        Account account = getOrThrow(accountId);
+    public RealEstateMetadataResponse updateRealEstateMetadata(Long accountId, Long memberId, RealEstateMetadataRequest req) {
+        Account account = getOrThrow(accountId, memberId);
 
         RealEstateMetadata metadata = realEstateMetadataRepository.findByAccountId(accountId)
             .orElseGet(() -> RealEstateMetadata.builder().account(account).build());
@@ -304,8 +304,8 @@ public class AccountService {
     }
 
     @Transactional
-    public DebtResponse updateDebtMetadata(Long accountId, DebtRequest req) {
-        Account account = getOrThrow(accountId);
+    public DebtResponse updateDebtMetadata(Long accountId, Long memberId, DebtRequest req) {
+        Account account = getOrThrow(accountId, memberId);
 
         Debt debt = debtRepository.findByAccountId(accountId)
             .orElseGet(() -> Debt.builder().account(account).build());

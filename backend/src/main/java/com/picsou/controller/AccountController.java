@@ -11,6 +11,7 @@ import com.picsou.dto.SnapshotRequest;
 import com.picsou.dto.TransactionResponse;
 import com.picsou.model.BalanceSnapshot;
 import com.picsou.service.AccountService;
+import com.picsou.service.UserContext;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -25,36 +26,38 @@ import java.util.List;
 public class AccountController {
 
     private final AccountService accountService;
+    private final UserContext userContext;
 
-    public AccountController(AccountService accountService) {
+    public AccountController(AccountService accountService, UserContext userContext) {
         this.accountService = accountService;
+        this.userContext = userContext;
     }
 
     @GetMapping
     public List<AccountResponse> findAll() {
-        return accountService.findAll();
+        return accountService.findAll(userContext.currentMemberId());
     }
 
     @GetMapping("/{id}")
     public AccountResponse findById(@PathVariable Long id) {
-        return accountService.findById(id);
+        return accountService.findById(id, userContext.currentMemberId());
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public AccountResponse create(@Valid @RequestBody AccountRequest req) {
-        return accountService.create(req);
+        return accountService.create(req, userContext.currentMember());
     }
 
     @PutMapping("/{id}")
     public AccountResponse update(@PathVariable Long id, @Valid @RequestBody AccountRequest req) {
-        return accountService.update(id, req);
+        return accountService.update(id, req, userContext.currentMemberId());
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
-        accountService.delete(id);
+        accountService.delete(id, userContext.currentMemberId());
     }
 
     @GetMapping("/{id}/history")
@@ -63,7 +66,7 @@ public class AccountController {
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
-        return accountService.getHistory(id, from, to);
+        return accountService.getHistory(id, userContext.currentMemberId(), from, to);
     }
 
     @PostMapping("/{id}/snapshot")
@@ -72,17 +75,17 @@ public class AccountController {
         @PathVariable Long id,
         @Valid @RequestBody SnapshotRequest req
     ) {
-        return accountService.addManualSnapshot(id, req);
+        return accountService.addManualSnapshot(id, userContext.currentMemberId(), req);
     }
 
     @GetMapping("/{id}/holdings")
     public List<HoldingResponse> getHoldings(@PathVariable Long id) {
-        return accountService.getHoldings(id);
+        return accountService.getHoldings(id, userContext.currentMemberId());
     }
 
     @GetMapping("/{id}/transactions")
     public List<TransactionResponse> getTransactions(@PathVariable Long id) {
-        return accountService.getTransactions(id);
+        return accountService.getTransactions(id, userContext.currentMemberId());
     }
 
     @PutMapping("/{id}/real-estate")
@@ -90,7 +93,7 @@ public class AccountController {
         @PathVariable Long id,
         @Valid @RequestBody RealEstateMetadataRequest req
     ) {
-        return accountService.updateRealEstateMetadata(id, req);
+        return accountService.updateRealEstateMetadata(id, userContext.currentMemberId(), req);
     }
 
     @PutMapping("/{id}/debt")
@@ -98,6 +101,6 @@ public class AccountController {
         @PathVariable Long id,
         @Valid @RequestBody DebtRequest req
     ) {
-        return accountService.updateDebtMetadata(id, req);
+        return accountService.updateDebtMetadata(id, userContext.currentMemberId(), req);
     }
 }

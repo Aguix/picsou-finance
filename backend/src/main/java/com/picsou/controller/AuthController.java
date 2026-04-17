@@ -2,6 +2,7 @@ package com.picsou.controller;
 
 import com.picsou.config.JwtUtil;
 import com.picsou.config.RateLimitConfig;
+import com.picsou.dto.ActivationRequest;
 import com.picsou.dto.LoginRequest;
 import com.picsou.model.AppUser;
 import com.picsou.repository.AppUserRepository;
@@ -20,6 +21,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.util.Map;
 
 @RestController
@@ -68,12 +70,17 @@ public class AuthController {
             throw new BadCredentialsException("Invalid credentials");
         }
 
-        String accessToken = jwtUtil.generateAccessToken(user.getUsername());
-        String refreshToken = jwtUtil.generateRefreshToken(user.getUsername());
+        String accessToken = jwtUtil.generateAccessToken(user);
+        String refreshToken = jwtUtil.generateRefreshToken(user);
 
         setTokenCookies(httpRes, accessToken, refreshToken);
 
-        return ResponseEntity.ok(Map.of("username", user.getUsername()));
+        return ResponseEntity.ok(Map.of(
+            "username", user.getUsername(),
+            "role", user.getRole().name(),
+            "memberId", user.getMember().getId(),
+            "displayName", user.getMember().getDisplayName()
+        ));
     }
 
     @PostMapping("/refresh")
@@ -92,14 +99,22 @@ public class AuthController {
             }
 
             String username = claims.getSubject();
-            userRepository.findByUsername(username)
+            AppUser user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new BadCredentialsException("User not found"));
 
-            String newAccess = jwtUtil.generateAccessToken(username);
-            String newRefresh = jwtUtil.generateRefreshToken(username); // rotation
+            AppUser fullUser = userRepository.findByIdWithMember(user.getId())
+                .orElseThrow(() -> new BadCredentialsException("User not found"));
+
+            String newAccess = jwtUtil.generateAccessToken(fullUser);
+            String newRefresh = jwtUtil.generateRefreshToken(fullUser); // rotation
 
             setTokenCookies(httpRes, newAccess, newRefresh);
-            return ResponseEntity.ok(Map.of("username", username));
+            return ResponseEntity.ok(Map.of(
+                "username", fullUser.getUsername(),
+                "role", fullUser.getRole().name(),
+                "memberId", fullUser.getMember().getId(),
+                "displayName", fullUser.getMember().getDisplayName()
+            ));
 
         } catch (Exception ex) {
             clearTokenCookies(httpRes);
@@ -116,11 +131,9 @@ public class AuthController {
 
     @PostMapping("/change-password")
     public ResponseEntity<?> changePassword(
-        @AuthenticationPrincipal String username,
+        @AuthenticationPrincipal AppUser user,
         @Valid @RequestBody ChangePasswordRequest req
     ) {
-        AppUser user = userRepository.findByUsername(username)
-            .orElseThrow(() -> new BadCredentialsException("User not found"));
 
         if (!passwordEncoder.matches(req.currentPassword(), user.getPasswordHash())) {
             throw new BadCredentialsException("Current password is incorrect");
@@ -130,6 +143,35 @@ public class AuthController {
         userRepository.save(user);
 
         return ResponseEntity.ok(Map.of("message", "Password updated successfully"));
+    }
+
+    @PostMapping("/activate/{token}")
+    public ResponseEntity<?> activate(
+        @PathVariable String token,
+        @Valid @RequestBody ActivationRequest req
+    ) {
+        AppUser user = userRepository.findByActivationToken(token)
+            .orElseThrow(() -> new BadCredentialsException("Invalid activation token"));
+
+        if (user.getActivationTokenExpires() != null &&
+            user.getActivationTokenExpires().isBefore(Instant.now())) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", "Activation token has expired"));
+        }
+
+        if (!req.acknowledgedWarning()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", "You must acknowledge the data access warning"));
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(req.password()));
+        user.setActivationToken(null);
+        user.setActivationTokenExpires(null);
+        user.setActivated(true);
+        user.setAcknowledgedWarning(true);
+        userRepository.save(user);
+
+        return ResponseEntity.ok(Map.of("message", "Account activated successfully"));
     }
 
     // ─── Cookie helpers ───────────────────────────────────────────────────────
