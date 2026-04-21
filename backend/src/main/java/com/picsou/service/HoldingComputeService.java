@@ -49,6 +49,7 @@ public class HoldingComputeService {
 
             if (tx.getTxType() == TransactionType.BUY) {
                 netQuantity.merge(ticker, qty, BigDecimal::add);
+                // null price treated as 0; averageBuyIn will be 0, which is intentional
                 BigDecimal price = tx.getPricePerUnit() != null ? tx.getPricePerUnit() : BigDecimal.ZERO;
                 vwapNumerator.merge(ticker, qty.multiply(price), BigDecimal::add);
                 vwapDenominator.merge(ticker, qty, BigDecimal::add);
@@ -57,6 +58,11 @@ public class HoldingComputeService {
             }
         }
 
+        Map<String, AccountHolding> existingByTicker =
+            accountHoldingRepository.findByAccount_Id(account.getId())
+                .stream()
+                .collect(java.util.stream.Collectors.toMap(AccountHolding::getTicker, h -> h));
+
         List<AccountHolding> toSave = new ArrayList<>();
         List<AccountHolding> toDelete = new ArrayList<>();
 
@@ -64,8 +70,7 @@ public class HoldingComputeService {
             String ticker = entry.getKey();
             BigDecimal qty = entry.getValue();
 
-            Optional<AccountHolding> existing = accountHoldingRepository
-                    .findByAccountIdAndTicker(account.getId(), ticker);
+            Optional<AccountHolding> existing = Optional.ofNullable(existingByTicker.get(ticker));
 
             if (qty.compareTo(BigDecimal.ZERO) <= 0) {
                 existing.ifPresent(toDelete::add);
@@ -80,7 +85,6 @@ public class HoldingComputeService {
                 AccountHolding holding = existing.orElseGet(() -> AccountHolding.builder()
                         .account(account)
                         .ticker(ticker)
-                        .name(null)
                         .build());
                 holding.setQuantity(qty);
                 holding.setAverageBuyIn(averageBuyIn);

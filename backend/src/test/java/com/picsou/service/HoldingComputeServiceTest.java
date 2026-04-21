@@ -17,7 +17,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -66,8 +65,8 @@ class HoldingComputeServiceTest {
 
         when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
                 .thenReturn(List.of(buy));
-        when(accountHoldingRepository.findByAccountIdAndTicker(1L, "AAPL"))
-                .thenReturn(Optional.empty());
+        when(accountHoldingRepository.findByAccount_Id(1L))
+                .thenReturn(List.of());
 
         holdingComputeService.recomputeHoldings(account);
 
@@ -92,8 +91,8 @@ class HoldingComputeServiceTest {
 
         when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
                 .thenReturn(List.of(buy1, buy2));
-        when(accountHoldingRepository.findByAccountIdAndTicker(1L, "ETH"))
-                .thenReturn(Optional.empty());
+        when(accountHoldingRepository.findByAccount_Id(1L))
+                .thenReturn(List.of());
 
         holdingComputeService.recomputeHoldings(account);
 
@@ -115,8 +114,8 @@ class HoldingComputeServiceTest {
 
         when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
                 .thenReturn(List.of(buy, sell));
-        when(accountHoldingRepository.findByAccountIdAndTicker(1L, "BTC"))
-                .thenReturn(Optional.empty());
+        when(accountHoldingRepository.findByAccount_Id(1L))
+                .thenReturn(List.of());
 
         holdingComputeService.recomputeHoldings(account);
 
@@ -146,8 +145,8 @@ class HoldingComputeServiceTest {
 
         when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
                 .thenReturn(List.of(buy, sell));
-        when(accountHoldingRepository.findByAccountIdAndTicker(1L, "SOL"))
-                .thenReturn(Optional.of(existing));
+        when(accountHoldingRepository.findByAccount_Id(1L))
+                .thenReturn(List.of(existing));
 
         holdingComputeService.recomputeHoldings(account);
 
@@ -178,6 +177,8 @@ class HoldingComputeServiceTest {
 
         when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
                 .thenReturn(List.of(buy));
+        when(accountHoldingRepository.findByAccount_Id(1L))
+                .thenReturn(List.of());
 
         holdingComputeService.recomputeHoldings(account);
 
@@ -197,10 +198,8 @@ class HoldingComputeServiceTest {
 
         when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
                 .thenReturn(List.of(buyAapl, buyMsft));
-        when(accountHoldingRepository.findByAccountIdAndTicker(1L, "AAPL"))
-                .thenReturn(Optional.empty());
-        when(accountHoldingRepository.findByAccountIdAndTicker(1L, "MSFT"))
-                .thenReturn(Optional.empty());
+        when(accountHoldingRepository.findByAccount_Id(1L))
+                .thenReturn(List.of());
 
         holdingComputeService.recomputeHoldings(account);
 
@@ -237,6 +236,8 @@ class HoldingComputeServiceTest {
 
         when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
             .thenReturn(List.of(tx));
+        when(accountHoldingRepository.findByAccount_Id(1L))
+            .thenReturn(List.of());
 
         holdingComputeService.recomputeHoldings(account);
 
@@ -252,8 +253,8 @@ class HoldingComputeServiceTest {
 
         when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
                 .thenReturn(List.of(buy));
-        when(accountHoldingRepository.findByAccountIdAndTicker(1L, "XRP"))
-                .thenReturn(Optional.empty());
+        when(accountHoldingRepository.findByAccount_Id(1L))
+                .thenReturn(List.of());
 
         holdingComputeService.recomputeHoldings(account);
 
@@ -282,8 +283,8 @@ class HoldingComputeServiceTest {
 
         when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
                 .thenReturn(List.of(buy));
-        when(accountHoldingRepository.findByAccountIdAndTicker(1L, "NVDA"))
-                .thenReturn(Optional.of(existing));
+        when(accountHoldingRepository.findByAccount_Id(1L))
+                .thenReturn(List.of(existing));
 
         holdingComputeService.recomputeHoldings(account);
 
