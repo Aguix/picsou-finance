@@ -2,6 +2,7 @@ package com.picsou.service;
 
 import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
+import com.picsou.model.AccountType;
 import com.picsou.model.Transaction;
 import com.picsou.model.TransactionType;
 import com.picsou.repository.AccountHoldingRepository;
@@ -218,6 +219,29 @@ class HoldingComputeServiceTest {
 
         assertThat(msft.getQuantity()).isEqualByComparingTo("5");
         assertThat(msft.getAverageBuyIn()).isEqualByComparingTo("300.00000000");
+    }
+
+    @Test
+    void nullQuantity_skipped() {
+        Account account = Account.builder().id(1L).name("Test").type(AccountType.CRYPTO).currency("EUR").color("#fff").build();
+        Transaction tx = Transaction.builder()
+            .account(account)
+            .date(LocalDate.of(2024, 1, 1))
+            .description("BUY")
+            .amount(BigDecimal.ZERO)
+            .txType(TransactionType.BUY)
+            .ticker("BTC")
+            .quantity(null)  // null quantity — should be skipped
+            .pricePerUnit(new BigDecimal("50000"))
+            .build();
+
+        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
+            .thenReturn(List.of(tx));
+
+        holdingComputeService.recomputeHoldings(account);
+
+        verify(accountHoldingRepository, never()).findByAccountIdAndTicker(any(), any());
+        verify(accountHoldingRepository).saveAll(List.of());
     }
 
     @Test
