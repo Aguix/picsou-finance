@@ -337,6 +337,12 @@ export function useFinaryLogin() {
   })
 }
 
+export function useCheckFinaryTotp() {
+  return useMutation({
+    mutationFn: finaryApi.checkTotp,
+  })
+}
+
 export function useFinaryDeleteSession() {
   const queryClient = useQueryClient()
   return useMutation({

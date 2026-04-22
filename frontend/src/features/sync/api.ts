@@ -159,6 +159,9 @@ export const finaryApi = {
   login: (email: string, password: string) =>
     api.post('/finary/login', { email, password }).then(r => r.data),
 
+  checkTotp: () =>
+    api.post<{ totpRequired: boolean }>('/finary/check-totp').then(r => r.data),
+
   deleteSession: () =>
     api.delete('/finary/session').then(r => r.data),
 
