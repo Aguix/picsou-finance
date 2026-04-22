@@ -297,6 +297,7 @@ export function AccountDetailPage() {
         <AddTransactionModal
           open={showAddTx}
           onOpenChange={setShowAddTx}
+          accountId={account.id}
           accountType={account.type}
           onSubmit={async (data) => { await addTxMutation.mutateAsync(data) }}
           isLoading={addTxMutation.isPending}

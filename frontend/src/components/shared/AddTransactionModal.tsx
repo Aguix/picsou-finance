@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -6,20 +6,23 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2 } from 'lucide-react'
 import type { AccountType, TransactionRequest } from '@/types/api'
+import { useAccountHoldings } from '@/features/accounts/hooks'
 
 const INVESTMENT_TYPES: AccountType[] = ['PEA', 'COMPTE_TITRES', 'CRYPTO']
 
 interface AddTransactionModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  accountId: number
   accountType: AccountType
   onSubmit: (data: TransactionRequest) => Promise<void>
   isLoading?: boolean
 }
 
-export function AddTransactionModal({ open, onOpenChange, accountType, onSubmit, isLoading }: AddTransactionModalProps) {
+export function AddTransactionModal({ open, onOpenChange, accountId, accountType, onSubmit, isLoading }: AddTransactionModalProps) {
   const { t } = useTranslation()
   const isInvestment = INVESTMENT_TYPES.includes(accountType)
+  const { data: holdings } = useAccountHoldings(isInvestment ? accountId : 0)
 
   // Shared state
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
@@ -32,8 +35,16 @@ export function AddTransactionModal({ open, onOpenChange, accountType, onSubmit,
   // Investment fields
   const [investType, setInvestType] = useState<'BUY' | 'SELL'>('BUY')
   const [ticker, setTicker] = useState('')
+  const [name, setName] = useState('')
   const [quantity, setQuantity] = useState('')
   const [pricePerUnit, setPricePerUnit] = useState('')
+
+  // Auto-fill name from existing holdings when ticker matches
+  useEffect(() => {
+    if (!holdings || !ticker) return
+    const match = holdings.find(h => h.ticker.toUpperCase() === ticker.toUpperCase())
+    if (match?.name) setName(match.name)
+  }, [ticker, holdings])
 
   const total = quantity && pricePerUnit
     ? (parseFloat(quantity) * parseFloat(pricePerUnit)).toFixed(2)
@@ -46,6 +57,7 @@ export function AddTransactionModal({ open, onOpenChange, accountType, onSubmit,
     setCashAmount('')
     setInvestType('BUY')
     setTicker('')
+    setName('')
     setQuantity('')
     setPricePerUnit('')
   }
@@ -61,7 +73,7 @@ export function AddTransactionModal({ open, onOpenChange, accountType, onSubmit,
       const amount = investType === 'BUY' ? -(qty * price) : (qty * price)
       data = {
         date,
-        description: description || (investType === 'BUY' ? `Achat ${ticker}` : `Vente ${ticker}`),
+        description: name || (investType === 'BUY' ? `Achat ${ticker}` : `Vente ${ticker}`),
         amount,
         txType: investType,
         ticker: ticker.toUpperCase(),
@@ -84,7 +96,6 @@ export function AddTransactionModal({ open, onOpenChange, accountType, onSubmit,
     onOpenChange(false)
   }
 
-  // suppress unused warning — t is used for future i18n
   void t
 
   return (
@@ -121,6 +132,10 @@ export function AddTransactionModal({ open, onOpenChange, accountType, onSubmit,
                 <Input placeholder="BTC, IWDA.AS…" value={ticker} onChange={e => setTicker(e.target.value)} required />
               </div>
               <div className="space-y-1">
+                <Label>Nom <span className="text-muted-foreground text-xs">(optionnel)</span></Label>
+                <Input placeholder="Ex : iShares Core MSCI World" value={name} onChange={e => setName(e.target.value)} />
+              </div>
+              <div className="space-y-1">
                 <Label>Quantité</Label>
                 <Input type="number" step="any" min="0" value={quantity} onChange={e => setQuantity(e.target.value)} required />
               </div>
@@ -129,10 +144,6 @@ export function AddTransactionModal({ open, onOpenChange, accountType, onSubmit,
                 <Input type="number" step="any" min="0" value={pricePerUnit} onChange={e => setPricePerUnit(e.target.value)} required />
               </div>
               <p className="text-sm text-muted-foreground">Total : {total} €</p>
-              <div className="space-y-1">
-                <Label>Description (optionnel)</Label>
-                <Input value={description} onChange={e => setDescription(e.target.value)} />
-              </div>
             </>
           ) : (
             <>
