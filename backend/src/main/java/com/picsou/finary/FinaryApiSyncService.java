@@ -384,7 +384,14 @@ public class FinaryApiSyncService {
      */
     public FinaryAutoSyncResponse autoSync(Long memberId) {
         Optional<FinarySession> sessionOpt = finarySessionRepository.findByMemberId(memberId);
-        if (sessionOpt.isEmpty() || !"CONNECTED".equals(sessionOpt.get().getStatus())) {
+        if (sessionOpt.isEmpty()) {
+            return new FinaryAutoSyncResponse("NOT_CONNECTED", 0, 0);
+        }
+        FinarySession existingSession = sessionOpt.get();
+        if ("TOTP_REQUIRED".equals(existingSession.getStatus())) {
+            return new FinaryAutoSyncResponse("TOTP_REQUIRED", 0, 0);
+        }
+        if (!"CONNECTED".equals(existingSession.getStatus())) {
             return new FinaryAutoSyncResponse("NOT_CONNECTED", 0, 0);
         }
         try {
@@ -396,9 +403,8 @@ public class FinaryApiSyncService {
                 return new FinaryAutoSyncResponse("NEEDS_MAPPING", 0, preview.accounts().size());
             }
         } catch (TotpRequiredException e) {
-            FinarySession session = sessionOpt.get();
-            session.setStatus("TOTP_REQUIRED");
-            finarySessionRepository.save(session);
+            existingSession.setStatus("TOTP_REQUIRED");
+            finarySessionRepository.save(existingSession);
             return new FinaryAutoSyncResponse("TOTP_REQUIRED", 0, 0);
         } catch (SyncException e) {
             log.error("Finary auto-sync failed for member {}: {}", memberId, e.getMessage(), e);

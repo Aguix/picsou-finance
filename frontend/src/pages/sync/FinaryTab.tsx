@@ -73,6 +73,7 @@ export function FinaryTab() {
   const autoSyncMutation = useFinaryAutoSync()
 
   const isConnected = connectionStatus?.connected ?? false
+  const isTotpRequired = connectionStatus?.status === 'TOTP_REQUIRED'
 
   // Wizard state
   const [step, setStep] = useState<WizardStep>(1)
@@ -346,9 +347,15 @@ export function FinaryTab() {
         <Card size="sm">
           <CardContent className="flex items-center justify-between py-4">
             <div className="flex items-center gap-3">
-              <Badge className="bg-green-500/10 text-green-600 dark:text-green-400">
-                {t('sync.finary.connected')}
-              </Badge>
+              {isTotpRequired ? (
+                <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  {t('sync.finary.totpRequired')}
+                </Badge>
+              ) : (
+                <Badge className="bg-green-500/10 text-green-600 dark:text-green-400">
+                  {t('sync.finary.connected')}
+                </Badge>
+              )}
               <span className="text-sm text-muted-foreground">{connectionStatus.maskedEmail}</span>
               {connectionStatus.lastSyncedAt && (
                 <span className="text-xs text-muted-foreground">
@@ -463,7 +470,7 @@ export function FinaryTab() {
                 </Button>
               </div>
 
-              {totpRequired && (
+              {(totpRequired || isTotpRequired) && (
                 <div className="flex gap-2">
                   <div className="flex-1">
                     <Label htmlFor="finary-totp">{t('sync.finary.totp')}</Label>
