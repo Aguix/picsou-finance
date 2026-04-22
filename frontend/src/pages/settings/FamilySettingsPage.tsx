@@ -62,7 +62,7 @@ function MemberManagement() {
         <div className="space-y-2">
           {members?.map((member) => {
             const isOwnProfile = member.id === user?.memberId
-            const isIndependent = member.hasLogin && member.activated
+            const isIndependent = member.managed && member.hasLogin && member.activated
 
             return (
               <div key={member.id} className="flex items-center justify-between rounded-lg border p-3">
