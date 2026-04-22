@@ -387,7 +387,7 @@ export function useExecuteFinaryApiSync() {
 export function useFinaryAutoSync() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (totp?: string) => finaryApi.autoSync(totp),
+    mutationFn: () => finaryApi.autoSync(),
     onSuccess: (data) => {
       if (data.status === 'OK') {
         queryClient.invalidateQueries({ queryKey: ['accounts'] })

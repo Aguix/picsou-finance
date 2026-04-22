@@ -135,6 +135,8 @@ export function FinaryTab() {
           handleApiSyncPreview()
         } else if (data.status === 'TOTP_REQUIRED') {
           setTotpRequired(true)
+        } else {
+          setError(t('sync.finary.notConnected'))
         }
       },
       onError: (err: any) => {

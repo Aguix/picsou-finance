@@ -183,8 +183,8 @@ export const finaryApi = {
       .post<FinaryImportResultResponse>('/finary/api-sync/execute', { syncToken, mappings })
       .then(r => r.data),
 
-  autoSync: (totp?: string) =>
+  autoSync: () =>
     api
-      .post<FinaryAutoSyncResponse>(`/finary/api-sync/auto${totp ? `?totp=${totp}` : ''}`)
+      .post<FinaryAutoSyncResponse>('/finary/api-sync/auto')
       .then(r => r.data),
 }
