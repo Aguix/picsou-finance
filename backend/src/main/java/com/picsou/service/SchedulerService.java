@@ -1,5 +1,7 @@
 package com.picsou.service;
 
+import com.picsou.dto.FinaryAutoSyncResponse;
+import com.picsou.finary.FinaryApiSyncService;
 import com.picsou.model.Account;
 import com.picsou.model.BalanceSnapshot;
 import com.picsou.model.FamilyMember;
@@ -30,9 +32,11 @@ public class SchedulerService {
     private final AccountService accountService;
     private final SyncService syncService;
     private final TradeRepublicSyncService trSyncService;
+    private final BoursoSyncService boursoSyncService;
     private final PriceService priceService;
     private final CryptoExchangeSyncService cryptoExchangeSyncService;
     private final WalletSyncService walletSyncService;
+    private final FinaryApiSyncService finaryApiSyncService;
 
     public SchedulerService(
         AccountRepository accountRepository,
@@ -41,9 +45,11 @@ public class SchedulerService {
         AccountService accountService,
         SyncService syncService,
         TradeRepublicSyncService trSyncService,
+        BoursoSyncService boursoSyncService,
         PriceService priceService,
         CryptoExchangeSyncService cryptoExchangeSyncService,
-        WalletSyncService walletSyncService
+        WalletSyncService walletSyncService,
+        FinaryApiSyncService finaryApiSyncService
     ) {
         this.accountRepository = accountRepository;
         this.snapshotRepository = snapshotRepository;
@@ -51,9 +57,11 @@ public class SchedulerService {
         this.accountService = accountService;
         this.syncService = syncService;
         this.trSyncService = trSyncService;
+        this.boursoSyncService = boursoSyncService;
         this.priceService = priceService;
         this.cryptoExchangeSyncService = cryptoExchangeSyncService;
         this.walletSyncService = walletSyncService;
+        this.finaryApiSyncService = finaryApiSyncService;
     }
 
     /**
@@ -76,6 +84,7 @@ public class SchedulerService {
             }
 
             trSyncService.resyncIfSessionActive(memberId);
+            boursoSyncService.resyncIfSessionActive(memberId);
 
             try {
                 cryptoExchangeSyncService.resyncAll(memberId);
@@ -87,6 +96,17 @@ public class SchedulerService {
                 walletSyncService.resyncAll(memberId);
             } catch (Exception ex) {
                 log.error("Daily wallet sync failed for member {}", memberId, ex);
+            }
+
+            try {
+                FinaryAutoSyncResponse finaryResult = finaryApiSyncService.autoSync(memberId);
+                if ("NEEDS_MAPPING".equals(finaryResult.status())) {
+                    log.info("Finary auto-sync for member {} found new accounts, manual mapping required", memberId);
+                } else if ("OK".equals(finaryResult.status())) {
+                    log.info("Finary auto-sync completed for member {}: {} accounts synced", memberId, finaryResult.accountsSynced());
+                }
+            } catch (Exception ex) {
+                log.error("Daily Finary auto-sync failed for member {}", memberId, ex);
             }
         }
     }

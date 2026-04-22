@@ -67,6 +67,7 @@ public class FinaryPersistenceHelper {
             LocalDate today = LocalDate.now();
             balanceSnapshotRepository.findByAccountIdAndDate(account.getId(), today)
                 .ifPresent(balanceSnapshotRepository::delete);
+            balanceSnapshotRepository.flush();
             balanceSnapshotRepository.save(BalanceSnapshot.builder()
                 .account(account)
                 .date(today)
@@ -76,9 +77,9 @@ public class FinaryPersistenceHelper {
             return 1;
         }
 
-        // Delete existing snapshots for this account
-        balanceSnapshotRepository.findRecentByAccountId(account.getId(), LocalDate.of(2000, 1, 1))
-            .forEach(balanceSnapshotRepository::delete);
+        // Delete existing snapshots for this account (batch delete executes immediately)
+        List<BalanceSnapshot> existing = balanceSnapshotRepository.findRecentByAccountId(account.getId(), LocalDate.of(2000, 1, 1));
+        balanceSnapshotRepository.deleteAllInBatch(existing);
 
         int count = 0;
         BigDecimal runningBalance = finaryAcc.balance();
@@ -123,7 +124,7 @@ public class FinaryPersistenceHelper {
     public int importTransactions(Account account, ParsedFinaryAccount finaryAcc,
                                   List<ParsedFinaryTransaction> allTransactions) {
         // Delete existing transactions for this account
-        transactionRepository.deleteByAccountId(account.getId());
+        transactionRepository.deleteByAccountIdAndIsManualFalse(account.getId());
 
         List<ParsedFinaryTransaction> accountTx = allTransactions.stream()
             .filter(tx -> tx.accountName().equalsIgnoreCase(finaryAcc.name()))
@@ -147,6 +148,68 @@ public class FinaryPersistenceHelper {
 
         transactionRepository.saveAll(toInsert);
         return toInsert.size();
+    }
+
+    /**
+     * Reconstruct balance snapshots from already-persisted Transaction entities.
+     * Same algorithm as reconstructSnapshots() but reads from DB instead of parsed DTOs.
+     */
+    public int reconstructSnapshotsFromDb(Account account) {
+        List<Transaction> accountTx = transactionRepository.findByAccountIdOrderByDateDesc(account.getId());
+        BigDecimal currentBalance = account.getCurrentBalance();
+
+        if (accountTx.isEmpty()) {
+            LocalDate today = LocalDate.now();
+            balanceSnapshotRepository.findByAccountIdAndDate(account.getId(), today)
+                .ifPresent(balanceSnapshotRepository::delete);
+            balanceSnapshotRepository.flush();
+            balanceSnapshotRepository.save(BalanceSnapshot.builder()
+                .account(account)
+                .date(today)
+                .balance(currentBalance)
+                .investedAmount(currentBalance)
+                .build());
+            return 1;
+        }
+
+        // Delete existing snapshots for this account (batch delete executes immediately)
+        List<BalanceSnapshot> existing = balanceSnapshotRepository.findRecentByAccountId(account.getId(), LocalDate.of(2000, 1, 1));
+        balanceSnapshotRepository.deleteAllInBatch(existing);
+
+        int count = 0;
+        BigDecimal runningBalance = currentBalance;
+
+        // Anchor: today with current balance
+        LocalDate today = LocalDate.now();
+        balanceSnapshotRepository.save(BalanceSnapshot.builder()
+            .account(account)
+            .date(today)
+            .balance(runningBalance)
+            .investedAmount(runningBalance)
+            .build());
+        count++;
+
+        // Walk backwards through transactions
+        Map<LocalDate, BigDecimal> snapshots = new LinkedHashMap<>();
+        for (Transaction tx : accountTx) {
+            runningBalance = runningBalance.subtract(tx.getAmount());
+            snapshots.put(tx.getDate(), runningBalance);
+        }
+
+        // Remove today to avoid duplicate with anchor
+        snapshots.remove(today);
+
+        for (Map.Entry<LocalDate, BigDecimal> entry : snapshots.entrySet()) {
+            balanceSnapshotRepository.save(BalanceSnapshot.builder()
+                .account(account)
+                .date(entry.getKey())
+                .balance(entry.getValue())
+                .investedAmount(entry.getValue())
+                .build());
+            count++;
+        }
+
+        return count;
     }
 
     /**

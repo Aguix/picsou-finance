@@ -1,6 +1,7 @@
 package com.picsou.controller;
 
 import com.picsou.dto.FinaryApiSyncExecuteRequest;
+import com.picsou.dto.FinaryAutoSyncResponse;
 import com.picsou.dto.FinaryConnectionStatusResponse;
 import com.picsou.dto.FinaryImportResultResponse;
 import com.picsou.dto.FinaryLoginRequest;
@@ -61,5 +62,14 @@ public class FinaryApiSyncController {
     @PostMapping("/api-sync/execute")
     public FinaryImportResultResponse apiSyncExecute(@RequestBody FinaryApiSyncExecuteRequest request) {
         return finaryApiSyncService.execute(request.syncToken(), request.mappings(), userContext.currentMemberId());
+    }
+
+    /**
+     * Auto-sync: runs preview + execute in one step if all accounts are already mapped.
+     * Returns NEEDS_MAPPING if new accounts are discovered (user must go through mapping UI).
+     */
+    @PostMapping("/api-sync/auto")
+    public FinaryAutoSyncResponse apiSyncAuto() {
+        return finaryApiSyncService.autoSync(userContext.currentMemberId());
     }
 }

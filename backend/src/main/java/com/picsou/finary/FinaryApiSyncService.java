@@ -4,6 +4,7 @@ import com.picsou.config.CryptoEncryption;
 import com.picsou.dto.*;
 import com.picsou.exception.ResourceNotFoundException;
 import com.picsou.exception.SyncException;
+import com.picsou.exception.TotpRequiredException;
 import com.picsou.finary.client.FinaryApiClient;
 import com.picsou.finary.dto.FinaryAccountDto;
 import com.picsou.finary.dto.FinaryTransactionDto;
@@ -234,7 +235,7 @@ public class FinaryApiSyncService {
             log.info("Preview ready: {} accounts, {} total transactions, autoMapped={}", allAccounts.size(), totalTx, allAutoMapped);
             return new FinaryPreviewResponse(previews, existing, totalTx, syncToken, allAutoMapped, suggestedMappings);
 
-        } catch (SyncException e) {
+        } catch (SyncException | TotpRequiredException e) {
             throw e;
         } catch (Exception e) {
             log.error("Finary API preview failed: {}", e.getMessage(), e);
@@ -354,6 +355,7 @@ public class FinaryApiSyncService {
                         .collect(Collectors.toList());
 
                     transactionsImported += persistenceHelper.importTransactions(finalAccount, fakeAcc, parsedTx);
+                    persistenceHelper.reconstructSnapshotsFromDb(finalAccount);
                 }
 
                 imported.add(new ImportedAccountSummary(
@@ -370,6 +372,39 @@ public class FinaryApiSyncService {
             accountsCreated, accountsMapped, accountsSkipped,
             0, transactionsImported, imported
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Auto-sync
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Auto-sync: preview + execute in one step if all accounts are already mapped.
+     * Returns NEEDS_MAPPING if new accounts are discovered (user must go through mapping UI).
+     */
+    @Transactional
+    public FinaryAutoSyncResponse autoSync(Long memberId) {
+        Optional<FinarySession> sessionOpt = finarySessionRepository.findByMemberId(memberId);
+        if (sessionOpt.isEmpty() || !"CONNECTED".equals(sessionOpt.get().getStatus())) {
+            return new FinaryAutoSyncResponse("NOT_CONNECTED", 0, 0);
+        }
+        try {
+            FinaryPreviewResponse preview = preview(null, memberId);
+            if (preview.autoMapped()) {
+                FinaryImportResultResponse result = execute(preview.fileToken(), preview.suggestedMappings(), memberId);
+                return new FinaryAutoSyncResponse("OK", result.accountsCreated() + result.accountsMapped(), 0);
+            } else {
+                return new FinaryAutoSyncResponse("NEEDS_MAPPING", 0, preview.accounts().size());
+            }
+        } catch (TotpRequiredException e) {
+            FinarySession session = sessionOpt.get();
+            session.setStatus("TOTP_REQUIRED");
+            finarySessionRepository.save(session);
+            return new FinaryAutoSyncResponse("TOTP_REQUIRED", 0, 0);
+        } catch (RuntimeException e) {
+            log.error("Finary auto-sync failed for member {}: {}", memberId, e.getMessage(), e);
+            throw new SyncException("Finary auto-sync failed: " + e.getMessage(), e);
+        }
     }
 
     // ---------------------------------------------------------------------------
