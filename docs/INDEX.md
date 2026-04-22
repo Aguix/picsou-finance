@@ -41,12 +41,15 @@
 | Goals — Grid view (donuts) | 2026-04-08 | [goal-calendar-donut.md](./features/goal-calendar-donut.md) |
 | Price service | 2026-04-04 | [price-service.md](./features/price-service.md) |
 | Live prices (holdings) | 2026-04-13 | [live-prices-holdings.md](./features/live-prices-holdings.md) |
-| Finary import | 2026-04-04 | [finary-import.md](./features/finary-import.md) |
+| Finary import + auto-sync | 2026-04-21 | [finary-import.md](./features/finary-import.md) |
+| Manual transactions + holdings derivation | 2026-04-21 | [manual-transactions.md](./features/manual-transactions.md) |
+| BoursoBank sync | 2026-04-21 | [bourso-bank.md](./features/bourso-bank.md) |
 | Accounts overview (PnL chart + summary card + filters) | 2026-04-13 | [accounts-overview.md](./features/accounts-overview.md) |
 | Add Account modal (unified sync + manual) | 2026-04-09 | [add-account-modal.md](./features/add-account-modal.md) |
 | Docker deployment (all-in-one image) | 2026-04-16 | [docker-deployment.md](./features/docker-deployment.md) |
 | Navigation (sidebar + mobile bottom nav) | 2026-04-13 | [sidebar-navigation.md](./features/sidebar-navigation.md) |
 | Multi-account family system | 2026-04-18 | [multi-account-family.md](./features/multi-account-family.md) |
+| 24H Intraday net worth chart | 2026-04-18 | [intraday-chart.md](./features/intraday-chart.md) |
 
 ## Conventions
 

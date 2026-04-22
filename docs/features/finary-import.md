@@ -1,10 +1,10 @@
 # Feature: Finary Import
 
-> Last updated: 2026-04-04
+> Last updated: 2026-04-21
 
 ## Context
 
-Finary is a French personal finance app. Picsou supports importing data from Finary via two methods: uploading an xlsx export file, or direct API sync using Finary credentials. Both methods use a two-phase flow (preview then execute) to let users review and map accounts before committing. Daily auto-sync is available via the scheduler.
+Finary is a French personal finance app. Picsou supports importing data from Finary via two methods: uploading an xlsx export file, or direct API sync using Finary credentials. Both methods use a two-phase flow (preview then execute) to let users review and map accounts before committing. Once accounts are mapped, a one-click auto-sync skips the mapping UI and syncs in the background, running daily via the scheduler.
 
 ## How it works
 
@@ -22,6 +22,7 @@ The user exports their Finary data as an xlsx file and uploads it via the API. T
 Authenticates directly with Finary via Clerk (their auth provider) and fetches accounts + transactions through the Finary API.
 
 - **Authentication**: `FinaryApiClient.authenticate()` performs a 6-step Clerk OAuth flow: GET environment, GET client, POST sign_ins, (optionally POST TOTP), POST session touch, POST tokens. Returns a JWT for API calls.
+- **TOTP/2FA handling**: When Clerk returns `needs_second_factor`, the backend throws `TotpRequiredException` → HTTP 403. The frontend detects 403 on the preview mutation, shows a TOTP input field, then retries with `?totp={code}` as query parameter.
 - **Preview**: `preview(totp)` authenticates, fetches accounts from all 10 categories, fetches transactions (paginated, 200 per page), caches everything with a `syncToken`, returns previews.
 - **Execute**: `execute(syncToken, mappings)` retrieves cached data, applies user mappings, creates/updates accounts, imports transactions.
 
@@ -41,20 +42,35 @@ Type suggestions are auto-computed from the Finary category via `FinaryPersisten
 - `FinaryApiSyncService` uses a `ConcurrentHashMap` with 10-minute expiry (cleaned every 60s by `@Scheduled`).
 - Cache tokens are UUIDs. The preview+execute must complete within the TTL or the user must re-upload.
 
-### Daily auto-sync
+### Auto-sync
 
-`SchedulerService.dailyFinaryAutoSync()` runs at midnight. It calls `FinaryApiSyncService.preview(null)` (no TOTP), then auto-maps accounts by case-insensitive name matching against existing Picsou accounts. Unmatched accounts are created with default types. Requires TOTP to be disabled on the Finary account.
+`FinaryApiSyncService.autoSync(memberId)` is the fast path when all Finary accounts are already known to Picsou (i.e., every account returned by the preview has a matching `externalAccountId` in the DB):
+
+1. Runs the preview phase (authenticate + fetch).
+2. Checks `autoMapped` flag: if all accounts have an `externalAccountId` match, auto-generates the `MAP_EXISTING` mappings and calls `execute()` directly.
+3. If any new account is found: returns `{ status: "NEEDS_MAPPING" }` — the user must go through the mapping UI.
+4. If Finary requires TOTP: sets `FinarySession.status = "TOTP_REQUIRED"` and returns gracefully.
+
+**REST endpoint:** `POST /api/finary/api-sync/auto` → `FinaryAutoSyncResponse { status, accountsSynced, newAccountCount }`
+
+Possible status values: `OK`, `NEEDS_MAPPING`, `TOTP_REQUIRED`, `NOT_CONNECTED`.
+
+**Scheduler:** `SchedulerService.dailyBankSync()` calls `autoSync()` for each family member at 08:00 UTC. If it returns `NEEDS_MAPPING`, a warning is logged and the user must sync manually. If `TOTP_REQUIRED`, the session is flagged and the user must re-authenticate.
+
+**Frontend:** The "Sync Finary" button in `FinaryTab` calls `POST /api/finary/api-sync/auto`. On `OK` it shows a success toast. On `NEEDS_MAPPING` it falls through to the full preview+mapping wizard. On `TOTP_REQUIRED` it shows the TOTP input and the user retries via the preview endpoint.
 
 ### Key files
 
 - `service/FinaryImportService.java` -- XLSX file import (Apache POI parsing, two-phase flow)
-- `finary/FinaryApiSyncService.java` -- Direct API sync (Clerk auth, two-phase flow, cache)
-- `finary/client/FinaryApiClient.java` -- Finary/Clerk HTTP client (6-step auth, pagination)
-- `finary/FinaryPersistenceHelper.java` -- Shared helper: account creation, snapshot reconstruction, transaction import, type suggestion
+- `finary/FinaryApiSyncService.java` -- Direct API sync (Clerk auth, two-phase flow, cache, `autoSync()`)
+- `finary/client/FinaryApiClient.java` -- Finary/Clerk HTTP client (6-step auth, TOTP, pagination)
+- `exception/TotpRequiredException.java` -- Thrown when 2FA is required but no TOTP provided (returns 403)
+- `finary/FinaryPersistenceHelper.java` -- Shared helper: account creation, snapshot reconstruction, transaction import (preserves manual transactions), type suggestion
 - `controller/FinaryImportController.java` -- REST endpoints for xlsx upload
-- `controller/FinaryApiSyncController.java` -- REST endpoints for API sync
+- `controller/FinaryApiSyncController.java` -- REST endpoints for API sync (`/preview`, `/execute`, `/auto`)
 - `finary/dto/` -- 13 DTOs for Finary API responses
 - `finary/SyncSessionData.java` -- Cache record for API sync session
+- `dto/FinaryAutoSyncResponse.java` -- Response DTO for `/api/finary/api-sync/auto`
 
 ### Flow
 
@@ -87,12 +103,26 @@ FinaryImportService.executeImport(fileToken + mappings)
         +-- Return result (counts + imported accounts)
 
 API Sync:
-User triggers sync (optional TOTP)
+User triggers sync (no TOTP first attempt)
         |
         v
-FinaryApiSyncService.preview(totp)
+POST /api/finary/api-sync/preview
         |
         +-- FinaryApiClient.authenticate() via Clerk (6 steps)
+        |
+        +-- If Clerk returns "needs_second_factor" and no TOTP provided:
+        |       throw TotpRequiredException → HTTP 403
+        |
+        v
+Frontend receives 403 → shows TOTP input
+        |
+        v
+User enters 6-digit TOTP code
+        |
+        v
+POST /api/finary/api-sync/preview?totp={code}
+        |
+        +-- Clerk completes second factor with TOTP
         +-- Fetch accounts from all 10 categories
         +-- Fetch transactions (paginated, 200/page)
         +-- Cache with syncToken (10-min TTL)
@@ -109,15 +139,23 @@ FinaryApiSyncService.execute(syncToken + mappings)
         +-- Remove from cache
         +-- Return result
 
-Auto-sync (daily at midnight):
+Auto-sync (button or daily at 08:00):
         |
         v
-SchedulerService.dailyFinaryAutoSync()
+POST /api/finary/api-sync/auto
         |
-        +-- FinaryApiSyncService.preview(null) -- no TOTP
-        +-- Auto-map: match by account name (case-insensitive)
-        +-- CREATE_NEW for unmatched
-        +-- FinaryApiSyncService.execute()
+        +-- FinaryApiSyncService.autoSync(memberId)
+        +-- preview() -- authenticate + fetch (no TOTP)
+        |
+        +-- If TOTP required:
+        |       status = TOTP_REQUIRED, session flagged
+        |
+        +-- If new accounts found (autoMapped = false):
+        |       status = NEEDS_MAPPING → user goes through mapping UI
+        |
+        +-- All accounts already mapped (autoMapped = true):
+                execute() -- MAP_EXISTING for all
+                status = OK, accountsSynced = N
 ```
 
 ## Technical choices
@@ -128,11 +166,14 @@ SchedulerService.dailyFinaryAutoSync()
 | ConcurrentHashMap cache | Simple, no Redis dependency, single-user app | Redis or DB-backed cache (overkill) |
 | Apache POI for xlsx | Standard Java library for Excel; Finary exports in xlsx format | CSV parsing (Finary does not export CSV) |
 | Clerk auth flow reimplemented | Finary uses Clerk for auth; no official API; must reverse-engineer the 6-step flow | Finary API key (does not exist) |
+| `TotpRequiredException` → 403 | Frontend already checks for 403 on preview mutations; 401 would trigger the Picsou JWT refresh flow which is wrong | Using 401 (conflicts with Picsou auth refresh), using 502 (frontend can't distinguish from real errors) |
 | Auto-mapping by name | Simple heuristic that works for most cases after first manual import | ML-based matching (unnecessary complexity) |
 
 ## Gotchas / Pitfalls
 
-- **TOTP must be disabled for auto-sync**: `dailyFinaryAutoSync()` passes `null` for TOTP. If 2FA is enabled on the Finary account, auto-sync will fail silently (logged as warning).
+- **TOTP must be disabled for background auto-sync**: `autoSync()` passes `null` for TOTP. If 2FA is enabled on the Finary account, auto-sync returns `TOTP_REQUIRED` and the session is flagged. The user must re-authenticate interactively (via the preview endpoint with TOTP). For interactive sync via the frontend button, the TOTP input is shown and the user retries through the preview flow.
+- **Manual transactions survive Finary re-syncs**: `FinaryPersistenceHelper.importTransactions()` calls `deleteByAccountIdAndIsManualFalse()` instead of `deleteByAccountId()`. Manually-added transactions are preserved across any number of re-syncs.
+- **TOTP is a query parameter**: The TOTP code is sent as `?totp={code}` on the POST preview request. This avoids body parsing complexity but means the code is visible in server access logs.
 - **Preview tokens expire quickly**: XLSX tokens expire after 30 minutes, API sync tokens after 10 minutes. Users must complete the mapping within that window or re-upload.
 - **Clerk API version is hardcoded**: The `__clerk_api_version` and `_clerk_js_version` query parameters are hardcoded in `FinaryApiClient`. If Clerk updates, these may need to be updated.
 - **Account name matching is case-insensitive but exact**: Auto-mapping matches Finary account name to Picsou account name. If the user renamed an account in Picsou, it won't match.
