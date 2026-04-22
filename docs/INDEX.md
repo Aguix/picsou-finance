@@ -49,6 +49,7 @@
 | Docker deployment (all-in-one image) | 2026-04-16 | [docker-deployment.md](./features/docker-deployment.md) |
 | Navigation (sidebar + mobile bottom nav) | 2026-04-13 | [sidebar-navigation.md](./features/sidebar-navigation.md) |
 | Multi-account family system | 2026-04-22 | [multi-account-family.md](./features/multi-account-family.md) |
+| CORS & cookie security | 2026-04-22 | [security-cors-cookies.md](./features/security-cors-cookies.md) |
 | 24H Intraday net worth chart | 2026-04-18 | [intraday-chart.md](./features/intraday-chart.md) |
 
 ## Conventions
