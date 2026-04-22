@@ -129,7 +129,8 @@ public class AuthController {
     @PatchMapping("/username")
     public ResponseEntity<?> changeUsername(
         @AuthenticationPrincipal AppUser user,
-        @Valid @RequestBody ChangeUsernameRequest req
+        @Valid @RequestBody ChangeUsernameRequest req,
+        HttpServletResponse httpRes
     ) {
         String newUsername = req.newUsername().trim();
         if (newUsername.equals(user.getUsername())) {
@@ -142,6 +143,9 @@ public class AuthController {
         }
         user.setUsername(newUsername);
         userRepository.save(user);
+        String newAccess = jwtUtil.generateAccessToken(user);
+        String newRefresh = jwtUtil.generateRefreshToken(user);
+        setTokenCookies(httpRes, newAccess, newRefresh);
         return ResponseEntity.ok(Map.of("username", newUsername));
     }
 
