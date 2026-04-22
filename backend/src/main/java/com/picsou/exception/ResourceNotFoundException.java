@@ -20,4 +20,8 @@ public class ResourceNotFoundException extends RuntimeException {
     public static ResourceNotFoundException requisition(String requisitionId) {
         return new ResourceNotFoundException("Requisition not found: " + requisitionId);
     }
+
+    public static ResourceNotFoundException transaction(Long id) {
+        return new ResourceNotFoundException("Transaction not found: " + id);
+    }
 }

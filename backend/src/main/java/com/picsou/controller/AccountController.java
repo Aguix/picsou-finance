@@ -8,9 +8,11 @@ import com.picsou.dto.HoldingResponse;
 import com.picsou.dto.RealEstateMetadataRequest;
 import com.picsou.dto.RealEstateMetadataResponse;
 import com.picsou.dto.SnapshotRequest;
+import com.picsou.dto.TransactionRequest;
 import com.picsou.dto.TransactionResponse;
 import com.picsou.model.BalanceSnapshot;
 import com.picsou.service.AccountService;
+import com.picsou.service.ManualTransactionService;
 import com.picsou.service.UserContext;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -27,10 +29,12 @@ public class AccountController {
 
     private final AccountService accountService;
     private final UserContext userContext;
+    private final ManualTransactionService manualTransactionService;
 
-    public AccountController(AccountService accountService, UserContext userContext) {
+    public AccountController(AccountService accountService, UserContext userContext, ManualTransactionService manualTransactionService) {
         this.accountService = accountService;
         this.userContext = userContext;
+        this.manualTransactionService = manualTransactionService;
     }
 
     @GetMapping
@@ -86,6 +90,21 @@ public class AccountController {
     @GetMapping("/{id}/transactions")
     public List<TransactionResponse> getTransactions(@PathVariable Long id) {
         return accountService.getTransactions(id, userContext.currentMemberId());
+    }
+
+    @PostMapping("/{id}/transactions")
+    @ResponseStatus(HttpStatus.CREATED)
+    public TransactionResponse addTransaction(
+        @PathVariable Long id,
+        @Valid @RequestBody TransactionRequest req
+    ) {
+        return manualTransactionService.addTransaction(id, userContext.currentMemberId(), req);
+    }
+
+    @DeleteMapping("/{id}/transactions/{txId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteTransaction(@PathVariable Long id, @PathVariable Long txId) {
+        manualTransactionService.deleteTransaction(id, txId, userContext.currentMemberId());
     }
 
     @PutMapping("/{id}/real-estate")
