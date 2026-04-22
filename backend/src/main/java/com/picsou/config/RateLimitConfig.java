@@ -38,6 +38,14 @@ public class RateLimitConfig {
         return new ConcurrentHashMap<>();
     }
 
+    /**
+     * Per-IP BoursoBank auth rate limiter: 5 attempts per 15 minutes.
+     */
+    @Bean("boursoAuthBuckets")
+    public Map<String, Bucket> boursoAuthBuckets() {
+        return new ConcurrentHashMap<>();
+    }
+
     public static Bucket createLoginBucket() {
         return Bucket.builder()
             .addLimit(Bandwidth.builder()
@@ -61,6 +69,15 @@ public class RateLimitConfig {
             .addLimit(Bandwidth.builder()
                 .capacity(3)
                 .refillIntervally(3, Duration.ofMinutes(10))
+                .build())
+            .build();
+    }
+
+    public static Bucket createBoursoAuthBucket() {
+        return Bucket.builder()
+            .addLimit(Bandwidth.builder()
+                .capacity(5)
+                .refillIntervally(5, Duration.ofMinutes(15))
                 .build())
             .build();
     }
