@@ -208,7 +208,7 @@ public class AuthController {
 
     private void addCookie(HttpServletResponse response, String name, String value, int maxAge) {
         String cookieHeader = String.format(
-            "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Strict%s",
+            "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s",
             name, value, maxAge, secureCookies ? "; Secure" : ""
         );
         response.addHeader("Set-Cookie", cookieHeader);
