@@ -1,6 +1,6 @@
 # Feature: Admin Page (instance settings)
 
-> Last updated: 2026-04-25
+> Last updated: 2026-04-26
 
 ## Context
 
@@ -9,6 +9,13 @@ to change CORS origins, the `Secure` cookie flag, Enable Banking credentials, or
 toggle integrations on/off without editing rows in `app_setting` by hand. The Admin
 page exposes those same `SetupService` writers behind a role-gated `/admin` route so
 a self-host admin can reconfigure the instance from the browser.
+
+The page also surfaces a **Members** section that lets the admin see every family
+member with their display name and login (username), invite a managed profile via
+a one-shot activation link, reset an active user's password by sending the same
+`/activate/{token}` link with a fresh token, and delete a non-activated managed
+profile. The actions reuse `FamilyService` writers behind the existing
+`/api/family/**` admin gate (`requireAdmin()`).
 
 ## How it works
 
@@ -51,6 +58,11 @@ Frontend:
 - `frontend/src/pages/admin/sections/IntegrationsSection.tsx` — five hardcoded keys
   (`enablebanking, boursobank, traderepublic, finary, crypto`) toggled via
   `useToggleIntegration`.
+- `frontend/src/pages/admin/sections/MembersSection.tsx` — list of family members
+  with avatar, display name, login, derived status; per-member actions:
+  create / regenerate activation link, reset password, delete. Generated link is
+  shown inline with a copy button; no email is sent (self-hosted, admin transmits
+  manually).
 - `frontend/src/features/admin/api.ts` — `adminApi` (typed endpoints).
 - `frontend/src/features/admin/hooks.ts` — `useAdminSettings`,
   `useUpdateSecurity`, `useUpdateEnableBanking`, `useToggleIntegration` (all

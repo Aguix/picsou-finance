@@ -7,6 +7,7 @@ export interface FamilyMemberItem {
   managed: boolean
   hasLogin: boolean
   activated: boolean
+  loginName: string | null
 }
 
 export interface FamilyDashboard {
@@ -60,6 +61,9 @@ export const familyApi = {
 
   generateActivationLink: (id: number) =>
     api.post<{ activationLink: string }>(`/family/members/${id}/activate`).then(r => r.data),
+
+  resetMemberPassword: (id: number) =>
+    api.post<{ resetLink: string }>(`/family/members/${id}/reset-password`).then(r => r.data),
 
   getDashboard: () =>
     api.get<FamilyDashboard>('/family/dashboard').then(r => r.data),

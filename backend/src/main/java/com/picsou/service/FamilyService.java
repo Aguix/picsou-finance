@@ -84,6 +84,25 @@ public class FamilyService {
     }
 
     @Transactional
+    public String resetPasswordToken(Long memberId) {
+        memberRepository.findById(memberId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Member not found"));
+
+        AppUser user = userRepository.findByMemberId(memberId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Member has no login to reset"));
+
+        byte[] tokenBytes = new byte[32];
+        new SecureRandom().nextBytes(tokenBytes);
+        String token = HexFormat.of().formatHex(tokenBytes);
+
+        user.setActivationToken(token);
+        user.setActivationTokenExpires(Instant.now().plus(7, ChronoUnit.DAYS));
+        userRepository.save(user);
+
+        return token;
+    }
+
+    @Transactional
     public String generateActivationToken(Long memberId) {
         FamilyMember member = memberRepository.findById(memberId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Member not found"));

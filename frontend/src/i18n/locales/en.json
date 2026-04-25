@@ -443,6 +443,29 @@
       "traderepublic": "Trade Republic",
       "finary": "Finary",
       "crypto": "Crypto"
+    },
+    "members": {
+      "title": "Members",
+      "description": "Manage family member accounts",
+      "displayName": "Display name",
+      "loginName": "Login",
+      "noLogin": "—",
+      "you": "(you)",
+      "statusAdmin": "Administrator",
+      "statusManaged": "Managed profile",
+      "statusPending": "Activation pending",
+      "statusActive": "Active account",
+      "createLogin": "Create login",
+      "regenerateLink": "Regenerate link",
+      "resetPassword": "Reset password",
+      "delete": "Delete",
+      "deleteConfirmTitle": "Delete member",
+      "deleteConfirmDesc": "This will delete the member and all their data. This action cannot be undone.",
+      "linkLabel": "Link to share (valid 7 days):",
+      "copyLink": "Copy",
+      "copied": "Copied!",
+      "noMembers": "No members",
+      "loading": "Loading..."
     }
   },
   "error": {

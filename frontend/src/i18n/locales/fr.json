@@ -443,6 +443,29 @@
       "traderepublic": "Trade Republic",
       "finary": "Finary",
       "crypto": "Crypto"
+    },
+    "members": {
+      "title": "Membres",
+      "description": "Gérer les comptes des membres de la famille",
+      "displayName": "Nom affiché",
+      "loginName": "Identifiant",
+      "noLogin": "—",
+      "you": "(vous)",
+      "statusAdmin": "Administrateur",
+      "statusManaged": "Profil géré",
+      "statusPending": "Activation en attente",
+      "statusActive": "Compte actif",
+      "createLogin": "Créer un identifiant",
+      "regenerateLink": "Régénérer le lien",
+      "resetPassword": "Réinitialiser mot de passe",
+      "delete": "Supprimer",
+      "deleteConfirmTitle": "Supprimer le membre",
+      "deleteConfirmDesc": "Cela supprimera le membre et toutes ses données. Action irréversible.",
+      "linkLabel": "Lien à transmettre (valable 7 jours) :",
+      "copyLink": "Copier",
+      "copied": "Copié !",
+      "noMembers": "Aucun membre",
+      "loading": "Chargement..."
     }
   },
   "error": {

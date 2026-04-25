@@ -51,6 +51,20 @@ The `FamilyViewService` aggregates shared data for the family dashboard.
 
 Once activated, a managed member becomes **independent** (`isManaged=true && hasLogin && activated`). The admin can no longer delete their profile or regenerate their activation link. `FamilyService.deleteMember()` enforces this with a 403 guard.
 
+### Password reset by an admin
+
+`POST /api/family/members/{id}/reset-password` (admin-only) issues a fresh
+`activationToken` with a 7-day expiry on an existing `AppUser` row. The token
+reuses the `/activate/{token}` flow so the user lands on the same screen and
+sets a new password. The current `passwordHash` is **not** cleared — the old
+credential keeps working until the user actually completes the reset, so a
+mistakenly-issued reset link does not lock anyone out. Distinct from
+`POST /members/{id}/activate`, which deliberately rejects already-activated
+users (`FamilyService.generateActivationToken` line 92).
+
+`FamilyMemberResponse` now exposes `loginName` (= `AppUser.username` or `null`)
+so the admin UI can show both the display name and the login side-by-side.
+
 ### Username change
 
 `PATCH /api/auth/username` updates the username of the currently authenticated user:

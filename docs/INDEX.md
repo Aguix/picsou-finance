@@ -25,6 +25,7 @@
 | 2026-04-23 | [Two-layer bootstrap for first-launch Setup Wizard](./decisions/2026-04-23-first-launch-wizard.md) | Active |
 | 2026-04-25 | [tr-auth as isolated sidecar with Chromium-only image](./decisions/2026-04-25-tr-auth-sidecar-slim-image.md) | Active |
 | 2026-04-25 | [Admin page reuses SetupService writers behind a role-gated controller](./decisions/2026-04-25-admin-page-reuses-setup-writers.md) | Active |
+| 2026-04-26 | [Compute loan amortization schedules on the fly](./decisions/2026-04-26-loan-amortization-on-the-fly.md) | Active |
 
 ## Feature notes
 
@@ -51,12 +52,13 @@
 | Add Account modal (unified sync + manual) | 2026-04-25 | [add-account-modal.md](./features/add-account-modal.md) |
 | Docker deployment | 2026-04-25 | [docker-deployment.md](./features/docker-deployment.md) |
 | Navigation (sidebar + mobile bottom nav) | 2026-04-13 | [sidebar-navigation.md](./features/sidebar-navigation.md) |
-| Multi-account family system | 2026-04-22 | [multi-account-family.md](./features/multi-account-family.md) |
+| Multi-account family system | 2026-04-26 | [multi-account-family.md](./features/multi-account-family.md) |
 | CORS & cookie security | 2026-04-22 | [security-cors-cookies.md](./features/security-cors-cookies.md) |
 | 24H Intraday net worth chart | 2026-04-18 | [intraday-chart.md](./features/intraday-chart.md) |
 | First-launch Setup Wizard | 2026-04-24 | [setup-wizard.md](./features/setup-wizard.md) |
-| Admin page (instance settings) | 2026-04-25 | [admin-page.md](./features/admin-page.md) |
+| Admin page (instance settings) | 2026-04-26 | [admin-page.md](./features/admin-page.md) |
 | Frontend error display (`extractErrorMessage`) | 2026-04-25 | [frontend-error-display.md](./features/frontend-error-display.md) |
+| Loan accounts (LOAN type, amortization view) | 2026-04-26 | [loans.md](./features/loans.md) |
 
 ## Conventions
 

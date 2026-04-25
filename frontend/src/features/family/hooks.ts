@@ -54,6 +54,12 @@ export function useGenerateActivationLink() {
   })
 }
 
+export function useResetMemberPassword() {
+  return useMutation({
+    mutationFn: (id: number) => familyApi.resetMemberPassword(id),
+  })
+}
+
 export function useUpdateSharingSettings() {
   const qc = useQueryClient()
   return useMutation({

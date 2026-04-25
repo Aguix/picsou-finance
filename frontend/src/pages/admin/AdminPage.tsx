@@ -5,6 +5,7 @@ import { useAdminSettings } from '@/features/admin/hooks'
 import { SecuritySection } from './sections/SecuritySection'
 import { EnableBankingSection } from './sections/EnableBankingSection'
 import { IntegrationsSection } from './sections/IntegrationsSection'
+import { MembersSection } from './sections/MembersSection'
 
 export function AdminPage() {
   const { t } = useTranslation()
@@ -17,6 +18,7 @@ export function AdminPage() {
       <PageHeader title={t('admin.title')} />
       {data && (
         <>
+          <MembersSection />
           <SecuritySection settings={data.security} />
           <EnableBankingSection settings={data.enableBanking} />
           <IntegrationsSection integrations={data.integrations} />

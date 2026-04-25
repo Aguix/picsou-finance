@@ -70,6 +70,14 @@ public class FamilyController {
         return ResponseEntity.ok(Map.of("activationLink", link));
     }
 
+    @PostMapping("/members/{id}/reset-password")
+    public ResponseEntity<Map<String, String>> generateResetPasswordLink(@PathVariable Long id) {
+        requireAdmin();
+        String token = familyService.resetPasswordToken(id);
+        String link = "/activate/" + token;
+        return ResponseEntity.ok(Map.of("resetLink", link));
+    }
+
     // ─── Sharing settings (any authenticated user) ──────────────────────
 
     @GetMapping("/sharing")

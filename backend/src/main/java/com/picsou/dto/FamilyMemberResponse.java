@@ -9,7 +9,8 @@ public record FamilyMemberResponse(
     String avatarColor,
     boolean managed,
     boolean hasLogin,
-    boolean activated
+    boolean activated,
+    String loginName
 ) {
     public static FamilyMemberResponse from(FamilyMember member, AppUser user) {
         return new FamilyMemberResponse(
@@ -18,7 +19,8 @@ public record FamilyMemberResponse(
             member.getAvatarColor(),
             member.isManaged(),
             user != null,
-            user != null && user.isActivated()
+            user != null && user.isActivated(),
+            user != null ? user.getUsername() : null
         );
     }
 }
