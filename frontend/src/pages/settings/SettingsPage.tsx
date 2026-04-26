@@ -29,6 +29,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { api } from '@/lib/api-client'
+import { SecuritySection } from './security/SecuritySection'
 
 // ---------------------------------------------------------------------------
 // Toggle group button (theme / language)
@@ -273,6 +274,15 @@ export function SettingsPage() {
             </Button>
           </div>
         </div>
+      </SectionCard>
+
+      {/* Security --------------------------------------------------------- */}
+      <SectionCard
+        icon={Shield}
+        title={t('settings.security')}
+        description={t('settings.securityDescription')}
+      >
+        <SecuritySection />
       </SectionCard>
 
       {/* Family ----------------------------------------------------------- */}
