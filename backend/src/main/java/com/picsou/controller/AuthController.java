@@ -5,9 +5,15 @@ import com.picsou.config.JwtUtil;
 import com.picsou.config.RateLimitConfig;
 import com.picsou.dto.ActivationRequest;
 import com.picsou.dto.LoginRequest;
+import com.picsou.dto.MfaDtos;
 import com.picsou.model.AppUser;
+import com.picsou.model.PersistentSession;
 import com.picsou.repository.AppUserRepository;
+import com.picsou.service.MfaService;
+import com.picsou.service.PersistentSessionService;
 import io.github.bucket4j.Bucket;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -22,6 +28,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -32,20 +40,29 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final Map<String, Bucket> loginBuckets;
+    private final Map<String, Bucket> mfaVerifyBuckets;
     private final AuthCookieWriter cookieWriter;
+    private final MfaService mfaService;
+    private final PersistentSessionService persistentSessionService;
 
     public AuthController(
         AppUserRepository userRepository,
         PasswordEncoder passwordEncoder,
         JwtUtil jwtUtil,
         @org.springframework.beans.factory.annotation.Qualifier("loginBuckets") Map<String, Bucket> loginBuckets,
-        AuthCookieWriter cookieWriter
+        @org.springframework.beans.factory.annotation.Qualifier("mfaVerifyBuckets") Map<String, Bucket> mfaVerifyBuckets,
+        AuthCookieWriter cookieWriter,
+        MfaService mfaService,
+        PersistentSessionService persistentSessionService
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
         this.loginBuckets = loginBuckets;
+        this.mfaVerifyBuckets = mfaVerifyBuckets;
         this.cookieWriter = cookieWriter;
+        this.mfaService = mfaService;
+        this.persistentSessionService = persistentSessionService;
     }
 
     @PostMapping("/login")
@@ -70,17 +87,78 @@ public class AuthController {
             throw new BadCredentialsException("Invalid credentials");
         }
 
-        String accessToken = jwtUtil.generateAccessToken(user);
-        String refreshToken = jwtUtil.generateRefreshToken(user);
+        // MFA gate: if 2FA is on AND this device is not already a trusted one,
+        // we hand back a short-lived mfa_challenge cookie and demand the user
+        // complete /api/auth/mfa/verify before access/refresh are issued.
+        if (mfaService.isEnabled(user)) {
+            String existingPersistent = extractCookie(httpReq, AuthCookieWriter.PERSISTENT_COOKIE);
+            boolean trustedDevice = existingPersistent != null
+                && persistentSessionService.isTrustedDeviceFor(user, existingPersistent);
 
-        setTokenCookies(httpRes, accessToken, refreshToken);
+            if (!trustedDevice) {
+                String challenge = jwtUtil.generateMfaChallengeToken(user, req.rememberMe());
+                cookieWriter.setMfaChallenge(httpRes, challenge);
+                return ResponseEntity.ok(Map.of(
+                    "mfaRequired", true,
+                    "username", user.getUsername()
+                ));
+            }
+            // Trusted device — fall through to issue access/refresh + rotate persistent.
+        }
 
-        return ResponseEntity.ok(Map.of(
-            "username", user.getUsername(),
-            "role", user.getRole().name(),
-            "memberId", user.getMember().getId(),
-            "displayName", user.getMember().getDisplayName()
-        ));
+        completeAuthenticatedSession(user, req.rememberMe(), false, httpReq, httpRes);
+        return ResponseEntity.ok(userPayload(user));
+    }
+
+    @PostMapping("/mfa/verify")
+    public ResponseEntity<?> mfaVerify(
+        @Valid @RequestBody MfaDtos.MfaVerifyRequest req,
+        HttpServletRequest httpReq,
+        HttpServletResponse httpRes
+    ) {
+        String ip = getClientIp(httpReq);
+        Bucket bucket = mfaVerifyBuckets.computeIfAbsent(ip, k -> RateLimitConfig.createMfaVerifyBucket());
+        if (!bucket.tryConsume(1)) {
+            cookieWriter.clearMfaChallenge(httpRes);
+            ProblemDetail detail = ProblemDetail.forStatus(HttpStatus.TOO_MANY_REQUESTS);
+            detail.setDetail("Too many verification attempts. Please log in again in 15 minutes.");
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(detail);
+        }
+
+        String challengeCookie = extractCookie(httpReq, AuthCookieWriter.MFA_CHALLENGE_COOKIE);
+        if (challengeCookie == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "No MFA challenge in progress"));
+        }
+
+        Claims claims;
+        try {
+            claims = jwtUtil.validateAndParse(challengeCookie);
+        } catch (JwtException ex) {
+            cookieWriter.clearMfaChallenge(httpRes);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Invalid MFA challenge"));
+        }
+        if (!jwtUtil.isMfaChallengeToken(claims)) {
+            cookieWriter.clearMfaChallenge(httpRes);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        Long userId = claims.get("uid", Long.class);
+        AppUser user = userRepository.findByIdWithMember(userId)
+            .orElseThrow(() -> new BadCredentialsException("User not found"));
+
+        boolean isRecovery = Boolean.TRUE.equals(req.isRecoveryCode());
+        if (!mfaService.verifyTotpOrRecovery(user, req.code(), isRecovery)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Invalid verification code"));
+        }
+
+        boolean rememberMe = jwtUtil.getRememberMeClaim(claims);
+        boolean trustDevice = Boolean.TRUE.equals(req.trustDevice());
+        completeAuthenticatedSession(user, rememberMe || trustDevice, trustDevice, httpReq, httpRes);
+        cookieWriter.clearMfaChallenge(httpRes);
+        return ResponseEntity.ok(userPayload(user));
     }
 
     @PostMapping("/refresh")
@@ -121,7 +199,14 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(HttpServletResponse httpRes) {
+    public ResponseEntity<Void> logout(HttpServletRequest httpReq, HttpServletResponse httpRes) {
+        // Best-effort revoke the persistent series so the cookie can't be replayed
+        // even if the browser failed to honour Set-Cookie Max-Age=0.
+        String persistent = extractCookie(httpReq, AuthCookieWriter.PERSISTENT_COOKIE);
+        if (persistent != null) {
+            persistentSessionService.seriesFromCookie(persistent)
+                .ifPresent(persistentSessionService::revokeBySeriesId);
+        }
         clearTokenCookies(httpRes);
         return ResponseEntity.noContent().build();
     }
@@ -194,9 +279,51 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("message", "Account activated successfully"));
     }
 
-    // ─── Cookie helpers ───────────────────────────────────────────────────────
+    // ─── Session helpers ──────────────────────────────────────────────────────
     // Cookie attributes (HttpOnly/SameSite/Secure) live in AuthCookieWriter so
     // every emitter (controller, MFA flow, persistent-token filter) stays aligned.
+
+    /**
+     * Issues access + refresh cookies and, when {@code issuePersistent} is true,
+     * also creates a fresh PersistentSession in DB and writes the persistent_token
+     * cookie. Use {@code trustedFor2fa} to mark the device as MFA-trusted for the
+     * silent-bypass flow.
+     */
+    private void completeAuthenticatedSession(
+        AppUser user,
+        boolean issuePersistent,
+        boolean trustedFor2fa,
+        HttpServletRequest httpReq,
+        HttpServletResponse httpRes
+    ) {
+        cookieWriter.setAccessAndRefresh(httpRes,
+            jwtUtil.generateAccessToken(user),
+            jwtUtil.generateRefreshToken(user));
+
+        if (issuePersistent) {
+            PersistentSessionService.IssueResult issued = persistentSessionService.issue(
+                user,
+                trustedFor2fa,
+                httpReq.getHeader("User-Agent"),
+                getClientIp(httpReq)
+            );
+            PersistentSession session = issued.session();
+            long secondsUntilExpiry = Math.max(
+                ChronoUnit.SECONDS.between(Instant.now(), session.getExpiresAt()),
+                0
+            );
+            cookieWriter.setPersistent(httpRes, issued.cookieValue(), secondsUntilExpiry);
+        }
+    }
+
+    private Map<String, Object> userPayload(AppUser user) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("username", user.getUsername());
+        body.put("role", user.getRole().name());
+        body.put("memberId", user.getMember().getId());
+        body.put("displayName", user.getMember().getDisplayName());
+        return body;
+    }
 
     private void setTokenCookies(HttpServletResponse response, String accessToken, String refreshToken) {
         cookieWriter.setAccessAndRefresh(response, accessToken, refreshToken);
