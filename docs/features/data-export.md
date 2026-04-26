@@ -1,7 +1,7 @@
 # Feature: GDPR-friendly data export (JSON + CSV)
 
 > Last updated: 2026-04-26
-> Status: 📝 Spec — not yet implemented
+> Status: ✅ Implemented
 
 ## Context
 
