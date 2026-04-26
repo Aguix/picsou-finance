@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
-import { Loader2, ShieldCheck, ShieldOff, KeyRound } from 'lucide-react'
+import { Loader2, ShieldCheck, ShieldOff, KeyRound, Download } from 'lucide-react'
 import { useMfaStatus } from '@/features/mfa/hooks'
 import { MfaEnrollDialog } from './MfaEnrollDialog'
 import { MfaDisableDialog } from './MfaDisableDialog'
 import { RecoveryCodesDialog } from './RecoveryCodesDialog'
 import { SessionsList } from './SessionsList'
+import { ExportDataDialog } from './ExportDataDialog'
 
 /**
  * Top-level "Security" panel rendered as the contents of the SectionCard in
@@ -22,6 +23,7 @@ export function SecuritySection() {
   const [enrollOpen, setEnrollOpen] = useState(false)
   const [disableOpen, setDisableOpen] = useState(false)
   const [regenerateOpen, setRegenerateOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
 
   return (
     <div className="space-y-6">
@@ -80,6 +82,27 @@ export function SecuritySection() {
         )}
       </div>
 
+      {/* ── GDPR data export block ───────────────────────────────────── */}
+      <div className="space-y-2 pt-4 border-t">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">{t('settings.exportTitle')}</p>
+            <p className="text-xs text-muted-foreground">
+              {t('settings.exportShortDesc')}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setExportOpen(true)}
+            className="w-full sm:w-auto"
+          >
+            <Download size={14} className="mr-1.5" />
+            {t('settings.exportButton')}
+          </Button>
+        </div>
+      </div>
+
       {/* ── Persistent sessions block ────────────────────────────────── */}
       <div className="space-y-2 pt-4 border-t">
         <div>
@@ -94,6 +117,7 @@ export function SecuritySection() {
       <MfaEnrollDialog open={enrollOpen} onOpenChange={setEnrollOpen} />
       <MfaDisableDialog open={disableOpen} onOpenChange={setDisableOpen} />
       <RecoveryCodesDialog open={regenerateOpen} onOpenChange={setRegenerateOpen} />
+      <ExportDataDialog open={exportOpen} onOpenChange={setExportOpen} />
     </div>
   )
 }
