@@ -71,10 +71,16 @@ public class JwtUtil {
             .claim("uid", user.getId())
             .claim("role", user.getRole().name())
             .claim("type", tokenType)
+            .claim("tv", user.getTokenVersion())
             .issuedAt(Date.from(Instant.now()))
             .expiration(Date.from(expiry))
             .signWith(signingKey)
             .compact();
+    }
+
+    public Long getTokenVersion(Claims claims) {
+        Number v = claims.get("tv", Number.class);
+        return v == null ? null : v.longValue();
     }
 
     public Claims validateAndParse(String token) {

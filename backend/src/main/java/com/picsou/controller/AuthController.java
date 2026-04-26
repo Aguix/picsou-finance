@@ -180,6 +180,13 @@ public class AuthController {
             AppUser user = userRepository.findByUsernameWithMember(username)
                 .orElseThrow(() -> new BadCredentialsException("User not found"));
 
+            Long tv = jwtUtil.getTokenVersion(claims);
+            if (tv == null || tv != user.getTokenVersion()) {
+                clearTokenCookies(httpRes);
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Token revoked"));
+            }
+
             String newAccess = jwtUtil.generateAccessToken(user);
             String newRefresh = jwtUtil.generateRefreshToken(user); // rotation
 
@@ -237,7 +244,9 @@ public class AuthController {
     @PostMapping("/change-password")
     public ResponseEntity<?> changePassword(
         @AuthenticationPrincipal AppUser user,
-        @Valid @RequestBody ChangePasswordRequest req
+        @Valid @RequestBody ChangePasswordRequest req,
+        HttpServletRequest httpReq,
+        HttpServletResponse httpRes
     ) {
 
         if (!passwordEncoder.matches(req.currentPassword(), user.getPasswordHash())) {
@@ -245,7 +254,22 @@ public class AuthController {
         }
 
         user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
+        // Invalidate every outstanding access/refresh JWT across all devices.
+        user.setTokenVersion(user.getTokenVersion() + 1);
         userRepository.save(user);
+
+        // Kick every Remember-Me browser. The caller's persistent cookie is
+        // dropped along with the rest — they will need to log back in on this
+        // browser too if they ticked Remember-Me previously.
+        persistentSessionService.revokeAllForUser(user.getId());
+
+        // Re-issue access+refresh for the calling browser so the user does
+        // not get logged out by their own action. The new cookies carry the
+        // bumped tokenVersion; old cookies on this browser are overwritten.
+        String newAccess = jwtUtil.generateAccessToken(user);
+        String newRefresh = jwtUtil.generateRefreshToken(user);
+        setTokenCookies(httpRes, newAccess, newRefresh);
+        cookieWriter.clearPersistent(httpRes);
 
         return ResponseEntity.ok(Map.of("message", "Password updated successfully"));
     }

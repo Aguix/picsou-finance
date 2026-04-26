@@ -41,9 +41,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Claims claims = jwtUtil.validateAndParse(token);
                 if (jwtUtil.isAccessToken(claims)) {
                     Long userId = claims.get("uid", Long.class);
+                    Long tv = jwtUtil.getTokenVersion(claims);
                     if (userId != null) {
                         AppUser user = userRepository.findByIdWithMember(userId).orElse(null);
-                        if (user != null && user.isActivated()) {
+                        if (user != null && user.isActivated()
+                            && tv != null && tv == user.getTokenVersion()) {
                             String role = "ROLE_" + user.getRole().name();
                             var auth = new UsernamePasswordAuthenticationToken(
                                 user,

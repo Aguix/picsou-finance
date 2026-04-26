@@ -46,4 +46,8 @@ public class AppUser extends AuditableEntity {
     @Column(name = "acknowledged_warning", nullable = false)
     @Builder.Default
     private boolean acknowledgedWarning = false;
+
+    @Column(name = "token_version", nullable = false)
+    @Builder.Default
+    private long tokenVersion = 0L;
 }
