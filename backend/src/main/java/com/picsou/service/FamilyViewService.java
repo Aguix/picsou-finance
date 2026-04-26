@@ -3,8 +3,10 @@ package com.picsou.service;
 import com.picsou.dto.ContributionBreakdownResponse;
 import com.picsou.dto.FamilyDashboardResponse;
 import com.picsou.dto.FamilyDashboardResponse.*;
+import com.picsou.exception.ResourceNotFoundException;
 import com.picsou.model.*;
 import com.picsou.repository.*;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -139,7 +141,12 @@ public class FamilyViewService {
         return new FamilyDashboardResponse(sharedAccounts, sharedGoals, totalNetWorth);
     }
 
-    public List<ContributionBreakdownResponse> getGoalContributions(Long goalId, List<FamilyMember> allMembers) {
+    public List<ContributionBreakdownResponse> getGoalContributions(Long goalId, Long viewerMemberId, List<FamilyMember> allMembers) {
+        Goal goal = goalRepository.findById(goalId).orElseThrow(() -> ResourceNotFoundException.goal(goalId));
+        Long ownerId = goal.getMember().getId();
+        if (!ownerId.equals(viewerMemberId) && !isGoalVisibleTo(goal, ownerId)) {
+            throw new AccessDeniedException("Goal not accessible");
+        }
         List<ContributionBreakdownResponse> result = new ArrayList<>();
         for (FamilyMember member : allMembers) {
             BigDecimal total = contributionRepository
@@ -151,5 +158,19 @@ public class FamilyViewService {
             }
         }
         return result;
+    }
+
+    private boolean isGoalVisibleTo(Goal goal, Long ownerMemberId) {
+        SharingSettings settings = sharingSettingsRepository
+            .findByMemberIdAndResourceType(ownerMemberId, "GOAL")
+            .orElse(null);
+        if (settings == null || settings.getSharingLevel() == SharingLevel.NONE) {
+            return false;
+        }
+        if (settings.getSharingLevel() == SharingLevel.ALL) {
+            return true;
+        }
+        return sharedResourceRepository
+            .existsByOwnerMemberIdAndResourceTypeAndResourceId(ownerMemberId, "GOAL", goal.getId());
     }
 }

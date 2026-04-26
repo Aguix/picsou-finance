@@ -36,6 +36,6 @@ public class FamilyViewController {
     @GetMapping("/goals/{goalId}/contributions")
     public List<ContributionBreakdownResponse> getContributions(@PathVariable Long goalId) {
         List<FamilyMember> allMembers = memberRepository.findAllByOrderByCreatedAtAsc();
-        return familyViewService.getGoalContributions(goalId, allMembers);
+        return familyViewService.getGoalContributions(goalId, userContext.currentMemberId(), allMembers);
     }
 }
