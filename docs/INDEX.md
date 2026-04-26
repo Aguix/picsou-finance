@@ -26,6 +26,7 @@
 | 2026-04-25 | [tr-auth as isolated sidecar with Chromium-only image](./decisions/2026-04-25-tr-auth-sidecar-slim-image.md) | Active |
 | 2026-04-25 | [Admin page reuses SetupService writers behind a role-gated controller](./decisions/2026-04-25-admin-page-reuses-setup-writers.md) | Active |
 | 2026-04-26 | [Compute loan amortization schedules on the fly](./decisions/2026-04-26-loan-amortization-on-the-fly.md) | Active |
+| 2026-04-26 | [TOTP 2FA and persistent (Remember-Me) sessions](./decisions/2026-04-26-totp-2fa-and-persistent-sessions.md) | Active |
 
 ## Feature notes
 
@@ -59,6 +60,7 @@
 | Admin page (instance settings) | 2026-04-26 | [admin-page.md](./features/admin-page.md) |
 | Frontend error display (`extractErrorMessage`) | 2026-04-25 | [frontend-error-display.md](./features/frontend-error-display.md) |
 | Loan accounts (LOAN type, amortization view) | 2026-04-26 | [loans.md](./features/loans.md) |
+| 2FA (TOTP) and Remember Me | 2026-04-26 | [mfa-and-remember-me.md](./features/mfa-and-remember-me.md) |
 
 ## Conventions
 

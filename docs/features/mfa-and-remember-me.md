@@ -1,7 +1,14 @@
 # Feature: 2FA (TOTP) and Remember Me
 
 > Last updated: 2026-04-26
-> Status: 📐 Design (not yet implemented)
+> Status: ✅ Implemented (2026-04-26)
+>
+> Implementation notes vs. original design:
+> - `AdminMfaController` lives at `controller/AdminMfaController.java` (flat) — the URL stays `/api/admin/members/{id}/mfa` so the security-config URL pattern is unchanged.
+> - `MfaController.regenerate` accepts only TOTP, not recovery codes (rejects `isRecoveryCode=true`) — extra paranoia: don't let one stolen recovery code mint a fresh batch of ten.
+> - `FamilyMemberResponse` was extended with `mfaEnabled: boolean` so the admin Members list can show a "2FA on" badge and gate the Reset 2FA button without an extra round-trip.
+> - Settings UI: `pages/settings/security/` (`SecuritySection`, `MfaEnrollDialog`, `MfaDisableDialog`, `RecoveryCodesDialog`, `RecoveryCodesView`, `SessionsList`) — split out of the design's flat `features/mfa/` proposal because the dialogs are tightly coupled to the settings page layout.
+> - `MfaChallengePage` lives under `<PublicOnly>` (not anonymous-permitted): the user is mid-login (no `access_token`), so `RequireAuth` would loop.
 
 ## Context
 
@@ -426,4 +433,4 @@ All UIs are mobile-responsive (per repo convention).
 - Related ADR: `docs/decisions/2026-03-01-aes-gcm-crypto-secrets.md` (reused for `totp_secret_enc`)
 - Related feature: `docs/features/security-cors-cookies.md` (cookie semantics)
 - Related feature: `docs/features/multi-account-family.md` (admin force-disable on members)
-- A new ADR will be authored alongside implementation: `docs/decisions/YYYY-MM-DD-totp-2fa-and-persistent-sessions.md`.
+- ADR: `docs/decisions/2026-04-26-totp-2fa-and-persistent-sessions.md` (active).
