@@ -1,0 +1,114 @@
+/*
+ * Setup-scoped stylesheet — imported by the setup entry pages only,
+ * keeping every global stylesheet (index.css, tailwind layers) untouched.
+ *
+ * Animation rule of thumb for this wizard:
+ *   — keep motion subtle and biologically plausible (ease-out for arrivals,
+ *     ease-in for departures; 300-500ms window)
+ *   — honor prefers-reduced-motion on every @keyframes block
+ */
+
+@keyframes setup-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes hello-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hello-fade-down {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+
+.animate-setup-slide-in {
+  animation: setup-slide-in 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-hello-in {
+  animation: hello-fade-up 400ms ease-out both;
+}
+
+.animate-hello-out {
+  animation: hello-fade-down 400ms ease-in both;
+}
+
+.setup-gradient {
+  background:
+    radial-gradient(80rem 80rem at 50% -20%, color-mix(in oklab, var(--primary) 10%, transparent), transparent 60%),
+    radial-gradient(60rem 60rem at 80% 100%, color-mix(in oklab, var(--accent, var(--primary)) 8%, transparent), transparent 70%);
+}
+
+.font-homemade {
+  font-family: 'Homemade Apple', 'Segoe Script', 'Snell Roundhand', cursive;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+@font-face {
+  font-family: 'Homemade Apple';
+  src: url('/fonts/HomemadeApple-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+
+/* Confetti — pure CSS burst. No external lib. Each `.confetti-piece` is
+ * positioned at the middle top of the parent and animates out to a random
+ * angle+distance. Randomness is expressed via CSS custom properties set
+ * inline from React so we don't need a real PRNG in CSS. */
+@keyframes confetti-burst {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, 0) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform:
+      translate(calc(-50% + var(--dx, 0px)), var(--dy, 400px))
+      rotate(var(--rot, 720deg));
+  }
+}
+
+.confetti-piece {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0.5rem;
+  height: 0.75rem;
+  border-radius: 2px;
+  transform: translate(-50%, 0);
+  animation: confetti-burst 1.6s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-setup-slide-in,
+  .animate-hello-in,
+  .animate-hello-out,
+  .confetti-piece {
+    animation: none !important;
+  }
+  .confetti-piece {
+    display: none;
+  }
+}
