@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useLogin } from '@/features/auth/hooks'
+import { useLoginWithRememberMe } from '@/features/mfa/hooks'
 import { useAppStore } from '@/stores/app-store'
 import { safeRedirect } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -14,9 +14,10 @@ export function LoginPage() {
   const { t } = useTranslation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(false)
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const loginMutation = useLogin()
+  const loginMutation = useLoginWithRememberMe()
   const demoMode = useAppStore(s => s.demoMode)
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -26,7 +27,20 @@ export function LoginPage() {
     e.preventDefault()
     setError(null)
     try {
-      await loginMutation.mutateAsync({ username, password })
+      const result = await loginMutation.mutateAsync({ username, password, rememberMe })
+      if (result.mfaRequired) {
+        // Branch off to /login/mfa — the mfa_challenge cookie is now set.
+        // Forward both the post-MFA redirect target and the rememberMe flag
+        // so the user's preference survives the second hop. (Server-side, the
+        // remember_me claim was already encoded into the mfa_challenge JWT —
+        // the URL param is purely UI state for the trust-device checkbox.)
+        const params = new URLSearchParams()
+        if (redirect && redirect !== '/') params.set('redirect', redirect)
+        if (rememberMe) params.set('rememberMe', '1')
+        const qs = params.toString()
+        navigate(`/login/mfa${qs ? `?${qs}` : ''}`)
+        return
+      }
       navigate(redirect, { replace: true })
     } catch (err: any) {
       const status = err?.response?.status
@@ -87,6 +101,22 @@ export function LoginPage() {
                   >
                     {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2">
+                <input
+                  id="rememberMe"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={e => setRememberMe(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded"
+                />
+                <div className="flex flex-col">
+                  <Label htmlFor="rememberMe" className="text-sm cursor-pointer">
+                    {t('auth.rememberMe')}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t('auth.rememberMeDesc')}</p>
                 </div>
               </div>
 

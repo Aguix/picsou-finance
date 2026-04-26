@@ -9,6 +9,9 @@ import '@/pages/setup/setup.css'
 const LoginPage = lazy(() =>
   import('@/pages/login/LoginPage').then((m) => ({ default: m.LoginPage }))
 )
+const MfaChallengePage = lazy(() =>
+  import('@/pages/login/MfaChallengePage').then((m) => ({ default: m.MfaChallengePage }))
+)
 const DashboardPage = lazy(() =>
   import('@/pages/dashboard/DashboardPage').then((m) => ({
     default: m.DashboardPage,
@@ -117,6 +120,18 @@ export const router = createBrowserRouter([
       <PublicOnly>
         <SuspensePage>
           <LoginPage />
+        </SuspensePage>
+      </PublicOnly>
+    ),
+  },
+  {
+    // /login/mfa is also for unauthenticated visitors — the user is mid-login
+    // (mfa_challenge cookie set, access_token NOT yet set), so PublicOnly applies.
+    path: '/login/mfa',
+    element: (
+      <PublicOnly>
+        <SuspensePage>
+          <MfaChallengePage />
         </SuspensePage>
       </PublicOnly>
     ),
