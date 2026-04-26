@@ -12,6 +12,7 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
 
@@ -102,6 +103,55 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             return result;
         } catch (Exception ex) {
             log.warn("CoinGecko price fetch failed: {}", ex.getMessage());
+            return Map.of();
+        }
+    }
+
+    /**
+     * Fetch hourly prices for a crypto ticker from CoinGecko over the last 24H.
+     * CoinGecko's market_chart/range returns hourly data for ranges < 90 days.
+     */
+    public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(String ticker, LocalDateTime from, LocalDateTime to) {
+        String coinId = TICKER_TO_ID.get(ticker.toUpperCase());
+        if (coinId == null) return Map.of();
+
+        try {
+            long fromEpoch = from.atZone(ZoneOffset.UTC).toEpochSecond();
+            long toEpoch = to.atZone(ZoneOffset.UTC).toEpochSecond();
+
+            Map<String, Object> response = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                    .path("/coins/{id}/market_chart/range")
+                    .queryParam("vs_currency", "eur")
+                    .queryParam("from", fromEpoch)
+                    .queryParam("to", toEpoch)
+                    .build(coinId))
+                .retrieve()
+                .bodyToMono(new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() {})
+                .timeout(Duration.ofSeconds(15))
+                .block();
+
+            if (response == null) return Map.of();
+
+            List<?> rawPrices = (List<?>) response.getOrDefault("prices", List.of());
+            Map<LocalDateTime, BigDecimal> prices = new LinkedHashMap<>();
+
+            for (Object entry : rawPrices) {
+                List<?> pair = (List<?>) entry;
+                if (pair.size() >= 2) {
+                    long timestamp = ((Number) pair.get(0)).longValue();
+                    double price = ((Number) pair.get(1)).doubleValue();
+                    LocalDateTime dt = Instant.ofEpochMilli(timestamp).atZone(ZoneOffset.UTC).toLocalDateTime();
+                    if (!dt.isBefore(from) && !dt.isAfter(to) && price > 0) {
+                        prices.put(dt, BigDecimal.valueOf(price).setScale(8, RoundingMode.HALF_UP));
+                    }
+                }
+            }
+
+            log.debug("Fetched {} intraday prices for {} ({}) from CoinGecko", prices.size(), ticker, coinId);
+            return prices;
+        } catch (Exception ex) {
+            log.warn("CoinGecko intraday price fetch failed for {}: {}", ticker, ex.getMessage());
             return Map.of();
         }
     }

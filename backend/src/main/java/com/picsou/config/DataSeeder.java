@@ -1,71 +1,44 @@
 package com.picsou.config;
 
-import com.picsou.model.AppUser;
-import com.picsou.model.FamilyMember;
-import com.picsou.model.UserRole;
-import com.picsou.repository.AppUserRepository;
-import com.picsou.repository.FamilyMemberRepository;
+import com.picsou.service.SetupService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Creates the bootstrap admin from {@code APP_USERNAME} / {@code APP_PASSWORD_HASH}
+ * env vars when both are set — the historical self-hosted path.
+ *
+ * When either is blank the seeder is a no-op: the app boots in PENDING_ADMIN
+ * state and the web setup wizard at /setup takes over.
+ */
 @Component
 public class DataSeeder implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DataSeeder.class);
 
-    private final AppUserRepository userRepository;
-    private final FamilyMemberRepository memberRepository;
-    private final PasswordEncoder passwordEncoder;
+    private final SetupService setupService;
 
-    @Value("${app.user.username}")
+    @Value("${app.user.username:}")
     private String username;
 
-    @Value("${app.user.password-hash}")
+    @Value("${app.user.password-hash:}")
     private String passwordHash;
 
-    public DataSeeder(AppUserRepository userRepository, FamilyMemberRepository memberRepository, PasswordEncoder passwordEncoder) {
-        this.userRepository = userRepository;
-        this.memberRepository = memberRepository;
-        this.passwordEncoder = passwordEncoder;
+    public DataSeeder(SetupService setupService) {
+        this.setupService = setupService;
     }
 
     @Override
-    @Transactional
     public void run(ApplicationArguments args) {
-        if (userRepository.existsByUsername(username)) {
+        if (username.isBlank() || passwordHash.isBlank()) {
+            log.info("APP_USERNAME or APP_PASSWORD_HASH not set — skipping auto-seed, setup wizard will take over");
             return;
         }
-
-        if (!passwordHash.startsWith("$2")) {
-            throw new IllegalStateException(
-                "APP_PASSWORD_HASH must be a valid bcrypt hash starting with $2a$, $2b$, or $2y$. " +
-                "Generate one with: htpasswd -bnBC 12 \"\" your_password | tr -d ':\\n'"
-            );
-        }
-
-        FamilyMember member = FamilyMember.builder()
-            .displayName(username)
-            .avatarColor("#6366f1")
-            .managed(false)
-            .build();
-        memberRepository.save(member);
-
-        AppUser user = AppUser.builder()
-            .username(username)
-            .passwordHash(passwordHash)
-            .member(member)
-            .role(UserRole.ADMIN)
-            .activated(true)
-            .acknowledgedWarning(true)
-            .build();
-
-        userRepository.save(user);
-        log.info("Created application user: {} (ADMIN)", username);
+        setupService.seedAdmin(username, passwordHash, username, null);
+        setupService.markComplete();
     }
 }

@@ -49,7 +49,7 @@ public class DashboardService {
         this.historyService = historyService;
     }
 
-    public DashboardResponse getDashboard(Long memberId) {
+    public DashboardResponse getDashboard(Long memberId, String range) {
         List<Account> accounts = accountRepository.findAllByMemberIdOrderByCreatedAtAsc(memberId);
 
         // Pre-load all holdings and group by account
@@ -108,7 +108,14 @@ public class DashboardService {
 
         // Build history using shared HistoryService
         List<Long> allAccountIds = accounts.stream().map(Account::getId).toList();
-        List<NetWorthPoint> updatedHistory = historyService.buildHistory(allAccountIds, 12, memberId);
+        int months = switch (range != null ? range : "1Y") {
+            case "7D", "1M" -> 1;
+            case "3M" -> 3;
+            case "YTD" -> LocalDate.now().getMonthValue();
+            case "ALL" -> 1200;
+            default -> 12;
+        };
+        List<NetWorthPoint> updatedHistory = historyService.buildHistory(allAccountIds, months, memberId);
 
         List<DistributionItem> distribution = buildDistribution(accounts, totalNetWorth, holdingsByAccount, false);
         List<DistributionItem> liabilities = buildDistribution(accounts, totalNetWorth, holdingsByAccount, true);
@@ -156,7 +163,9 @@ public class DashboardService {
                 account.getName(),
                 account.getColor(),
                 balanceEur,
-                Math.round(percentage * 100.0) / 100.0
+                Math.round(percentage * 100.0) / 100.0,
+                account.getType().name(),
+                !holdings.isEmpty()
             ));
         }
 

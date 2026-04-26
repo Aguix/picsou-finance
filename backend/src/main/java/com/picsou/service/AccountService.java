@@ -43,6 +43,7 @@ public class AccountService {
     private final RealEstateMetadataRepository realEstateMetadataRepository;
     private final DebtRepository debtRepository;
     private final PriceService priceService;
+    private final LoanAmortizationService loanAmortizationService;
 
     public AccountService(
         AccountRepository accountRepository,
@@ -51,7 +52,8 @@ public class AccountService {
         TransactionRepository transactionRepository,
         RealEstateMetadataRepository realEstateMetadataRepository,
         DebtRepository debtRepository,
-        PriceService priceService
+        PriceService priceService,
+        LoanAmortizationService loanAmortizationService
     ) {
         this.accountRepository = accountRepository;
         this.snapshotRepository = snapshotRepository;
@@ -60,6 +62,7 @@ public class AccountService {
         this.realEstateMetadataRepository = realEstateMetadataRepository;
         this.debtRepository = debtRepository;
         this.priceService = priceService;
+        this.loanAmortizationService = loanAmortizationService;
     }
 
     public List<AccountResponse> findAll(Long memberId) {
@@ -243,6 +246,11 @@ public class AccountService {
      * For cash accounts, returns the stored balance converted to EUR.
      */
     public BigDecimal liveBalanceEur(Account account) {
+        if (account.getType() == AccountType.LOAN) {
+            return debtRepository.findByAccountId(account.getId())
+                .map(debt -> loanAmortizationService.computeRemainingBalance(debt, LocalDate.now()))
+                .orElseGet(() -> priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getTicker()));
+        }
         List<AccountHolding> holdings = holdingRepository.findByAccount_Id(account.getId());
         if (holdings.isEmpty()) {
             return priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getTicker());
@@ -260,11 +268,7 @@ public class AccountService {
     }
 
     AccountResponse toResponse(Account account) {
-        BigDecimal balanceEur = priceService.toEur(
-            account.getCurrentBalance(),
-            account.getCurrency(),
-            account.getTicker()
-        );
+        BigDecimal balanceEur = liveBalanceEur(account);
         AccountResponse response = AccountResponse.from(account, balanceEur);
 
         if (account.getType() == AccountType.REAL_ESTATE) {
@@ -284,6 +288,26 @@ public class AccountService {
         }
 
         return response;
+    }
+
+    @Transactional
+    public HoldingResponse updateHolding(Long accountId, Long memberId, String ticker,
+            BigDecimal quantity, BigDecimal averageBuyIn) {
+        getOrThrow(accountId, memberId);
+        AccountHolding h = holdingRepository.findByAccountIdAndTicker(accountId, ticker)
+            .orElseThrow(() -> new ResourceNotFoundException("Holding not found: " + ticker));
+        h.setQuantity(quantity);
+        if (averageBuyIn != null) h.setAverageBuyIn(averageBuyIn);
+        holdingRepository.save(h);
+        return toHoldingResponse(h);
+    }
+
+    @Transactional
+    public void deleteHolding(Long accountId, Long memberId, String ticker) {
+        getOrThrow(accountId, memberId);
+        AccountHolding h = holdingRepository.findByAccountIdAndTicker(accountId, ticker)
+            .orElseThrow(() -> new ResourceNotFoundException("Holding not found: " + ticker));
+        holdingRepository.delete(h);
     }
 
     @Transactional
@@ -308,7 +332,10 @@ public class AccountService {
         Account account = getOrThrow(accountId, memberId);
 
         Debt debt = debtRepository.findByAccountId(accountId)
-            .orElseGet(() -> Debt.builder().account(account).build());
+            .orElseGet(() -> Debt.builder()
+                .account(account)
+                .member(account.getMember())
+                .build());
 
         if (req.linkedAccountId() != null) {
             Account linked = accountRepository.findById(req.linkedAccountId())
@@ -324,8 +351,20 @@ public class AccountService {
         debt.setLenderName(req.lenderName());
         debt.setStartDate(req.startDate());
         debt.setEndDate(req.endDate());
+        debt.setInsuranceMonthly(req.insuranceMonthly());
+        debt.setFileFees(req.fileFees());
 
         return DebtResponse.from(debtRepository.save(debt));
+    }
+
+    public LoanAmortizationService.LoanScheduleResponse getLoanSummary(Long accountId, Long memberId) {
+        Account account = getOrThrow(accountId, memberId);
+        if (account.getType() != AccountType.LOAN) {
+            throw new IllegalArgumentException("Account is not a loan: " + accountId);
+        }
+        Debt debt = debtRepository.findByAccountId(accountId)
+            .orElseThrow(() -> new ResourceNotFoundException("Debt details not set for account: " + accountId));
+        return loanAmortizationService.compute(debt, LocalDate.now());
     }
 
     private HoldingResponse toHoldingResponse(AccountHolding holding) {

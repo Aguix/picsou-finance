@@ -59,6 +59,38 @@ public class ManualTransactionService {
     }
 
     @Transactional
+    public TransactionResponse updateTransaction(Long accountId, Long txId, Long memberId, TransactionRequest req) {
+        Account account = accountRepository.findByIdAndMemberId(accountId, memberId)
+            .orElseThrow(() -> ResourceNotFoundException.account(accountId));
+
+        Transaction tx = transactionRepository.findByIdAndAccountId(txId, account.getId())
+            .orElseThrow(() -> ResourceNotFoundException.transaction(txId));
+
+        if (!tx.isManual()) {
+            throw new IllegalArgumentException("Cannot edit a synced transaction");
+        }
+
+        tx.setDate(req.date());
+        tx.setDescription(req.description());
+        tx.setAmount(req.amount());
+        if (req.txType() != null) tx.setTxType(req.txType());
+        if (req.ticker() != null) tx.setTicker(req.ticker());
+        if (req.quantity() != null) tx.setQuantity(req.quantity());
+        if (req.pricePerUnit() != null) tx.setPricePerUnit(req.pricePerUnit());
+        if (req.currency() != null) tx.setNativeCurrency(req.currency());
+        transactionRepository.save(tx);
+
+        if (INVESTMENT_TYPES.contains(account.getType())) {
+            holdingComputeService.recomputeHoldings(account);
+        } else {
+            recomputeCashBalance(account);
+            finaryPersistenceHelper.reconstructSnapshotsFromDb(account);
+        }
+
+        return TransactionResponse.from(tx);
+    }
+
+    @Transactional
     public void deleteTransaction(Long accountId, Long txId, Long memberId) {
         Account account = accountRepository.findByIdAndMemberId(accountId, memberId)
             .orElseThrow(() -> ResourceNotFoundException.account(accountId));

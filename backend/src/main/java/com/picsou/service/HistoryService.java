@@ -1,6 +1,7 @@
 package com.picsou.service;
 
 import com.picsou.dto.DashboardResponse.AccountPoint;
+import com.picsou.dto.DashboardResponse.NetWorthIntradayPoint;
 import com.picsou.dto.DashboardResponse.NetWorthPoint;
 import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
@@ -17,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -252,9 +255,143 @@ public class HistoryService {
     }
 
     /**
-     * Compute the live PnL for a set of accounts.
+     * Build hourly net worth history for the last 24 hours.
+     *
+     * For investment accounts (PEA, CT, Crypto): portfolio value = sum(holding.qty × intraday price at each hour).
+     * For bank/savings accounts: use today's balance snapshot (constant throughout the day).
+     * For loans: negate the balance.
      */
-    public com.picsou.dto.PnlResponse buildPnl(List<Long> accountIds, Long memberId) {
+    public List<NetWorthIntradayPoint> buildIntradayHistory(List<Long> accountIds, Long memberId) {
+        List<Account> accounts = accountRepository.findAllById(accountIds);
+        if (accounts.isEmpty()) return List.of();
+
+        if (memberId != null) {
+            for (Account account : accounts) {
+                if (!account.getMember().getId().equals(memberId)) {
+                    throw com.picsou.exception.ResourceNotFoundException.account(account.getId());
+                }
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime from = now.minusHours(24);
+
+        // Collect all tickers and group holdings
+        record HoldingData(String ticker, BigDecimal quantity, BigDecimal avgBuyEur) {}
+
+        Map<Long, List<HoldingData>> accountHoldings = new HashMap<>();
+        Map<Long, BigDecimal> accountHoldingsInvested = new HashMap<>();
+        Map<Long, BigDecimal> accountBankBalance = new HashMap<>(); // non-investment account balances
+        Set<String> allTickers = new HashSet<>();
+        Set<Long> loanIds = new HashSet<>();
+
+        LocalDate today = LocalDate.now();
+
+        for (Account account : accounts) {
+            Long accId = account.getId();
+
+            if (account.getType() == AccountType.LOAN) {
+                loanIds.add(accId);
+            }
+
+            List<AccountHolding> holdings = holdingRepository.findByAccount_Id(accId);
+
+            if (holdings.isEmpty()) {
+                // Non-investment account: use today's balance snapshot or live balance
+                var snapshot = snapshotRepository.findByAccountIdAndDate(accId, today);
+                BigDecimal balance = snapshot.isPresent()
+                    ? snapshot.get().getBalance()
+                    : accountService.liveBalanceEur(account);
+                accountBankBalance.put(accId, balance);
+                accountHoldings.put(accId, List.of());
+                accountHoldingsInvested.put(accId, BigDecimal.ZERO);
+            } else {
+                List<HoldingData> holdingDataList = new ArrayList<>();
+                BigDecimal invested = BigDecimal.ZERO;
+
+                for (AccountHolding h : holdings) {
+                    BigDecimal qty = h.getQuantity();
+                    BigDecimal avgBuy = h.getAverageBuyIn() != null ? h.getAverageBuyIn() : BigDecimal.ZERO;
+                    BigDecimal avgBuyEur = priceService.toEur(avgBuy, account.getCurrency(), null);
+                    String ticker = h.getTicker() != null ? h.getTicker().toUpperCase() : null;
+                    holdingDataList.add(new HoldingData(ticker, qty, avgBuyEur));
+                    invested = invested.add(qty.multiply(avgBuyEur));
+                    if (ticker != null) allTickers.add(ticker);
+                }
+
+                accountHoldings.put(accId, holdingDataList);
+                accountHoldingsInvested.put(accId, invested);
+            }
+        }
+
+        // Fetch intraday prices for all tickers
+        Map<String, NavigableMap<LocalDateTime, BigDecimal>> intradayPricesByTicker = new HashMap<>();
+        for (String ticker : allTickers) {
+            Map<LocalDateTime, BigDecimal> prices = priceService.getIntradayPricesEur(ticker, from, now);
+            if (!prices.isEmpty()) {
+                intradayPricesByTicker.put(ticker, new TreeMap<>(prices));
+            }
+        }
+
+        // Generate hourly timestamps from `from` to `now`
+        List<NetWorthIntradayPoint> result = new ArrayList<>();
+        for (LocalDateTime ts = from.withMinute(0).withSecond(0).withNano(0);
+             !ts.isAfter(now); ts = ts.plusHours(1)) {
+
+            BigDecimal aggTotal = BigDecimal.ZERO;
+            BigDecimal aggInvested = BigDecimal.ZERO;
+
+            for (Account account : accounts) {
+                Long accId = account.getId();
+                List<HoldingData> holdings = accountHoldings.getOrDefault(accId, List.of());
+
+                if (holdings.isEmpty()) {
+                    // Bank/savings/loan account: constant balance
+                    BigDecimal balance = accountBankBalance.getOrDefault(accId, BigDecimal.ZERO);
+                    BigDecimal value = loanIds.contains(accId) ? balance.negate() : balance;
+                    aggTotal = aggTotal.add(value);
+                    if (!loanIds.contains(accId)) {
+                        aggInvested = aggInvested.add(value);
+                    }
+                } else {
+                    // Investment account: compute market value at this hour
+                    BigDecimal marketValue = BigDecimal.ZERO;
+                    for (HoldingData hd : holdings) {
+                        if (hd.ticker == null) continue;
+                        NavigableMap<LocalDateTime, BigDecimal> priceMap = intradayPricesByTicker.get(hd.ticker);
+                        if (priceMap != null) {
+                            var entry = priceMap.floorEntry(ts);
+                            if (entry != null) {
+                                marketValue = marketValue.add(hd.quantity.multiply(entry.getValue()));
+                            }
+                        }
+                    }
+
+                    // If no intraday price found, account has zero market value at that hour (skip)
+                    if (loanIds.contains(accId)) {
+                        aggTotal = aggTotal.subtract(marketValue);
+                    } else {
+                        aggTotal = aggTotal.add(marketValue);
+                        aggInvested = aggInvested.add(accountHoldingsInvested.getOrDefault(accId, BigDecimal.ZERO));
+                    }
+                }
+            }
+
+            result.add(new NetWorthIntradayPoint(ts, aggTotal, aggInvested));
+        }
+
+        log.info("buildIntradayHistory: {} hourly points, {} accounts, {} tickers",
+            result.size(), accounts.size(), allTickers.size());
+
+        return result;
+    }
+
+    /**
+     * Compute the live PnL for a set of accounts.
+     * If a fromDate is provided, also computes the portfolio value at that date
+     * using historical prices from price_snapshot, and returns range-based PnL.
+     */
+    public com.picsou.dto.PnlResponse buildPnl(List<Long> accountIds, Long memberId, LocalDate fromDate) {
         List<Account> accounts = accountRepository.findAllById(accountIds);
         if (accounts.isEmpty()) {
             return new com.picsou.dto.PnlResponse(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, null);
@@ -269,10 +406,17 @@ public class HistoryService {
             }
         }
 
+        // Live values
         BigDecimal liveTotal = BigDecimal.ZERO;
         BigDecimal liveInvested = BigDecimal.ZERO;
 
+        // Collect all holdings for historical lookup
+        List<AccountHolding> allHoldings = new ArrayList<>();
+
         for (Account account : accounts) {
+            List<AccountHolding> holdings = holdingRepository.findByAccount_Id(account.getId());
+            allHoldings.addAll(holdings);
+
             if (account.getType() == AccountType.LOAN) {
                 liveTotal = liveTotal.subtract(accountService.liveBalanceEur(account));
             } else {
@@ -286,7 +430,42 @@ public class HistoryService {
             ? pnl.multiply(BigDecimal.valueOf(100)).divide(liveInvested, 1, java.math.RoundingMode.HALF_UP)
             : null;
 
-        return new com.picsou.dto.PnlResponse(liveTotal, liveInvested, pnl, pnlPercent);
+        // If no fromDate, return live PnL only
+        if (fromDate == null || allHoldings.isEmpty()) {
+            return new com.picsou.dto.PnlResponse(liveTotal, liveInvested, pnl, pnlPercent);
+        }
+
+        // Compute portfolio value at fromDate using historical prices (with weekend/holiday fallback)
+        BigDecimal valueAtFrom = BigDecimal.ZERO;
+        int matchedPrices = 0;
+        for (AccountHolding h : allHoldings) {
+            if (h.getTicker() == null) continue;
+            Optional<PriceSnapshot> snap = priceSnapshotRepository.findLatestByTickerBeforeOrOnDate(h.getTicker(), fromDate);
+            if (snap.isPresent()) {
+                valueAtFrom = valueAtFrom.add(h.getQuantity().multiply(snap.get().getPriceEur()));
+                matchedPrices++;
+            }
+        }
+
+        if (matchedPrices == 0) {
+            log.warn("buildPnl: no historical prices found for {} holdings at {}", allHoldings.size(), fromDate);
+            return new com.picsou.dto.PnlResponse(liveTotal, liveInvested, pnl, pnlPercent);
+        }
+
+        // Range PnL: live holdings value minus value at from date
+        BigDecimal rangePnl = liveTotal.subtract(valueAtFrom);
+        BigDecimal rangePnlPercent = valueAtFrom.compareTo(BigDecimal.ZERO) > 0
+            ? rangePnl.multiply(BigDecimal.valueOf(100)).divide(valueAtFrom, 1, java.math.RoundingMode.HALF_UP)
+            : null;
+
+        log.info("buildPnl: fromDate={} valueAtFrom={} liveTotal={} rangePnl={} rangePnlPercent={}",
+            fromDate, valueAtFrom, liveTotal, rangePnl, rangePnlPercent);
+
+        return new com.picsou.dto.PnlResponse(liveTotal, liveInvested, pnl, pnlPercent, valueAtFrom, rangePnl, rangePnlPercent);
+    }
+
+    public com.picsou.dto.PnlResponse buildPnl(List<Long> accountIds, Long memberId) {
+        return buildPnl(accountIds, memberId, null);
     }
 
     /** Per-account forward-filled snapshot data. */

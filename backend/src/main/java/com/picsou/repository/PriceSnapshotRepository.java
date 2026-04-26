@@ -17,6 +17,17 @@ public interface PriceSnapshotRepository extends JpaRepository<PriceSnapshot, Lo
 
     @Query("""
         SELECT ps FROM PriceSnapshot ps
+        WHERE ps.ticker = :ticker AND ps.date <= :date
+        ORDER BY ps.date DESC
+        LIMIT 1
+        """)
+    Optional<PriceSnapshot> findLatestByTickerBeforeOrOnDate(
+        @Param("ticker") String ticker,
+        @Param("date") LocalDate date
+    );
+
+    @Query("""
+        SELECT ps FROM PriceSnapshot ps
         WHERE ps.ticker IN :tickers AND ps.date BETWEEN :from AND :to
         ORDER BY ps.ticker, ps.date
         """)

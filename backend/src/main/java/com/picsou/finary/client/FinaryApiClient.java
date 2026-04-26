@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.picsou.config.FinaryProperties;
 import com.picsou.finary.dto.*;
 import com.picsou.exception.SyncException;
+import com.picsou.exception.TotpRequiredException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -236,7 +237,7 @@ public class FinaryApiClient {
             // Step 4: Handle TOTP if needed
             if ("needs_second_factor".equals(signIn.status)) {
                 if (totp == null || totp.isBlank()) {
-                    throw new SyncException("FINARY_TOTP required: account has 2FA enabled but FINARY_TOTP is not set");
+                    throw new TotpRequiredException("TOTP required: account has 2FA enabled");
                 }
                 log.debug("Clerk step 4: POST /v1/client/sign_ins/{}/attempt_second_factor", signInId);
                 String totpBody = "strategy=totp&code=" + URLEncoder.encode(totp, StandardCharsets.UTF_8);

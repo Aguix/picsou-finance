@@ -4,6 +4,7 @@ import com.picsou.dto.AccountRequest;
 import com.picsou.dto.AccountResponse;
 import com.picsou.dto.DebtRequest;
 import com.picsou.dto.DebtResponse;
+import com.picsou.dto.HoldingRequest;
 import com.picsou.dto.HoldingResponse;
 import com.picsou.dto.RealEstateMetadataRequest;
 import com.picsou.dto.RealEstateMetadataResponse;
@@ -12,6 +13,7 @@ import com.picsou.dto.TransactionRequest;
 import com.picsou.dto.TransactionResponse;
 import com.picsou.model.BalanceSnapshot;
 import com.picsou.service.AccountService;
+import com.picsou.service.LoanAmortizationService;
 import com.picsou.service.ManualTransactionService;
 import com.picsou.service.UserContext;
 import jakarta.validation.Valid;
@@ -101,10 +103,34 @@ public class AccountController {
         return manualTransactionService.addTransaction(id, userContext.currentMemberId(), req);
     }
 
+    @PutMapping("/{id}/transactions/{txId}")
+    public TransactionResponse updateTransaction(
+        @PathVariable Long id,
+        @PathVariable Long txId,
+        @Valid @RequestBody TransactionRequest req
+    ) {
+        return manualTransactionService.updateTransaction(id, txId, userContext.currentMemberId(), req);
+    }
+
     @DeleteMapping("/{id}/transactions/{txId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteTransaction(@PathVariable Long id, @PathVariable Long txId) {
         manualTransactionService.deleteTransaction(id, txId, userContext.currentMemberId());
+    }
+
+    @PutMapping("/{id}/holdings/{ticker}")
+    public HoldingResponse updateHolding(
+        @PathVariable Long id,
+        @PathVariable String ticker,
+        @Valid @RequestBody HoldingRequest req
+    ) {
+        return accountService.updateHolding(id, userContext.currentMemberId(), ticker, req.quantity(), req.averageBuyIn());
+    }
+
+    @DeleteMapping("/{id}/holdings/{ticker}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteHolding(@PathVariable Long id, @PathVariable String ticker) {
+        accountService.deleteHolding(id, userContext.currentMemberId(), ticker);
     }
 
     @PutMapping("/{id}/real-estate")
@@ -121,5 +147,10 @@ public class AccountController {
         @Valid @RequestBody DebtRequest req
     ) {
         return accountService.updateDebtMetadata(id, userContext.currentMemberId(), req);
+    }
+
+    @GetMapping("/{id}/loan-summary")
+    public LoanAmortizationService.LoanScheduleResponse getLoanSummary(@PathVariable Long id) {
+        return accountService.getLoanSummary(id, userContext.currentMemberId());
     }
 }

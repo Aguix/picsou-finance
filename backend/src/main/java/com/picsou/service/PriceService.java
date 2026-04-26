@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -189,6 +190,24 @@ public class PriceService {
     private record CachedPrice(BigDecimal price, Instant cachedAt) {
         boolean isExpired() {
             return Instant.now().isAfter(cachedAt.plusSeconds(CACHE_TTL_SECONDS));
+        }
+    }
+
+    /**
+     * Fetch intraday (hourly) prices for a ticker over the given time range.
+     * Routes to CoinGecko for crypto, Yahoo Finance for stocks/ETFs.
+     */
+    public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(String ticker, LocalDateTime from, LocalDateTime to) {
+        if (ticker == null || ticker.isBlank() || "EUR".equalsIgnoreCase(ticker)) {
+            return Map.of();
+        }
+
+        String upper = ticker.toUpperCase();
+
+        if (coinGecko.supports(upper)) {
+            return coinGecko.getIntradayPricesEur(upper, from, to);
+        } else {
+            return yahoo.getIntradayPricesEur(upper, from, to);
         }
     }
 }

@@ -13,6 +13,9 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
     @Query("SELECT u FROM AppUser u JOIN FETCH u.member WHERE u.id = :id")
     Optional<AppUser> findByIdWithMember(Long id);
 
+    @Query("SELECT u FROM AppUser u JOIN FETCH u.member WHERE u.username = :username")
+    Optional<AppUser> findByUsernameWithMember(String username);
+
     Optional<AppUser> findByActivationToken(String token);
 
     Optional<AppUser> findByMemberId(Long memberId);

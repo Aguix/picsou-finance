@@ -5,6 +5,7 @@ import com.picsou.service.DashboardService;
 import com.picsou.service.UserContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -20,7 +21,7 @@ public class DashboardController {
     }
 
     @GetMapping
-    public DashboardResponse getDashboard() {
-        return dashboardService.getDashboard(userContext.currentMemberId());
+    public DashboardResponse getDashboard(@RequestParam(required = false) String range) {
+        return dashboardService.getDashboard(userContext.currentMemberId(), range);
     }
 }

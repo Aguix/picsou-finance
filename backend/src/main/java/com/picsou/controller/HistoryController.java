@@ -4,8 +4,10 @@ import com.picsou.dto.DashboardResponse;
 import com.picsou.dto.PnlResponse;
 import com.picsou.service.HistoryService;
 import com.picsou.service.UserContext;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -30,7 +32,15 @@ public class HistoryController {
     }
 
     @GetMapping("/pnl")
-    public PnlResponse getPnl(@RequestParam List<Long> accountIds) {
-        return historyService.buildPnl(accountIds, userContext.currentMemberId());
+    public PnlResponse getPnl(
+        @RequestParam List<Long> accountIds,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from
+    ) {
+        return historyService.buildPnl(accountIds, userContext.currentMemberId(), from);
+    }
+
+    @GetMapping("/net-worth/intraday")
+    public List<DashboardResponse.NetWorthIntradayPoint> getIntraday(@RequestParam List<Long> accountIds) {
+        return historyService.buildIntradayHistory(accountIds, userContext.currentMemberId());
     }
 }
