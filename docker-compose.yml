@@ -46,6 +46,14 @@ services:
     networks:
       - picsou-net
 
+  bourso-auth:
+    build:
+      context: ./services/bourso-auth
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - picsou-net
+
   frontend:
     build:
       context: ./frontend

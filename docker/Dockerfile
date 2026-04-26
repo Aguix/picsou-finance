@@ -1,5 +1,5 @@
 # ============================================================
-# Picsou — All-in-one Docker image (frontend + backend + tr-auth)
+# Picsou — All-in-one Docker image (frontend + backend)
 # Build context: project root (..)
 # ============================================================
 
@@ -29,28 +29,15 @@ COPY backend/src ./src
 RUN mvn package -DskipTests -q
 
 # ---------- Stage 3: Runtime ----------
-FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
+FROM eclipse-temurin:21-jre-jammy
 
-# Install Nginx, Eclipse Temurin JRE 21, supervisor
+# Install Nginx + supervisor + openssl (entrypoint auto-generates secrets on first boot)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nginx \
         supervisor \
-        wget \
-        gpg \
-    && mkdir -p /etc/apt/keyrings \
-    && wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | \
-        gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(. /etc/os-release && echo $VERSION_CODENAME) main" \
-        > /etc/apt/sources.list.d/adoptium.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends temurin-21-jre \
+        openssl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
-# Install tr-auth Python dependencies
-COPY services/tr-auth/requirements.txt /app/tr-auth/requirements.txt
-RUN pip install --no-cache-dir -r /app/tr-auth/requirements.txt
-COPY services/tr-auth/main.py /app/tr-auth/main.py
 
 # Copy built frontend
 COPY --from=frontend-build /build/frontend/dist /usr/share/nginx/html

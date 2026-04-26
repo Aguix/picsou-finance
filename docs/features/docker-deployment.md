@@ -1,69 +1,90 @@
-# Feature: Docker deployment (all-in-one image)
+# Feature: Docker deployment
 
-> Last updated: 2026-04-16
+> Last updated: 2026-04-25
 
 ## Context
 
-Picsou ships as a single Docker image containing three processes: the React frontend (served by Nginx), the Spring Boot backend (JVM), and the tr-auth Python microservice (uvicorn). A `docker-compose.yml` orchestrates the image alongside a PostgreSQL 16 container.
+Picsou deploys as two Docker images orchestrated by `docker/docker-compose.yml`:
+- **`picsou:latest`** — main app: frontend (Nginx) + backend (Spring Boot), no Python.
+- **`docker-tr-auth`** — Trade Republic auth sidecar: headless Chromium + Python/uvicorn.
+
+A third container is PostgreSQL 16 (official image, not built).
 
 ## How it works
 
-### Multi-stage build (3 stages)
+### Main image — `docker/Dockerfile` (3-stage build, context: project root)
 
-1. **`frontend-build`** — `oven/bun:alpine`. Installs deps from `bun.lock` via `bun install --frozen-lockfile`, runs `bun run build` (tsc + Vite). Output: `dist/`.
-2. **`backend-build`** — `maven:3.9-eclipse-temurin-21-alpine`. Copies `pom.xml` first for layer caching (`mvn dependency:go-offline`), then source, then `mvn package -DskipTests`. Output: single fat JAR.
-3. **Runtime** — `mcr.microsoft.com/playwright/python:v1.44.0-jammy` (needed for tr-auth's Playwright dependency). Installs Nginx + Temurin JRE 21 + supervisor. Copies artifacts from both build stages plus config files.
+1. **`frontend-build`** — `oven/bun:alpine`. `bun install --frozen-lockfile`, `bun run build`. Output: `dist/`.
+2. **`backend-build`** — `maven:3.9-eclipse-temurin-21-alpine`. `mvn dependency:go-offline` (layer cache), then `mvn package -DskipTests`. Output: fat JAR.
+3. **Runtime** — `eclipse-temurin:21-jre-jammy`. Installs Nginx + supervisor + openssl. Copies `dist/` and JAR from build stages plus `docker/{nginx.conf,supervisord.conf,entrypoint.sh}`.
 
-### Process supervision
-
-`supervisord` manages three processes in the single container:
+`supervisord` manages **two** processes in the main container:
 
 | Process | Port | Role |
 |---------|------|------|
-| Nginx | 8080 (public) | Serves frontend SPA, proxies `/api/*` and `/actuator` to backend |
+| Nginx | 8080 (public) | Serves SPA, proxies `/api/*` and `/actuator` to backend |
 | Java (Spring Boot) | 9090 (internal) | Backend API |
-| uvicorn (tr-auth) | 8001 (internal) | Trade Republic auth microservice |
 
-Nginx config in `docker/nginx.conf` handles SPA routing (`try_files`), API proxying, static asset caching, and security headers.
+### tr-auth sidecar — `services/tr-auth/Dockerfile`
 
-### Entrypoint
+Based on `python:3.12-slim`. Installs only Chromium (not Firefox/WebKit) via `playwright install chromium`, with system deps pre-installed via apt. The sidecar exposes port 8001 and is reached by the backend via `TR_AUTH_URL=http://tr-auth:8001`.
 
-`docker/entrypoint.sh` sets `SERVER_PORT=9090` and `TR_AUTH_URL=http://127.0.0.1:8001`, then execs supervisord.
+### Entrypoint (`docker/entrypoint.sh`)
+
+On first boot, auto-generates three secrets into `/data/.secrets/` (mounted named volume):
+- `JWT_SECRET` — 48-byte base64
+- `CRYPTO_ENCRYPTION_KEY` — 32-byte base64
+- `POSTGRES_PASSWORD` — 24-byte base64
+
+On subsequent boots, re-reads from the files. If the env var is already set by the operator, it is respected and written to the file for consistency. Secrets are **never** regenerated once created — doing so would invalidate JWTs and corrupt all encrypted data in the DB.
 
 ### Key files
 
-- `docker/Dockerfile` — multi-stage build definition
-- `docker/docker-compose.yml` — orchestration (app + PostgreSQL + volume)
+- `docker/Dockerfile` — main image, 3-stage build
+- `docker/docker-compose.yml` — orchestration (app + tr-auth + PostgreSQL + volumes)
+- `services/tr-auth/Dockerfile` — tr-auth sidecar image
 - `docker/nginx.conf` — Nginx reverse proxy config
-- `docker/supervisord.conf` — process supervision
-- `docker/entrypoint.sh` — container entrypoint
-- `.dockerignore` — excludes build artifacts, secrets, docs, and the Dockerfile itself
+- `docker/supervisord.conf` — supervisor (nginx + backend)
+- `docker/entrypoint.sh` — secret bootstrap + exec supervisord
 
 ### Flow
 
 ```
-docker compose up
-  -> builds docker/Dockerfile (context: project root)
-  -> app container (nginx:8080 -> backend:9090, tr-auth:8001)
-  -> db container (PostgreSQL 16)
+docker compose -f docker/docker-compose.yml up
+  → picsou:latest  (nginx:8080 → backend:9090)
+  → docker-tr-auth (uvicorn:8001)
+  → postgres:16-alpine (:5432)
+```
+
+### Building a release archive
+
+```bash
+docker compose -f docker/docker-compose.yml build
+docker save picsou:latest docker-tr-auth:latest | gzip > picsou-release.tar.gz
+# On target machine:
+docker load < picsou-release.tar.gz
 ```
 
 ## Technical choices
 
 | Choice | Why | Rejected alternative |
 |--------|-----|----------------------|
-| Bun for frontend build | Project uses bun exclusively (`bun.lock`, no `package-lock.json`) | npm (would require a separate lock file or unreliable resolution) |
-| Single image with supervisor | Simpler deployment, one container to manage | Separate containers per service (more complex compose, more overhead) |
-| Playwright base image | tr-auth needs Playwright for Trade Republic auth flow | Slim image + manual Playwright install (harder to maintain) |
+| Bun for frontend build | Project uses bun exclusively (`bun.lock`) | npm (would need a separate lock file) |
+| tr-auth as a separate container | Keeps the main image slim (JRE only, no Python/Playwright) | Embed tr-auth in the main image via supervisord — was done previously, bloated the main image to 1.5GB+ |
+| `python:3.12-slim` + Chromium only | Only Chromium is used (`p.chromium.launch()`); base image is ~5× smaller than `mcr.microsoft.com/playwright/python` which pre-installs all three browsers | `mcr.microsoft.com/playwright/python:v1.44.0-jammy` — included Firefox + WebKit unnecessarily (+~1.5GB uncompressed) |
+| Auto-generated secrets on first boot | Zero-config install: user runs `docker compose up` with no pre-configuration | Require operator to set secrets manually before first boot |
 | `.dockerignore` excludes `docker/Dockerfile` | Prevents the Dockerfile from being part of its own build context | No exclusion (harmless but unnecessary) |
 
 ## Gotchas / Pitfalls
 
-- **`.dockerignore` must NOT exclude `docker/` entirely.** The runtime stage copies `docker/nginx.conf`, `docker/supervisord.conf`, and `docker/entrypoint.sh` from the build context. Only `docker/Dockerfile` and `docker-compose*.yml` should be excluded.
-- **Frontend lock file is `bun.lock`, not `package-lock.json`.** The Dockerfile must use `oven/bun` image and `bun install --frozen-lockfile`. Using npm will fail.
-- **`VITE_DEMO_MODE` build arg** defaults to `false`. Pass `--build-arg VITE_DEMO_MODE=true` to enable demo mode in the built image.
-- **Nginx listens on 8080**, backend on 9090 internally. The backend port is set via `SERVER_PORT` env var in `entrypoint.sh`, not in `application.yml`.
-- **Runtime image is large** (~1.5 GB+) because of Playwright. Only tr-auth needs it. If tr-auth is ever externalized, the base image can be switched to a lightweight one.
+- **`.dockerignore` must NOT exclude `docker/` entirely.** The runtime stage copies `docker/nginx.conf`, `docker/supervisord.conf`, and `docker/entrypoint.sh` from the build context.
+- **Frontend lock file is `bun.lock`.** The Dockerfile must use `oven/bun` and `bun install --frozen-lockfile`. npm will fail.
+- **`VITE_DEMO_MODE` build arg** defaults to `false`. Pass `--build-arg VITE_DEMO_MODE=true` for a demo build.
+- **Nginx listens on 8080**, backend on 9090. The backend port is set via `SERVER_PORT` in `entrypoint.sh`, not `application.yml`.
+- **`TR_AUTH_URL` default in entrypoint is `http://127.0.0.1:8001`** (legacy single-container fallback). In docker-compose it is overridden to `http://tr-auth:8001` via the `environment:` block.
+- **Secrets are never regenerated.** If `/data/.secrets/jwt_secret` exists, it is reused. Deleting it will log out all users and invalidate all encrypted secrets in the DB.
+- **Spring Boot env var naming:** Properties under `app.*` require the `APP_` prefix. `app.finary.email` → `APP_FINARY_EMAIL`. Variables like `JWT_SECRET` work because `application.yml` maps them explicitly.
+- **Stale env vars removed (2026-04-19):** `TR_PHONE_NUMBER`, `TR_PIN`, `FINARY_TOTP`, `POWENS_*`, `FINARY_EMAIL`, `FINARY_PASSWORD`. Do not re-add them.
 
 ## Tests
 
