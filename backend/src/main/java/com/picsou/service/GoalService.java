@@ -146,10 +146,10 @@ public class GoalService {
             : BigDecimal.ZERO;
 
         BigDecimal avgMonthlyContribution = calculateAvgMonthlyContribution(goal.getAccounts());
-        // null = no history yet → give benefit of the doubt (not "late")
-        boolean isOnTrack = monthlyNeeded.compareTo(BigDecimal.ZERO) <= 0
-            || avgMonthlyContribution == null
-            || avgMonthlyContribution.compareTo(monthlyNeeded) >= 0;
+
+        // isOnTrack now compares cumulative past objectives vs cumulative past effectives
+        // (overrides + manual contributions included). Indirect user override via the calendar.
+        boolean isOnTrack = isOnTrackFromPastMonths(goal, monthlyNeeded);
 
         BigDecimal surplus = avgMonthlyContribution != null
             ? avgMonthlyContribution.subtract(monthlyNeeded)
@@ -193,6 +193,50 @@ public class GoalService {
 
         if (accountsWithData == 0) return null;
         return totalContribution.divide(BigDecimal.valueOf(accountsWithData), 2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * isOnTrack = Σ effective(past months) >= Σ objective(past months).
+     * - effective = manualActual ?? snapshot delta ; months with neither are skipped.
+     * - objective = override ?? monthlyNeeded.
+     * - "past" = strictly before current month (current month is in progress).
+     * - If goal has no createdAt or no past month with data, returns true (benefit of the doubt).
+     */
+    private boolean isOnTrackFromPastMonths(Goal goal, BigDecimal monthlyNeeded) {
+        if (monthlyNeeded.compareTo(BigDecimal.ZERO) <= 0) return true;
+        if (goal.getCreatedAt() == null) return true;
+
+        YearMonth startMonth = YearMonth.from(
+            goal.getCreatedAt().atZone(ZoneId.systemDefault()).toLocalDate()
+        );
+        YearMonth currentMonth = YearMonth.now();
+        if (!startMonth.isBefore(currentMonth)) return true;
+
+        Map<String, BigDecimal> overrideMap = overrideRepository.findByGoalId(goal.getId()).stream()
+            .collect(Collectors.toMap(GoalMonthOverride::getYearMonth, GoalMonthOverride::getAmount));
+        Map<String, BigDecimal> manualMap = manualContributionRepository.findByGoalId(goal.getId()).stream()
+            .collect(Collectors.toMap(GoalManualContribution::getYearMonth, GoalManualContribution::getAmount));
+
+        BigDecimal sumObjective = BigDecimal.ZERO;
+        BigDecimal sumEffective = BigDecimal.ZERO;
+        boolean anyData = false;
+
+        YearMonth cursor = startMonth;
+        while (cursor.isBefore(currentMonth)) {
+            String ym = cursor.toString();
+            BigDecimal manualActual = manualMap.get(ym);
+            BigDecimal actual = manualActual != null ? manualActual : calculateActualForMonth(goal, cursor);
+            if (actual != null) {
+                BigDecimal objective = overrideMap.getOrDefault(ym, monthlyNeeded);
+                sumObjective = sumObjective.add(objective);
+                sumEffective = sumEffective.add(actual);
+                anyData = true;
+            }
+            cursor = cursor.plusMonths(1);
+        }
+
+        if (!anyData) return true;
+        return sumEffective.compareTo(sumObjective) >= 0;
     }
 
     // ─── History ──────────────────────────────────────────────────────────────
