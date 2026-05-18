@@ -175,10 +175,20 @@ export function NetWorthChart({ data, intraday = [], range, onRangeChange, showI
         }))
       : filterByRange(data, range).map(p => ({ ...p, total: p.total as number | null }))
 
+    // When a target is set, crop history on the left to the trajectory start
+    // (goal createdAt). Balance changes before the goal existed aren't
+    // "savings progress" -- showing them would make the chart misleading.
+    const cropped = (() => {
+      if (!target) return base
+      const startMs = new Date(target.startDate).getTime()
+      if (!Number.isFinite(startMs)) return base
+      return base.filter(p => new Date(p.date).getTime() >= startMs)
+    })()
+
     // Decorate each visible point with the interpolated target value.
     const decorated = targetAt
-      ? base.map(p => ({ ...p, target: targetAt(p.date) ?? undefined }))
-      : base
+      ? cropped.map(p => ({ ...p, target: targetAt(p.date) ?? undefined }))
+      : cropped
 
     // On the ALL range, project the X axis up to the deadline so the user sees
     // the full trajectory. The synthetic point carries only `target` -- the
