@@ -2,7 +2,7 @@ name: Build & publish Docker image
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
     tags: ['v*']
   workflow_dispatch:
 
@@ -35,8 +35,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Tag strategy:
-      #   - push on main           -> nightly
-      #   - push of a v* git tag   -> latest + the semver (e.g. 1.0.0, 1.0, 1)
+      #   - push on main             -> nightly
+      #   - push on any other branch -> branch name (e.g. 1.0.0, feature-foo)
+      #   - push of a v* git tag     -> latest + the semver (e.g. 1.0.0, 1.0, 1)
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -44,6 +45,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
