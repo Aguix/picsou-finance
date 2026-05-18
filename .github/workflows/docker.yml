@@ -1,4 +1,4 @@
-name: Build & publish Docker image
+name: Build & publish Docker images
 
 on:
   push:
@@ -8,7 +8,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
@@ -16,6 +15,19 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: app
+            image: ${{ github.repository }}
+            context: .
+            dockerfile: docker/Dockerfile
+          - name: tr-auth
+            image: ${{ github.repository }}/tr-auth
+            context: services/tr-auth
+            dockerfile: services/tr-auth/Dockerfile
 
     steps:
       - name: Checkout
@@ -34,7 +46,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Tag strategy:
+      # Tag strategy (applied to every matrix image):
       #   - push on main             -> nightly
       #   - push on any other branch -> branch name (e.g. 1.0.0, feature-foo)
       #   - push of a v* git tag     -> latest + the semver (e.g. 1.0.0, 1.0, 1)
@@ -42,7 +54,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ matrix.image }}
           tags: |
             type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
@@ -55,11 +67,11 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: docker/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
