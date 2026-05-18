@@ -120,7 +120,7 @@ GoalService.setMonthOverride(goalId, yearMonth, amount)
 - **Status badges**: achieved/on track use `variant="default"` (primary), behind uses `variant="destructive"`, waiting uses `variant="secondary"`.
 - **Calendar badges**: "manu." uses `variant="secondary"`, "modif." uses `variant="outline"` — no raw Tailwind color overrides.
 - **Icons**: `TrendingUp`/`TrendingDown` come from `lucide-react` (not HugeIcons) in the goals pages.
-- **Goal detail chart**: `GoalDetailModal` reuses the shared `NetWorthChart` with the optional `target` prop. The chart draws a dashed `var(--chart-3)` line from `(goal.createdAt, 0)` to `(goal.deadline, goal.targetAmount)`, interpolated linearly per visible point. On the `ALL` range, the X axis is stretched to the deadline so the projection beyond today is visible. The `target` prop is opt-in: Dashboard / Accounts / AccountDetail don't pass it and remain unchanged.
+- **Goal detail chart**: `GoalDetailModal` reuses the shared `NetWorthChart` with the optional `target` prop. The chart draws a dashed `var(--chart-3)` line from `(goal.createdAt, 0)` to `(goal.deadline, goal.targetAmount)`, interpolated linearly per visible point. When the `target` prop is set, history is also cropped on the left to `target.startDate` -- pre-goal account activity isn't "savings progress" and would make the chart misleading. On the `ALL` range, the X axis is stretched on the right up to the deadline so the projection beyond today is visible. The `target` prop is opt-in: Dashboard / Accounts / AccountDetail don't pass it and remain unchanged.
 
 ## Links
 
