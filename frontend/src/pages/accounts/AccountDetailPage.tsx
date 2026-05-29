@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   useAccount, useAccountHistory, useHoldingsWithLivePrices,
-  useAccountTransactions, useAddSnapshot, useAddTransaction, useDeleteTransaction,
+  useAccountTransactions, useAddTransaction, useDeleteTransaction,
   useUpdateTransaction, useUpdateHolding, useDeleteHolding
 } from '@/features/accounts/hooks'
 import { useHistory } from '@/features/history/hooks'
@@ -13,49 +13,20 @@ import { HoldingsTable } from '@/components/shared/HoldingsTable'
 import { TransactionsList } from '@/components/shared/TransactionsList'
 import { AddTransactionModal } from '@/components/shared/AddTransactionModal'
 import { EditHoldingModal } from '@/components/shared/EditHoldingModal'
+import { MonthEndBalanceModal } from '@/components/shared/MonthEndBalanceModal'
 import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
 import { AccountTypeBadge } from '@/components/shared/AccountTypeBadge'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoanDetailSection } from '@/components/loan/LoanDetailSection'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
-} from '@/components/ui/dialog'
-import { ArrowLeft, Calendar, Loader2, TrendingUp, TrendingDown } from 'lucide-react'
+import { ArrowLeft, Calendar, TrendingUp, TrendingDown } from 'lucide-react'
 import { formatLocalDate, accountTypeLabel } from '@/lib/utils'
 import { type TimeRange } from '@/components/shared/TimeRangeSelector'
-import type { BalanceSnapshot, HoldingResponse, Transaction } from '@/types/api'
+import type { HoldingResponse, Transaction } from '@/types/api'
 
 const HOLDING_ACCOUNT_TYPES = ['PEA', 'COMPTE_TITRES', 'CRYPTO']
-
-function getLast12Months() {
-  const months = []
-  const now = new Date()
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    const year = d.getFullYear()
-    const month = d.getMonth() + 1
-    const key = `${year}-${String(month).padStart(2, '0')}`
-    const lastDay = new Date(year, month, 0).getDate()
-    const date = `${key}-${String(lastDay).padStart(2, '0')}`
-    const label = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
-    months.push({ key, year, month, date, label })
-  }
-  return months
-}
-
-function snapshotForMonth(history: BalanceSnapshot[] | undefined, year: number, month: number) {
-  return history
-    ?.filter(s => {
-      const [y, m] = s.date.split('-').map(Number)
-      return y === year && m === month
-    })
-    .sort((a, b) => b.date.localeCompare(a.date))[0]
-}
 
 export function AccountDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -67,7 +38,6 @@ export function AccountDetailPage() {
   const { data: history } = useAccountHistory(accountId)
   const { data: holdings } = useHoldingsWithLivePrices(accountId)
   const { data: transactions } = useAccountTransactions(accountId)
-  const addSnapshot = useAddSnapshot()
   const addTxMutation = useAddTransaction(accountId)
   const deleteTxMutation = useDeleteTransaction(accountId)
   const updateTxMutation = useUpdateTransaction(accountId)
@@ -79,47 +49,7 @@ export function AccountDetailPage() {
   const [showAddTx, setShowAddTx] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [editingHolding, setEditingHolding] = useState<HoldingResponse | null>(null)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [modified, setModified] = useState<Set<string>>(new Set())
-  const [saving, setSaving] = useState(false)
   const [range, setRange] = useState<TimeRange>('1Y')
-
-  const months = useMemo(() => getLast12Months(), [])
-
-  const openHistory = () => {
-    const initial: Record<string, string> = {}
-    months.forEach(({ key, year, month }) => {
-      const snap = snapshotForMonth(history, year, month)
-      if (snap) initial[key] = String(snap.balance)
-    })
-    setValues(initial)
-    setModified(new Set())
-    setShowHistory(true)
-  }
-
-  const closeHistory = () => {
-    setShowHistory(false)
-    setModified(new Set())
-  }
-
-  const handleChange = (key: string, value: string) => {
-    setValues(prev => ({ ...prev, [key]: value }))
-    setModified(prev => new Set([...prev, key]))
-  }
-
-  const handleSaveHistory = async () => {
-    setSaving(true)
-    const toSave = months.filter(({ key }) => modified.has(key) && values[key] !== '')
-    await Promise.all(
-      toSave.map(({ key, date, year, month }) => {
-        const existing = snapshotForMonth(history, year, month)
-        const saveDate = existing ? existing.date : date
-        return addSnapshot.mutateAsync({ id: accountId, balance: parseFloat(values[key]), date: saveDate })
-      })
-    )
-    setSaving(false)
-    closeHistory()
-  }
 
   if (!account && !isLoading) return null
 
@@ -163,7 +93,7 @@ export function AccountDetailPage() {
             </Button>
             <Button
               size="sm"
-              onClick={openHistory}
+              onClick={() => setShowHistory(true)}
             >
               <Calendar size={14} className="mr-1.5" />
               {t('accounts.snapshots')}
@@ -360,58 +290,12 @@ export function AccountDetailPage() {
       />
 
       {/* Monthly history dialog */}
-      <Dialog open={showHistory} onOpenChange={open => { if (!open) closeHistory() }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{t('accounts.monthlyHistory')}</DialogTitle>
-          </DialogHeader>
-
-          <div className="flex flex-col gap-0 max-h-[60vh] overflow-y-auto -mx-1 px-1">
-            {months.map(({ key, label }) => {
-              const isModified = modified.has(key)
-              return (
-                <div
-                  key={key}
-                  className="flex items-center gap-3 py-2 border-b last:border-0"
-                >
-                  <Label
-                    htmlFor={`month-${key}`}
-                    className={`flex-1 capitalize text-xs ${isModified ? 'text-foreground font-semibold' : 'text-muted-foreground font-medium'}`}
-                  >
-                    {label}
-                  </Label>
-                  <Input
-                    id={`month-${key}`}
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={values[key] ?? ''}
-                    onChange={e => handleChange(key, e.target.value)}
-                    placeholder="—"
-                    className="w-28 h-7 text-right text-xs"
-                  />
-                </div>
-              )
-            })}
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={closeHistory} type="button">
-              {t('common.cancel')}
-            </Button>
-            <Button
-              onClick={handleSaveHistory}
-              disabled={saving || modified.size === 0}
-            >
-              {saving && (
-                <Loader2 size={12} className="mr-1.5 animate-spin" />
-              )}
-              {t('accounts.addSnapshot')}
-              {modified.size > 0 && ` (${modified.size})`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <MonthEndBalanceModal
+        open={showHistory}
+        onClose={() => setShowHistory(false)}
+        accountId={accountId}
+        history={history}
+      />
     </div>
   )
 }
