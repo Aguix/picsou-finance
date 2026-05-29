@@ -1,6 +1,6 @@
 # Feature: Admin Page (instance settings)
 
-> Last updated: 2026-04-26
+> Last updated: 2026-05-29 (create-user-from-Admin + login derived from display name)
 
 ## Context
 
@@ -10,12 +10,22 @@ toggle integrations on/off without editing rows in `app_setting` by hand. The Ad
 page exposes those same `SetupService` writers behind a role-gated `/admin` route so
 a self-host admin can reconfigure the instance from the browser.
 
-The page also surfaces a **Members** section that lets the admin see every family
-member with their display name and login (username), invite a managed profile via
-a one-shot activation link, reset an active user's password by sending the same
+The page also surfaces a **Members** section that lets the admin **create a user**
+(name field + "Create user" button — provisions a managed profile *and* its login
+in one step, then shows the activation link to share), see every family member with
+their display name and login (username), invite a managed profile via a one-shot
+activation link, reset an active user's password by sending the same
 `/activate/{token}` link with a fresh token, and delete a non-activated managed
 profile. The actions reuse `FamilyService` writers behind the existing
 `/api/family/**` admin gate (`requireAdmin()`).
+
+The login **username is derived from the display name** ("Jean Dupont" →
+`jean.dupont`), replacing the legacy `member_<id>` scheme. `FamilyService`
+slugifies the name (NFD accent strip, lowercase, non-alphanumeric runs → a single
+dot, trimmed) and appends a numeric suffix (`.2`, `.3`, …) until unique. The
+"Create user" flow is the two existing endpoints chained client-side
+(`POST /api/family/members` then `POST /api/family/members/{id}/activate`) via the
+`useCreateUserWithLogin` hook — no new endpoint.
 
 ## How it works
 
@@ -58,11 +68,18 @@ Frontend:
 - `frontend/src/pages/admin/sections/IntegrationsSection.tsx` — five hardcoded keys
   (`enablebanking, boursobank, traderepublic, finary, crypto`) toggled via
   `useToggleIntegration`.
-- `frontend/src/pages/admin/sections/MembersSection.tsx` — list of family members
-  with avatar, display name, login, derived status; per-member actions:
-  create / regenerate activation link, reset password, delete. Generated link is
+- `frontend/src/pages/admin/sections/MembersSection.tsx` — create-user form (name
+  + "Create user" button) on top, then the list of family members with avatar,
+  display name, login, derived status; per-member actions: create / regenerate
+  activation link, reset password, reset 2FA, delete. Generated/activation link is
   shown inline with a copy button; no email is sent (self-hosted, admin transmits
   manually).
+- `frontend/src/features/family/hooks.ts` — `useCreateUserWithLogin` chains
+  `createMember` + `generateActivationLink` (one loading/error state, returns the
+  activation link); plus `useFamilyMembers`, `useDeleteMember`,
+  `useGenerateActivationLink`, `useResetMemberPassword`.
+- `backend/src/main/java/com/picsou/service/FamilyService.java` — `deriveUsername`
+  slugifier (used by `generateActivationToken`) + member CRUD / token writers.
 - `frontend/src/features/admin/api.ts` — `adminApi` (typed endpoints).
 - `frontend/src/features/admin/hooks.ts` — `useAdminSettings`,
   `useUpdateSecurity`, `useUpdateEnableBanking`, `useToggleIntegration` (all
@@ -139,6 +156,16 @@ On submit / toggle ──► PUT or PATCH ──► invalidate adminKeys.setting
   client-side.** This is a usability-only check; the real authorization is the
   backend matcher. Don't be tempted to remove the duplicate gate "to DRY it" — they
   guard different things (link visibility vs. endpoint access).
+- **The username is derived only when the login is first created**
+  (`generateActivationToken`, `existingUser == null` branch), not at managed-profile
+  creation — the `AppUser` doesn't exist until then. Renaming a member afterwards
+  (`updateDisplayName`) does **not** change an already-issued login username; that's
+  intentional (a login identifier is stable). The slug uses only `[a-z0-9.]`, a
+  subset of the `[A-Za-z0-9._-]` setup pattern, so it's always a legal username.
+- **"Create user" is two chained requests, not atomic.** If the second call
+  (`/activate`) fails after the profile is created, you get a managed profile with no
+  login — recoverable from the same screen via the per-member "Create login" button.
+  No new backend endpoint was added precisely to reuse this idempotent recovery path.
 
 ## Tests
 
@@ -148,6 +175,11 @@ On submit / toggle ──► PUT or PATCH ──► invalidate adminKeys.setting
   `toggleIntegration` with `enabled=true/false`. URL-level role gate is enforced by
   Spring Security and not exercised by these unit tests; coverage relies on the
   `SecurityConfig` matcher being correct.
+- `backend/src/test/java/com/picsou/service/FamilyServiceTest.java` — Mockito tests
+  for the username derivation in `generateActivationToken`: simple slug, accent +
+  space normalization (`Jean Dupont` → `jean.dupont`, `Élodie` → `elodie`),
+  collision suffix (`alice` → `alice.2`), and the blank/non-alphanumeric fallback
+  (`!!!` → `user`).
 - No dedicated integration test for the role gate (manual verification — same
   approach as `security-cors-cookies.md`). A future MockMvc slice test asserting a
   USER-role request is rejected with 403 would close the gap.

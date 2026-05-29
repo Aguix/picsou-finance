@@ -546,6 +546,8 @@
     "members": {
       "title": "Members",
       "description": "Manage family member accounts",
+      "createUser": "Create user",
+      "createUserPlaceholder": "Member name",
       "displayName": "Display name",
       "loginName": "Login",
       "noLogin": "—",

@@ -31,6 +31,23 @@ export function useCreateMember() {
   })
 }
 
+/**
+ * Creates a managed profile AND provisions its login in one step, returning the
+ * activation link to share. Chains the two existing endpoints so the caller gets
+ * a single loading/error state.
+ */
+export function useCreateUserWithLogin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (data: { displayName: string; avatarColor?: string }) => {
+      const member = await familyApi.createMember(data)
+      const { activationLink } = await familyApi.generateActivationLink(member.id)
+      return { member, activationLink }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['family', 'members'] }),
+  })
+}
+
 export function useUpdateMember() {
   const qc = useQueryClient()
   return useMutation({

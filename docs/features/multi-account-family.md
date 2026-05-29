@@ -42,8 +42,13 @@ The `FamilyViewService` aggregates shared data for the family dashboard.
 
 ### Profile activation flow
 
-1. Admin creates a managed profile (no login)
-2. Admin clicks "Create login" → generates an activation token stored on `AppUser`
+1. Admin creates a managed profile (no login). From the **Admin → Members** section
+   the "Create user" button does steps 1–2 in one geste (profile + login), then
+   shows the activation link; *Settings → Family* still creates a bare profile.
+2. Admin clicks "Create login" → generates an activation token stored on `AppUser`.
+   The login **username is derived from the display name** ("Jean Dupont" →
+   `jean.dupont`, slugified + made unique with a `.N` suffix) instead of the legacy
+   `member_<id>`. See `FamilyService.deriveUsername` and [admin-page.md](./admin-page.md).
 3. Admin shares the activation link (`/activate/{token}`)
 4. The managed person opens the link, sets a password
 5. `AppUser.isManaged` is set to false, `isActivated` to true

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Users, Link as LinkIcon, KeyRound, Trash2, Copy, Check, ShieldOff, ShieldCheck } from 'lucide-react'
+import { Users, Link as LinkIcon, KeyRound, Trash2, Copy, Check, ShieldOff, ShieldCheck, UserPlus } from 'lucide-react'
 import {
   Card,
   CardContent,
@@ -9,10 +9,12 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { useAuthStore } from '@/stores/auth-store'
 import {
   useFamilyMembers,
+  useCreateUserWithLogin,
   useDeleteMember,
   useGenerateActivationLink,
   useResetMemberPassword,
@@ -25,11 +27,13 @@ export function MembersSection() {
   const { t } = useTranslation()
   const currentUser = useAuthStore((s) => s.user)
   const { data: members, isLoading } = useFamilyMembers()
+  const createUser = useCreateUserWithLogin()
   const deleteMember = useDeleteMember()
   const generateActivation = useGenerateActivationLink()
   const resetPassword = useResetMemberPassword()
   const forceDisableMfa = useAdminForceDisableMfa()
 
+  const [newName, setNewName] = useState('')
   const [link, setLink] = useState<GeneratedLink>(null)
   const [copied, setCopied] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
@@ -38,6 +42,20 @@ export function MembersSection() {
   function showLink(memberId: number, path: string) {
     setLink({ memberId, url: `${window.location.origin}${path}` })
     setCopied(false)
+  }
+
+  function handleCreateUser() {
+    const displayName = newName.trim()
+    if (!displayName) return
+    createUser.mutate(
+      { displayName },
+      {
+        onSuccess: ({ member, activationLink }) => {
+          showLink(member.id, activationLink)
+          setNewName('')
+        },
+      },
+    )
   }
 
   async function handleCopy() {
@@ -75,6 +93,25 @@ export function MembersSection() {
         <CardDescription>{t('admin.members.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Create a new user (managed profile + login + activation link) */}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleCreateUser() }}
+            placeholder={t('admin.members.createUserPlaceholder')}
+            disabled={createUser.isPending}
+          />
+          <Button
+            onClick={handleCreateUser}
+            disabled={!newName.trim() || createUser.isPending}
+            className="shrink-0"
+          >
+            <UserPlus className="size-4" />
+            {t('admin.members.createUser')}
+          </Button>
+        </div>
+
         {isLoading ? (
           <p className="text-sm text-muted-foreground">{t('admin.members.loading')}</p>
         ) : !members || members.length === 0 ? (
