@@ -92,6 +92,16 @@ public class AuthController {
             throw new BadCredentialsException("Invalid credentials");
         }
 
+        // A deactivated account (e.g. pending break-glass admin recovery) must not
+        // get a session: JwtAuthenticationFilter requires isActivated(), so issuing
+        // tokens here would only feed an endless refresh→401 loop. Fail fast with a
+        // clear message that points the user at their activation link.
+        if (!user.isActivated()) {
+            ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.FORBIDDEN);
+            problem.setDetail("Account not activated. Use your activation link to set a password.");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+        }
+
         // MFA gate: if 2FA is on AND this device is not already a trusted one,
         // we hand back a short-lived mfa_challenge cookie and demand the user
         // complete /api/auth/mfa/verify before access/refresh are issued.
@@ -185,8 +195,13 @@ public class AuthController {
             AppUser user = userRepository.findByUsernameWithMember(username)
                 .orElseThrow(() -> new BadCredentialsException("User not found"));
 
+            // Reject if the token version was bumped (credential change / recovery)
+            // OR the account has since been deactivated. Treating !isActivated() as
+            // revoked clears the cookies and breaks the refresh→401 loop for any
+            // session that was minted before deactivation — consistent with the
+            // isActivated() gate in JwtAuthenticationFilter / PersistentTokenAuthFilter.
             Long tv = jwtUtil.getTokenVersion(claims);
-            if (tv == null || tv != user.getTokenVersion()) {
+            if (tv == null || tv != user.getTokenVersion() || !user.isActivated()) {
                 clearTokenCookies(httpRes);
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Token revoked"));
