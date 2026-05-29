@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import type { TrSessionStatus } from '@/types/api'
 import { extractErrorMessage } from '@/lib/errors'
+import { formatDateTime } from '@/lib/utils'
 
 type AuthState = 'IDLE' | 'AWAITING_TAN' | 'CONNECTED' | 'ERROR'
 
@@ -197,7 +198,7 @@ export function TradeRepublicTab() {
               )}
               {effectiveState === 'CONNECTED' && sessionStatus?.expiresAt && (
                 <span className="text-sm text-muted-foreground">
-                  {t('sync.tr.expiresAt')} {new Date(sessionStatus.expiresAt).toLocaleString()}
+                  {t('sync.tr.expiresAt')} {formatDateTime(sessionStatus.expiresAt)}
                 </span>
               )}
             </div>

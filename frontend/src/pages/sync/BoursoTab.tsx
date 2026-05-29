@@ -10,6 +10,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { RefreshCw, LogOut, User, Lock, ShieldCheck, AlertTriangle } from 'lucide-react'
 import type { BoursoSessionStatus, BoursoAuthInitResponse } from '@/types/api'
 import { extractErrorMessage } from '@/lib/errors'
+import { formatDate } from '@/lib/utils'
 
 type AuthState = 'IDLE' | 'AWAITING_MFA' | 'CONNECTED' | 'ERROR'
 
@@ -144,7 +145,7 @@ export function BoursoTab() {
             )}
             {effectiveState === 'CONNECTED' && sessionStatus?.expiresAt && (
               <span className="text-sm text-muted-foreground">
-                {t('sync.bourso.expiresAt')} {new Date(sessionStatus.expiresAt).toLocaleDateString()}
+                {t('sync.bourso.expiresAt')} {formatDate(sessionStatus.expiresAt)}
               </span>
             )}
           </div>

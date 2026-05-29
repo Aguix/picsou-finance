@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { TrendingUp, TrendingDown, Loader2 } from 'lucide-react'
 import { type TimeRange } from '@/components/shared/TimeRangeSelector'
+import { formatDate } from '@/lib/utils'
 
 const ACCOUNT_TYPE_I18N: Record<string, string> = {
   PEA: 'accountTypes.pea',
@@ -200,9 +201,7 @@ export function HoldingDetailModal({ line, onClose }: HoldingDetailModalProps) {
                 <div>
                   <p className="text-xs text-muted-foreground mb-0.5">{t('holdings.lastUpdated')}</p>
                   <p className="text-sm font-semibold">
-                    {line.priceUpdatedAt
-                      ? new Date(line.priceUpdatedAt).toLocaleDateString()
-                      : '\u2013'}
+                    {formatDate(line.priceUpdatedAt)}
                   </p>
                 </div>
                 <div>
