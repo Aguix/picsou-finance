@@ -55,7 +55,11 @@ export function extractErrorMessage(err: unknown, fallback = 'Une erreur est sur
   return safeBackendMessage(err) ?? fallback
 }
 
-type TFunc = (key: string, fallback?: string) => string
+// formatApiError only ever calls t with a single key argument, so we type it as
+// such. A looser `(key, fallback?: string)` signature would reject the real
+// i18next TFunction, whose second positional arg is an options object / default
+// value rather than a plain string — that mismatch is what broke the CI build.
+type TFunc = (key: string) => string
 
 /**
  * Maps any API error to a friendly, translated string.
