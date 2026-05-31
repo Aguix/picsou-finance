@@ -1,11 +1,12 @@
 import { useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/shared/NumericInput'
+import { DateInput } from '@/components/shared/DateInput'
 import { Label } from '@/components/ui/label'
 import { ColorPicker } from '@/components/shared/ColorPicker'
 import { parseAmount } from '@/lib/utils'
@@ -73,7 +74,7 @@ const EMPTY_DEFAULTS: AccountFormData = {
 
 export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title, loading }: AccountFormProps) {
   const { t } = useTranslation()
-  const { register, handleSubmit, watch, setValue, reset } = useForm<AccountFormData>({
+  const { register, handleSubmit, watch, setValue, reset, control } = useForm<AccountFormData>({
     resolver: zodResolver(accountSchema),
     defaultValues: { ...EMPTY_DEFAULTS, ...defaultValues },
   })
@@ -207,11 +208,23 @@ export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="startDate">{t('debt.startDate')}</Label>
-                  <Input id="startDate" type="date" {...register('startDate')} />
+                  <Controller
+                    control={control}
+                    name="startDate"
+                    render={({ field }) => (
+                      <DateInput id="startDate" value={field.value ?? ''} onChange={field.onChange} />
+                    )}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="endDate">{t('debt.endDate')}</Label>
-                  <Input id="endDate" type="date" {...register('endDate')} />
+                  <Controller
+                    control={control}
+                    name="endDate"
+                    render={({ field }) => (
+                      <DateInput id="endDate" value={field.value ?? ''} onChange={field.onChange} />
+                    )}
+                  />
                 </div>
               </div>
             </>

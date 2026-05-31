@@ -15,7 +15,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Separator } from '@/components/ui/separator'
 import { ArrowLeft, Calendar, LayoutGrid, Clock, Loader2 } from 'lucide-react'
-import { cn, parseAmount } from '@/lib/utils'
+import { cn, parseAmount, getLocale } from '@/lib/utils'
 import type { GoalMonthEntry } from '@/types/api'
 
 // ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ function monthAbbr(ym: string): string {
 function fullMonthName(ym: string): string {
   const [year, month] = ym.split('-')
   return new Date(parseInt(year), parseInt(month) - 1, 1)
-    .toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    .toLocaleDateString(getLocale(), { month: 'long', year: 'numeric' })
 }
 
 function groupByYear(months: GoalMonthEntry[]): { year: number; entries: GoalMonthEntry[] }[] {

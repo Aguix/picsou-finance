@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -74,9 +75,16 @@ class GoalServiceTest {
 
         assertThat(progress.currentTotal()).isEqualByComparingTo("5000");
         assertThat(progress.targetAmount()).isEqualByComparingTo("20000");
-        assertThat(progress.monthsLeft()).isEqualTo(6L);
-        // monthlyNeeded = (20000 - 5000) / 6 = 2500
-        assertThat(progress.monthlyNeeded()).isEqualByComparingTo("2500.00");
+
+        // The deadline is `now + 6 months`, but ChronoUnit.MONTHS.between clamps to 5
+        // when today's day-of-month doesn't exist in the target month (e.g. running on
+        // the 31st → November has 30 days). Derive the expectation from the actual
+        // monthsLeft so the test verifies the *relationship* (monthlyNeeded = needed /
+        // monthsLeft) and stays green on every calendar day.
+        long monthsLeft = progress.monthsLeft();
+        assertThat(monthsLeft).isIn(5L, 6L);
+        assertThat(progress.monthlyNeeded()).isEqualByComparingTo(
+            new BigDecimal("15000").divide(BigDecimal.valueOf(monthsLeft), 2, RoundingMode.HALF_UP));
         assertThat(progress.percentComplete()).isEqualByComparingTo("25.0000");
     }
 

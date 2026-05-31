@@ -1,6 +1,6 @@
 # Feature: Frontend utility library (`lib/utils.ts`)
 
-> Last updated: 2026-05-29 (comma/point decimal parsing + `NumericInput`)
+> Last updated: 2026-05-31 (`parseDate` + hybrid `DateInput`)
 
 ## Context
 
@@ -21,6 +21,7 @@ Shared formatting functions used across the frontend. Centralised in one file to
 | `getLocale` | `() => string` | `'fr-FR'` or `'en-US'` based on `document.documentElement.lang` |
 | `formatCurrency` | `(value, currency='EUR', locale=getLocale())` | `"1 234,50 €"` |
 | `formatDate` | `(dateStr, locale=getLocale(), format?)` | `"08/04/2026"` (locale) or `"08-04-2026"` (iso) |
+| `parseDate` | `(input, locale=getLocale(), format=store.dateFormat) => string \| null` | `"08/04/2026"` → `"2026-04-08"` (inverse of `formatDate`); `null` if unparseable |
 | `formatDateTime` | `(dateStr, locale=getLocale(), format?)` | `"08/04/2026 14:30"` (locale) or `"08-04-2026 14:30"` (iso) |
 | `normalizeDecimal` | `(value: string \| null \| undefined) => string` | `"12,50"` → `"12.50"` (replaces first `,` with `.`) |
 | `parseAmount` | `(value: string \| null \| undefined) => number` | `"12,50"` → `12.5`; tolerant `parseFloat` over `normalizeDecimal` |
@@ -50,6 +51,33 @@ Shared formatting functions used across the frontend. Centralised in one file to
 
 All numeric inputs across Picsou (account balances & loan fields, goal target, month override/manual contribution, transaction qty/price/amount, holding qty/buy-in, month-end balances) use `NumericInput` + `parseAmount`.
 
+### Date input — `DateInput` (hybrid native/desktop)
+
+`frontend/src/components/shared/DateInput.tsx` is the shared date-entry component.
+Its external contract is **always an ISO `yyyy-MM-dd` string** (`{ value, onChange:
+(iso) => void, id?, required?, disabled?, className? }`), regardless of how it's
+displayed. It exists because a native `<input type="date">` always renders in the
+OS/browser locale and **cannot** be coerced to honour the in-app `dateFormat`
+setting (`dd/mm/yyyy` vs `dd-mm-yyyy`):
+
+- **Touch devices** (`useIsTouchDevice()` → `matchMedia('(pointer: coarse)')`,
+  `frontend/src/hooks/use-touch-device.ts`) render the native `<input type="date">`
+  — the OS picker is the best mobile experience and already speaks ISO.
+- **Desktop** renders a text field that *displays* `formatDate(value)` and *parses*
+  typed text back to ISO with `parseDate`. It only emits `onChange` once the text
+  parses to a real date (or `''` when cleared), so a half-typed value never
+  propagates a garbage ISO upstream. A `common.dateHint` placeholder shows the
+  expected shape, and `aria-invalid` flags an unparseable value after blur.
+
+It resyncs the visible text when the external `value` or the `dateFormat` setting
+changes, derived **during render** (tracking `lastValue`/`lastFormat` in state) to
+avoid a cascading re-render — the same "derive during render" pattern used in
+`ConfirmDialog`.
+
+Wired into the four date fields: `AddTransactionModal` (transaction date),
+`GoalsPage` (deadline), and `AccountForm` (loan start/end — via react-hook-form
+`<Controller>` so the ISO value flows through `value`/`onChange`).
+
 ## Gotchas / Pitfalls
 
 - **`getLocale()` reads `document.documentElement.lang`** — this is set by the `<html lang>` attribute. It's updated by `i18next-browser-languagedetector` on init, not on every language change. In practice, this is fine because locale changes require a page reload.
@@ -58,9 +86,11 @@ All numeric inputs across Picsou (account balances & loan fields, goal target, m
 - **Store import in `utils.ts`**: `formatDate` imports `useAppStore` directly — safe because `app-store.ts` has no dependency on `utils.ts` (no circular dependency).
 - **`formatPercent` expects a ratio** (0.5 = 50%), not a percentage value. Passing `50` instead of `0.5` will output `"5 000 %"`.
 - **`formatDate` uses `new Date(dateStr)`** — ISO datetime strings work fine; bare date strings like `"2026-04-08"` may shift by timezone offset. Use `formatLocalDate` for LocalDate (date-only) values from the backend to avoid off-by-one-day issues.
+- **`parseDate` is the strict inverse of `formatDate`** — the year is the last token in every shape we render (`dd-mm-yyyy`, `dd/mm/yyyy`, `mm/dd/yyyy`); only day/month order varies (`mm/dd` for **en-US in non-iso mode**, `dd/mm` otherwise). It accepts `/`, `-`, `.` separators interchangeably, expands 2-digit years to the 2000s, and round-trips impossible dates (e.g. `31/02`) to `null` by re-checking via `new Date`. When changing `formatDate`'s output shape, update `parseDate` and the round-trip test together.
+- **`DateInput` desktop branch never emits an invalid ISO** — `onChange` fires only when `parseDate` succeeds (or `''` on clear). Consumers therefore can't rely on `onChange` firing for every keystroke; the displayed text is internal state until it parses.
 - **`safeRedirect` is a security guard** — always use it before redirecting to a URL from query params to prevent open redirect attacks.
 - **`accountTypeLabel` returns the raw type if unknown** — if new `AccountType` values are added to the backend, add them here to avoid displaying enum keys in the UI.
 
 ## Tests
 
-- `frontend/src/lib/utils.test.ts` — covers `cn`, `formatCurrency`, `formatDate`, `formatPercent`
+- `frontend/src/lib/utils.test.ts` — covers `cn`, `formatCurrency`, `formatDate`, `formatPercent`, and `parseDate` (dd/mm vs mm/dd ordering, iso mode, mixed separators, 2-digit years, impossible-date rejection, malformed input, and the `formatDate`∘`parseDate` round-trip across both formats × both locales).

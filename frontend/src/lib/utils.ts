@@ -42,6 +42,41 @@ export function formatDate(dateStr: string | null | undefined, locale = getLocal
   return new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(dateStr))
 }
 
+/**
+ * Inverse of {@link formatDate}: parses a user-typed date string back into an
+ * ISO `yyyy-MM-dd` string, honoring the active format/locale, or returns `null`
+ * when the input can't be parsed into a real calendar date.
+ *
+ * Accepts `/`, `-` and `.` as separators regardless of the active format (people
+ * mix them), and tolerates 2-digit years. The year is always the last token in
+ * every shape we render (`dd-mm-yyyy`, `dd/mm/yyyy`, `mm/dd/yyyy`); only the
+ * day/month order varies — `mm/dd` for en-US locale (non-iso), `dd/mm` otherwise.
+ */
+export function parseDate(
+  input: string | null | undefined,
+  locale = getLocale(),
+  format: DateFormat = useAppStore.getState().dateFormat,
+): string | null {
+  if (!input) return null
+  const parts = input.trim().split(/[/.-]/).map((p) => p.trim())
+  if (parts.length !== 3 || parts.some((p) => !/^\d+$/.test(p))) return null
+
+  const monthFirst = format !== 'iso' && locale.startsWith('en')
+  const [first, second, yearStr] = parts
+  const day = Number(monthFirst ? second : first)
+  const month = Number(monthFirst ? first : second)
+  let year = Number(yearStr)
+  if (yearStr.length === 2) year += 2000
+
+  if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) return null
+
+  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  // Reject impossible dates (e.g. 31/02) by round-tripping through Date.
+  const d = new Date(`${iso}T00:00:00`)
+  if (d.getFullYear() !== year || d.getMonth() + 1 !== month || d.getDate() !== day) return null
+  return iso
+}
+
 export function formatDateTime(dateStr: string | null | undefined, locale = getLocale(), format?: DateFormat): string {
   if (!dateStr) return '—'
   const d = new Date(dateStr)

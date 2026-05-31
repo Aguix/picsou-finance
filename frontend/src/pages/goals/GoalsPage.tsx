@@ -13,6 +13,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/shared/NumericInput'
+import { DateInput } from '@/components/shared/DateInput'
 import { parseAmount } from '@/lib/utils'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -190,12 +191,11 @@ export function GoalsPage() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="goal-deadline">{t('goals.deadline')}</Label>
-                <Input
+                <DateInput
                   id="goal-deadline"
-                  type="date"
                   required
                   value={form.deadline}
-                  onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))}
+                  onChange={(iso) => setForm((f) => ({ ...f, deadline: iso }))}
                 />
               </div>
             </div>

@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/shared/NumericInput'
+import { DateInput } from '@/components/shared/DateInput'
 import { Label } from '@/components/ui/label'
 import { parseAmount } from '@/lib/utils'
 import { Loader2 } from 'lucide-react'
@@ -136,7 +137,7 @@ export function AddTransactionModal({ open, onOpenChange, accountId, accountType
           {/* Date */}
           <div className="space-y-1">
             <Label>Date</Label>
-            <Input type="date" value={date} onChange={e => setDate(e.target.value)} required />
+            <DateInput value={date} onChange={setDate} required />
           </div>
 
           {isInvestment ? (
