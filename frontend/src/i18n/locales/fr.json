@@ -227,7 +227,23 @@
     "evolution": "Évolution",
     "capitalInvested": "Capital investi",
     "avgBuyIn": "Prix moyen d'achat",
-    "perShare": "/ part"
+    "perShare": "/ part",
+    "insight": {
+      "title": "Insight",
+      "companies": "Entreprises",
+      "countries": "Pays",
+      "sectors": "Secteurs",
+      "others": "Autres",
+      "unavailable": "Composition indisponible pour ce titre",
+      "source": "Source : {{source}}",
+      "asOf": "au {{date}}",
+      "assetTypes": {
+        "ETF": "ETF",
+        "STOCK": "Action",
+        "CRYPTO": "Crypto",
+        "UNKNOWN": "Inconnu"
+      }
+    }
   },
   "goals": {
     "title": "Objectifs",

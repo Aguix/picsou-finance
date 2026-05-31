@@ -1,5 +1,5 @@
 import { api } from '@/lib/api-client'
-import type { Account, AccountRequest, BalanceSnapshot, DebtRequest, DebtInfo, HoldingResponse, LoanScheduleResponse, RealEstateMetadataRequest, RealEstateMetadata, Transaction, TransactionRequest } from '@/types/api'
+import type { Account, AccountRequest, BalanceSnapshot, DebtRequest, DebtInfo, HoldingResponse, LoanScheduleResponse, RealEstateMetadataRequest, RealEstateMetadata, SecurityInsight, Transaction, TransactionRequest } from '@/types/api'
 
 export const accountsApi = {
   list: () => api.get<Account[]>('/accounts').then(r => r.data),
@@ -19,6 +19,10 @@ export const accountsApi = {
     api.get<Array<{ date: string; priceEur: number }>>(`/prices/${ticker}/history`, { params: { months } }).then(r => r.data),
   priceIntraday: (ticker: string) =>
     api.get<Array<{ timestamp: string; priceEur: number }>>(`/prices/${ticker}/intraday`).then(r => r.data),
+  securityInsight: (ticker: string, name?: string | null) =>
+    api.get<SecurityInsight>(`/securities/${encodeURIComponent(ticker)}/insight`, {
+      params: name ? { name } : undefined,
+    }).then(r => r.data),
   addSnapshot: (id: number, balance: number, date: string) =>
     api.post<BalanceSnapshot>(`/accounts/${id}/history`, { balance, date }).then(r => r.data),
   updateRealEstateMetadata: (id: number, data: RealEstateMetadataRequest) =>

@@ -125,6 +125,34 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
     }
 
     /**
+     * Returns Yahoo's classification of the instrument ("ETF", "EQUITY",
+     * "CRYPTOCURRENCY", "MUTUALFUND"...) read from the same unauthenticated
+     * chart endpoint already used for prices. Empty if unavailable.
+     */
+    public Optional<String> getInstrumentType(String ticker) {
+        if (ticker == null || ticker.isBlank()) return Optional.empty();
+        try {
+            YahooResponse response = webClient.get()
+                .uri("/v8/finance/chart/{ticker}?range=1d&interval=1d", ticker)
+                .retrieve()
+                .bodyToMono(YahooResponse.class)
+                .timeout(TIMEOUT)
+                .block();
+
+            if (response == null || response.chart() == null || response.chart().result() == null
+                || response.chart().result().isEmpty()) {
+                return Optional.empty();
+            }
+            var result = response.chart().result().get(0);
+            if (result.meta() == null) return Optional.empty();
+            return Optional.ofNullable(result.meta().instrumentType()).filter(s -> !s.isBlank());
+        } catch (Exception ex) {
+            log.debug("Yahoo instrumentType fetch failed for {}: {}", ticker, ex.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Apply FX conversion to a native-currency price. Returns null if the FX
      * rate cannot be fetched (caller treats that the same way as a missing
      * price — skip the snapshot rather than store a wrong value).
@@ -211,7 +239,7 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
     record Quote(List<Double> close) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record Meta(double regularMarketPrice, String currency) {}
+    record Meta(double regularMarketPrice, String currency, String instrumentType) {}
 
     private record CachedFx(BigDecimal rate, Instant cachedAt) {
         boolean isFresh() { return Instant.now().isBefore(cachedAt.plus(FX_CACHE_TTL)); }

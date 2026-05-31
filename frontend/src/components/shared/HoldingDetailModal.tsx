@@ -4,6 +4,7 @@ import { usePriceHistory, type PortfolioLine } from '@/features/accounts/hooks'
 import { NetWorthChart } from '@/components/shared/NetWorthChart'
 import { EmptyChartState } from '@/components/shared/EmptyChartState'
 import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
+import { HoldingInsightSection } from '@/components/shared/HoldingInsightSection'
 import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
@@ -211,6 +212,9 @@ export function HoldingDetailModal({ line, onClose }: HoldingDetailModalProps) {
                   </Badge>
                 </div>
               </div>
+
+              {/* Asset-type & ETF composition insight */}
+              <HoldingInsightSection ticker={line.ticker} name={line.name} open={open} />
             </div>
           </>
         )}

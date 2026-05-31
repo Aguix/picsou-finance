@@ -359,6 +359,19 @@ export function useDeleteHolding(accountId: number) {
 
 export type PricePoint = { date: string; priceEur: number }
 
+/**
+ * Asset type + ETF composition for a ticker. Cached aggressively — composition
+ * changes at most daily and the backend caches it for days too.
+ */
+export function useSecurityInsight(ticker: string | null, name: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['security-insight', ticker],
+    queryFn: () => accountsApi.securityInsight(ticker!, name),
+    enabled: enabled && !!ticker,
+    staleTime: 24 * 60 * 60 * 1000,
+  })
+}
+
 export function usePriceHistory(ticker: string | null, months: number, range: string) {
   const is24H = range === '24H'
   return useQuery({

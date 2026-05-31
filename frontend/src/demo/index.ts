@@ -67,6 +67,52 @@ for (let i = 1; i <= 7; i++) {
   handlers.set(key('GET', `/accounts/${i}/transactions`), () => mockTransactions[i] ?? [])
 }
 
+// Security insight (asset type + ETF composition). Mirrors the backend
+// SecurityInsightResponse: { ticker, assetType, composition | null }.
+const demoStockTickers = ['AAPL', 'MSFT', 'AMZN', 'NVDA']
+const demoCryptoTickers = ['BTC', 'ETH', 'SOL']
+const demoEtfCompositions: Record<string, { companies: [string, number][]; countries: [string, number][]; sectors: [string, number][] }> = {
+  IWDA: {
+    companies: [['Apple', 5.1], ['Microsoft', 4.4], ['Nvidia', 4.0], ['Amazon', 2.7], ['Meta Platforms', 1.9], ['Alphabet A', 1.7], ['Alphabet C', 1.5], ['Broadcom', 1.3], ['Eli Lilly', 0.9], ['JPMorgan Chase', 0.8]],
+    countries: [['United States', 70.8], ['Japan', 6.0], ['United Kingdom', 3.7], ['France', 3.1], ['Canada', 3.0], ['Switzerland', 2.6], ['Germany', 2.3], ['Australia', 1.8]],
+    sectors: [['Information Technology', 24.1], ['Financials', 16.4], ['Health Care', 11.2], ['Industrials', 10.7], ['Consumer Discretionary', 10.2], ['Communication', 7.6], ['Consumer Staples', 6.1], ['Energy', 4.0], ['Materials', 3.6], ['Utilities', 2.7]],
+  },
+  EUNL: {
+    companies: [['Apple', 7.1], ['Microsoft', 6.6], ['Nvidia', 6.1], ['Amazon', 3.8], ['Meta Platforms', 2.6], ['Alphabet A', 2.3], ['Alphabet C', 2.0], ['Broadcom', 1.8], ['Berkshire Hathaway', 1.6], ['Eli Lilly', 1.3]],
+    countries: [['United States', 100.0]],
+    sectors: [['Information Technology', 31.2], ['Financials', 13.1], ['Health Care', 11.6], ['Consumer Discretionary', 10.3], ['Communication', 9.1], ['Industrials', 8.6], ['Consumer Staples', 5.9], ['Energy', 3.7], ['Utilities', 2.5], ['Materials', 2.2]],
+  },
+}
+
+function demoInsight(ticker: string) {
+  if (demoStockTickers.includes(ticker)) {
+    return { ticker, assetType: 'STOCK', composition: null }
+  }
+  if (demoCryptoTickers.includes(ticker)) {
+    return { ticker, assetType: 'CRYPTO', composition: null }
+  }
+  const comp = demoEtfCompositions[ticker]
+  if (comp) {
+    const toSlices = (pairs: [string, number][]) => pairs.map(([label, percent]) => ({ label, percent }))
+    return {
+      ticker,
+      assetType: 'ETF',
+      composition: {
+        companies: toSlices(comp.companies),
+        countries: toSlices(comp.countries),
+        sectors: toSlices(comp.sectors),
+        source: 'iShares',
+        asOf: new Date().toISOString().split('T')[0],
+      },
+    }
+  }
+  return { ticker, assetType: 'UNKNOWN', composition: null }
+}
+
+for (const ticker of [...demoStockTickers, ...demoCryptoTickers, ...Object.keys(demoEtfCompositions)]) {
+  handlers.set(key('GET', `/securities/${ticker}/insight`), () => demoInsight(ticker))
+}
+
 // Account details: history for multiple accounts (12 months each)
 function generateHistory(startBalances: number[], _currentBalance: number) {
   const now = new Date()

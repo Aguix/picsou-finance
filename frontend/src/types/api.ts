@@ -197,6 +197,28 @@ export interface HoldingResponse {
   priceUpdatedAt: string | null
 }
 
+// --- Security insight (asset type + ETF composition) ---
+export type AssetType = 'ETF' | 'STOCK' | 'CRYPTO' | 'UNKNOWN'
+
+export interface WeightedSlice {
+  label: string
+  percent: number
+}
+
+export interface EtfComposition {
+  companies: WeightedSlice[]
+  countries: WeightedSlice[]
+  sectors: WeightedSlice[]
+  source: string | null
+  asOf: string | null
+}
+
+export interface SecurityInsight {
+  ticker: string
+  assetType: AssetType
+  composition: EtfComposition | null
+}
+
 export type ExchangeType = 'BINANCE' | 'KRAKEN'
 export type ChainType = 'SOLANA' | 'ETHEREUM' | 'BITCOIN'
 export type FinaryMappingAction = 'SKIP' | 'MAP_EXISTING' | 'CREATE_NEW'
