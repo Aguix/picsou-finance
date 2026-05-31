@@ -97,7 +97,7 @@ public class EnableBankingKeyPairService {
      */
     public String importPrivateKey(String pemContent) {
         if (pemContent == null || pemContent.isBlank()) {
-            throw new IllegalArgumentException("PEM content is empty.");
+            throw new IllegalArgumentException("The key file is empty. Paste your private key and try again.");
         }
         String trimmed = pemContent.strip();
         if (trimmed.contains("-----BEGIN RSA PRIVATE KEY-----")) {
@@ -116,7 +116,8 @@ public class EnableBankingKeyPairService {
         try {
             writePemToDisk(trimmed);
         } catch (IOException ex) {
-            throw new IllegalStateException("Failed to write imported private key to disk.", ex);
+            throw new IllegalStateException(
+                "Could not save the private key on the server. Check the server's file permissions and try again.", ex);
         }
         log.info("Enable Banking private key imported from external PEM — public half derived");
         return derivePublicPemFromPrivate();

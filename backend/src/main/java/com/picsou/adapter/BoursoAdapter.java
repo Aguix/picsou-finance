@@ -52,22 +52,22 @@ public class BoursoAdapter implements BoursoPort {
             .onErrorResume(WebClientResponseException.class, ex -> {
                 log.error("bourso-auth /initiate failed ({}) : {}", ex.getStatusCode(), ex.getResponseBodyAsString());
                 return Mono.error(new SyncException(
-                    "Échec de l'authentification BoursoBank : " + ex.getResponseBodyAsString()));
+                    "BoursoBank authentication failed. Please check your credentials and try again."));
             })
             .timeout(Duration.ofSeconds(30))
             .blockOptional()
-            .orElseThrow(() -> new SyncException("Pas de réponse du service bourso-auth"));
+            .orElseThrow(() -> new SyncException("No response from the BoursoBank service. Please try again later."));
 
         String processId = response.path("processId").asText(null);
         if (processId == null || processId.isBlank()) {
-            throw new SyncException("BoursoBank n'a pas retourné de processId");
+            throw new SyncException("BoursoBank did not return a valid session. Please try again.");
         }
 
         boolean mfaRequired = response.path("mfaRequired").asBoolean(false);
         if (!mfaRequired) {
             String cookies = response.path("sessionCookies").asText(null);
             if (cookies == null || cookies.isBlank()) {
-                throw new SyncException("BoursoBank n'a pas retourné de sessionCookies après authentification");
+                throw new SyncException("BoursoBank authentication did not complete. Please try again.");
             }
             return new InitiateResult(processId, false, null, null, cookies);
         }
@@ -94,15 +94,15 @@ public class BoursoAdapter implements BoursoPort {
             .onErrorResume(WebClientResponseException.class, ex -> {
                 log.error("bourso-auth /complete failed ({}) : {}", ex.getStatusCode(), ex.getResponseBodyAsString());
                 return Mono.error(new SyncException(
-                    "Code MFA invalide ou expiré : " + ex.getResponseBodyAsString()));
+                    "The verification code is invalid or has expired. Please request a new one."));
             })
             .timeout(Duration.ofSeconds(60))
             .blockOptional()
-            .orElseThrow(() -> new SyncException("Pas de réponse du service bourso-auth /complete"));
+            .orElseThrow(() -> new SyncException("No response from the BoursoBank service. Please try again later."));
 
         String cookies = response.path("sessionCookies").asText(null);
         if (cookies == null || cookies.isBlank()) {
-            throw new SyncException("BoursoBank n'a pas retourné de sessionCookies après MFA");
+            throw new SyncException("BoursoBank verification did not complete. Please try again.");
         }
         return cookies;
     }
@@ -123,15 +123,15 @@ public class BoursoAdapter implements BoursoPort {
                 }
                 log.error("bourso-auth /accounts failed ({}) : {}", ex.getStatusCode(), ex.getResponseBodyAsString());
                 return Mono.error(new SyncException(
-                    "Échec de la synchronisation BoursoBank : " + ex.getResponseBodyAsString()));
+                    "Could not fetch your BoursoBank accounts. Please try again later."));
             })
             .timeout(Duration.ofSeconds(60))
             .blockOptional()
-            .orElseThrow(() -> new SyncException("Pas de réponse du service bourso-auth /accounts"));
+            .orElseThrow(() -> new SyncException("No response from the BoursoBank service. Please try again later."));
 
         List<BoursoAccountData> result = new ArrayList<>();
         if (!response.isArray()) {
-            throw new SyncException("Réponse inattendue de bourso-auth /accounts");
+            throw new SyncException("Unexpected response from the BoursoBank service. Please try again later.");
         }
 
         for (JsonNode acc : response) {

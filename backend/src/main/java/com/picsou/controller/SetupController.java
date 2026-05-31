@@ -247,7 +247,7 @@ public class SetupController {
 
         if (!"traderepublic".equals(key) && !"finary".equals(key)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Acknowledge is only supported for integrations without wizard-time config (traderepublic, finary).");
+                "This step only applies to the Trade Republic and Finary integrations.");
         }
         integrationsService.enable(key);
         auditService.record("setup.integration.enabled", null, httpRequest, "key=" + key);

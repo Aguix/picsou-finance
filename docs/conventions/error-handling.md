@@ -61,10 +61,17 @@ The `errors` map is built from `FieldError.getField()` and `FieldError.getDefaul
 
 ```java
 // Static factories for consistent messages
-ResourceNotFoundException.account(Long id);      // "Account not found: {id}"
-ResourceNotFoundException.goal(Long id);          // "Goal not found: {id}"
-ResourceNotFoundException.requisition(String id); // "Requisition not found: {id}"
+ResourceNotFoundException.account(Long id);       // "Account not found"
+ResourceNotFoundException.goal(Long id);          // "Goal not found"
+ResourceNotFoundException.requisition(String id); // "Requisition not found"
+ResourceNotFoundException.transaction(Long id);   // "Transaction not found"
 ```
+
+**Messages are ID-free.** The factories take the id (handy for logging / call-site
+clarity) but deliberately do **not** interpolate it into the user-facing message.
+Leaking a raw resource id into a 404 the user sees is noise at best and an
+information leak at worst — the id is already known to the caller. Keep new
+factories ID-free for the same reason.
 
 ### SyncException
 
@@ -111,5 +118,40 @@ Status-to-message mapping (as in `TradeRepublicTab.formatAuthError` and
 `BoursoTab.formatError`) must happen **before** the helper — only the unmapped tail
 should fall through. Pages that need a domain-specific default pass it as the
 `fallback` argument (e.g. `t('sync.tr.errors.unknownError')`).
+
+### `formatApiError(err, t, fallbackKey?)` — the default for most call sites
+
+`extractErrorMessage` returns a *string fallback*; `formatApiError` (same file) is
+the **translated, status-aware** wrapper and is what new code should reach for. It
+maps the HTTP status to an i18n key and only falls back to a backend-supplied
+message when that message is genuinely user-safe:
+
+- **401 → `common.errors.unauthorized`, 429 → `common.errors.tooManyRequests`,
+  ≥500 → `common.errors.serverError`** — the backend body here is absent or the
+  deliberately-vague "An unexpected error occurred", so we always translate.
+- **Other 4xx →** the backend's *specific* reason **when it's user-safe** (e.g.
+  "Cannot delete the last administrator") — this is why guard messages survive —
+  otherwise `403 → common.errors.forbidden`, anything else → `fallbackKey`
+  (default `common.error`).
+
+"User-safe" is decided by `safeBackendMessage`, which rejects any string matching
+`LEAK_PATTERN` (`Exception`, `.java`, `java.`/`org.`/`com.picsou`, the axios
+`"Request failed with status code N"` boilerplate, "stack trace") and returns
+`null` so the caller substitutes a friendly translation. `extractErrorMessage` is
+now a thin `safeBackendMessage(err) ?? fallback`.
+
+**Rule of thumb:** in a component with `t` available, use `formatApiError(err, t)`
+(optionally a feature `fallbackKey`). Reserve bare `extractErrorMessage` for
+non-React contexts where no translator is in scope. Never display `err.message`,
+`err.response.data.detail`, or a `` `${status} — …` `` string directly.
+
+### Backend message language
+
+The backend is **English-only** (no i18n layer — see `backend/CLAUDE.md`); messages
+are fixed at the throw site. User-facing English must be friendly and free of
+internals: no concatenated `ex.getMessage()` (log it instead via `log.warn`), no
+French strings reaching the English UI, no PEM/wizard/PKCS#8 jargon for non-operator
+audiences. Translation to the user's locale happens **only** on the frontend through
+`formatApiError`'s i18n keys; specific backend 4xx reasons pass through verbatim.
 
 Full feature note: [`docs/features/frontend-error-display.md`](../features/frontend-error-display.md).

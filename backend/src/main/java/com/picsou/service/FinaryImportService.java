@@ -88,7 +88,7 @@ public class FinaryImportService {
             return new FinaryPreviewResponse(previews, existing, totalTx, fileToken, false, List.of());
 
         } catch (IOException e) {
-            throw new IllegalArgumentException("Not a valid xlsx file", e);
+            throw new IllegalArgumentException("That file isn't a valid Excel spreadsheet (.xlsx).", e);
         }
     }
 
@@ -103,7 +103,7 @@ public class FinaryImportService {
         }
 
         FamilyMember member = familyMemberRepository.findById(memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+            .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
 
         int accountsCreated = 0;
         int accountsMapped = 0;

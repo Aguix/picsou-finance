@@ -105,7 +105,7 @@ public class TradeRepublicSyncService {
         TrTokens tokens = trPort.completeAuth(processId, tan);
 
         FamilyMember member = familyMemberRepository.findById(memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+            .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
 
         // Delete any existing sessions for this member
         sessionRepository.findByMemberId(memberId).ifPresent(sessionRepository::delete);
@@ -143,7 +143,7 @@ public class TradeRepublicSyncService {
     /** Manual or scheduled sync using the stored session, with auto-refresh. */
     public List<AccountResponse> sync(Long memberId) {
         TradeRepublicSession stored = sessionRepository.findByMemberId(memberId)
-            .orElseThrow(() -> new SyncException("Aucune session Trade Republic. Veuillez vous connecter."));
+            .orElseThrow(() -> new SyncException("No Trade Republic session. Please connect from the Trade Republic page."));
         return syncWithToken(encryption.decrypt(stored.getSessionToken()), stored, memberId);
     }
 
@@ -166,7 +166,7 @@ public class TradeRepublicSyncService {
                 log.warn("TR session expired -- no refresh token available, clearing session");
                 sessionRepository.findByMemberId(memberId).ifPresent(sessionRepository::delete);
                 throw new SyncException(
-                    "Session Trade Republic expiree. Veuillez vous reconnecter depuis la page Trade Republic.");
+                    "Your Trade Republic session has expired. Please reconnect from the Trade Republic page.");
             }
             throw e;
         }
@@ -187,7 +187,7 @@ public class TradeRepublicSyncService {
             log.warn("TR refresh failed -- clearing session");
             sessionRepository.findByMemberId(memberId).ifPresent(sessionRepository::delete);
             throw new SyncException(
-                "Session Trade Republic expiree et refresh echoue. Veuillez vous reconnecter.");
+                "Your Trade Republic session has expired and could not be refreshed. Please reconnect.");
         }
     }
 
@@ -325,7 +325,7 @@ public class TradeRepublicSyncService {
             account.setLastSyncedAt(Instant.now());
         } else {
             FamilyMember member = familyMemberRepository.findById(memberId)
-                .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+                .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
             account = Account.builder()
                 .member(member)
                 .name(data.name())

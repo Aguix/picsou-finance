@@ -81,15 +81,15 @@ public class TradeRepublicAdapter implements TradeRepublicPort {
             .onErrorResume(WebClientResponseException.class, ex -> {
                 log.error("tr-auth sidecar /initiate failed ({}) : {}", ex.getStatusCode(), ex.getResponseBodyAsString());
                 return Mono.error(new SyncException(
-                    "Échec de l'authentification Trade Republic : " + ex.getResponseBodyAsString()));
+                    "Trade Republic authentication failed. Please check your credentials and try again."));
             })
             .timeout(Duration.ofSeconds(60)) // headless browser takes time
             .blockOptional()
-            .orElseThrow(() -> new SyncException("Pas de réponse du service d'authentification TR"));
+            .orElseThrow(() -> new SyncException("No response from the Trade Republic service. Please try again later."));
 
         String processId = response.path("processId").asText(null);
         if (processId == null || processId.isBlank()) {
-            throw new SyncException("Trade Republic n'a pas retourné de processId.");
+            throw new SyncException("Trade Republic did not return a valid session. Please try again.");
         }
         return processId;
     }
@@ -107,15 +107,15 @@ public class TradeRepublicAdapter implements TradeRepublicPort {
             .onErrorResume(WebClientResponseException.class, ex -> {
                 log.error("tr-auth sidecar /complete failed ({}) : {}", ex.getStatusCode(), ex.getResponseBodyAsString());
                 return Mono.error(new SyncException(
-                    "Code 2FA invalide ou expiré : " + ex.getResponseBodyAsString()));
+                    "The verification code is invalid or has expired. Please request a new one."));
             })
             .timeout(Duration.ofSeconds(60))
             .blockOptional()
-            .orElseThrow(() -> new SyncException("Pas de réponse du service 2FA TR"));
+            .orElseThrow(() -> new SyncException("No response from the Trade Republic service. Please try again later."));
 
         String sessionToken = response.path("sessionToken").asText(null);
         if (sessionToken == null || sessionToken.isBlank()) {
-            throw new SyncException("Trade Republic n'a pas retourné de sessionToken.");
+            throw new SyncException("Trade Republic verification did not complete. Please try again.");
         }
         String refreshToken = response.path("refreshToken").asText(null);
         return new TrTokens(sessionToken, refreshToken);
@@ -364,7 +364,7 @@ public class TradeRepublicAdapter implements TradeRepublicPort {
 
         if (accounts.isEmpty()) {
             throw new SyncException(
-                "Aucune donnée de portfolio reçue de Trade Republic. Consultez les logs backend.");
+                "No portfolio data received from Trade Republic. Please try again later.");
         }
 
         log.info("TR portfolio fetched: {} account(s)", accounts.size());

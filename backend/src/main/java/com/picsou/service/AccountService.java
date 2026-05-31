@@ -295,7 +295,7 @@ public class AccountService {
             BigDecimal quantity, BigDecimal averageBuyIn) {
         getOrThrow(accountId, memberId);
         AccountHolding h = holdingRepository.findByAccountIdAndTicker(accountId, ticker)
-            .orElseThrow(() -> new ResourceNotFoundException("Holding not found: " + ticker));
+            .orElseThrow(() -> new ResourceNotFoundException("Holding not found"));
         h.setQuantity(quantity);
         if (averageBuyIn != null) h.setAverageBuyIn(averageBuyIn);
         holdingRepository.save(h);
@@ -306,7 +306,7 @@ public class AccountService {
     public void deleteHolding(Long accountId, Long memberId, String ticker) {
         getOrThrow(accountId, memberId);
         AccountHolding h = holdingRepository.findByAccountIdAndTicker(accountId, ticker)
-            .orElseThrow(() -> new ResourceNotFoundException("Holding not found: " + ticker));
+            .orElseThrow(() -> new ResourceNotFoundException("Holding not found"));
         holdingRepository.delete(h);
     }
 
@@ -361,10 +361,10 @@ public class AccountService {
     public LoanAmortizationService.LoanScheduleResponse getLoanSummary(Long accountId, Long memberId) {
         Account account = getOrThrow(accountId, memberId);
         if (account.getType() != AccountType.LOAN) {
-            throw new IllegalArgumentException("Account is not a loan: " + accountId);
+            throw new IllegalArgumentException("Account is not a loan");
         }
         Debt debt = debtRepository.findByAccountId(accountId)
-            .orElseThrow(() -> new ResourceNotFoundException("Debt details not set for account: " + accountId));
+            .orElseThrow(() -> new ResourceNotFoundException("Debt details not set for account"));
         return loanAmortizationService.compute(debt, LocalDate.now());
     }
 

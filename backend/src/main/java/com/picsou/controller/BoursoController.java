@@ -46,7 +46,7 @@ public class BoursoController {
     ) {
         if (!checkRateLimit(request)) {
             ProblemDetail detail = ProblemDetail.forStatus(HttpStatus.TOO_MANY_REQUESTS);
-            detail.setDetail("Trop de tentatives d'authentification. Veuillez patienter.");
+            detail.setDetail("Too many authentication attempts. Please wait a moment and try again.");
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(detail);
         }
 

@@ -61,11 +61,11 @@ public class CryptoExchangeSyncService {
         CryptoExchangePort adapter = findAdapter(type);
 
         if (!adapter.testConnection(apiKey, apiSecret)) {
-            throw new SyncException("Connexion echouee. Verifiez vos cles API " + type + ".");
+            throw new SyncException("Could not connect to " + type + ". Please check your API keys.");
         }
 
         FamilyMember member = familyMemberRepository.findById(memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+            .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
 
         Optional<CryptoExchangeSession> existing = sessionRepository.findByExchangeTypeAndMemberId(type, memberId);
         CryptoExchangeSession session;
@@ -90,7 +90,7 @@ public class CryptoExchangeSyncService {
 
     public AccountResponse sync(Long sessionId, Long memberId) {
         CryptoExchangeSession session = sessionRepository.findByIdAndMemberId(sessionId, memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Exchange session not found: " + sessionId));
+            .orElseThrow(() -> new ResourceNotFoundException("Exchange session not found"));
 
         CryptoExchangePort adapter = findAdapter(session.getExchangeType());
         String decryptedKey = encryption.decrypt(session.getApiKey());
@@ -128,8 +128,8 @@ public class CryptoExchangeSyncService {
                 .orElse(null);
             if (account == null) {
                 throw new SyncException(
-                    "L'historique de ce compte a été supprimé. Retirez la session " +
-                    session.getExchangeType().name() + " dans Réglages → Crypto pour ne plus la synchroniser."
+                    "This account's history was deleted. Remove the " + session.getExchangeType().name() +
+                    " session in Settings → Crypto to stop syncing it."
                 );
             }
 
@@ -150,13 +150,14 @@ public class CryptoExchangeSyncService {
         } catch (Exception ex) {
             session.setStatus("ERROR");
             sessionRepository.save(session);
-            throw new SyncException("Sync " + session.getExchangeType() + " echoue : " + ex.getMessage());
+            log.warn("Crypto exchange sync failed for {}: {}", session.getExchangeType(), ex.getMessage());
+            throw new SyncException("Could not sync your " + session.getExchangeType() + " account. Please try again later.");
         }
     }
 
     public void removeExchange(Long sessionId, Long memberId) {
         CryptoExchangeSession session = sessionRepository.findByIdAndMemberId(sessionId, memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Exchange session not found: " + sessionId));
+            .orElseThrow(() -> new ResourceNotFoundException("Exchange session not found"));
 
         String externalId = "crypto_exchange_" + session.getExchangeType().name().toLowerCase();
         accountRepository.findByExternalAccountIdAndMemberId(externalId, memberId)
@@ -188,7 +189,7 @@ public class CryptoExchangeSyncService {
         return exchangeAdapters.stream()
             .filter(a -> a.exchangeName().equalsIgnoreCase(type.name()))
             .findFirst()
-            .orElseThrow(() -> new SyncException("Aucun adapteur trouve pour l'exchange : " + type));
+            .orElseThrow(() -> new SyncException("This exchange isn't supported yet."));
     }
 
     private Optional<Account> resolveAccount(String externalId, String exchangeName, BigDecimal balanceEur, Long memberId) {
@@ -207,7 +208,7 @@ public class CryptoExchangeSyncService {
             account.setLastSyncedAt(Instant.now());
         } else {
             FamilyMember member = familyMemberRepository.findById(memberId)
-                .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+                .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
             account = Account.builder()
                 .member(member)
                 .name(exchangeName + " Crypto")

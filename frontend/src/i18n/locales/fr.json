@@ -8,6 +8,14 @@
     "create": "Créer",
     "confirm": "Confirmer",
     "confirmTypePrompt": "Tapez {{phrase}} pour confirmer.",
+    "error": "Une erreur est survenue. Veuillez réessayer.",
+    "errors": {
+      "unauthorized": "Votre session a expiré. Veuillez vous reconnecter.",
+      "forbidden": "Vous n'avez pas l'autorisation d'effectuer cette action.",
+      "tooManyRequests": "Trop de tentatives. Veuillez patienter un instant et réessayer.",
+      "serverError": "Une erreur est survenue de notre côté. Veuillez réessayer."
+    },
+    "dateHint": "jj/mm/aaaa",
     "search": "Rechercher",
     "noResults": "Aucun résultat",
     "retry": "Réessayer",

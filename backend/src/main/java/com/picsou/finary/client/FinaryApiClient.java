@@ -122,7 +122,8 @@ public class FinaryApiClient {
             ClerkSignInResponse signIn = apiResp.response;
 
             if (signIn.status == null) {
-                throw new SyncException("Clerk sign_in failed: " + signInResponse);
+                log.warn("Finary sign-in returned no status: {}", signInResponse);
+                throw new SyncException("Finary sign-in failed. Please check your credentials and try again.");
             }
 
             // If needs_second_factor, return the signInId for later completion
@@ -228,7 +229,7 @@ public class FinaryApiClient {
             ClerkSignInResponse signIn = apiResp.response;
 
             if (signIn.status == null) {
-                throw new SyncException("Clerk sign_in failed: " + signInResponse);
+                throw new SyncException("Finary sign-in failed. Please check your credentials and try again.");
             }
 
             String signInId = signIn.id;

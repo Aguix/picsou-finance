@@ -8,6 +8,14 @@
     "create": "Create",
     "confirm": "Confirm",
     "confirmTypePrompt": "Type {{phrase}} to confirm.",
+    "error": "Something went wrong. Please try again.",
+    "errors": {
+      "unauthorized": "Your session has expired. Please sign in again.",
+      "forbidden": "You don't have permission to do that.",
+      "tooManyRequests": "Too many attempts. Please wait a moment and try again.",
+      "serverError": "Something went wrong on our side. Please try again."
+    },
+    "dateHint": "dd/mm/yyyy",
     "search": "Search",
     "noResults": "No results",
     "retry": "Retry",

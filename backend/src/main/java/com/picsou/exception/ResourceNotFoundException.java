@@ -10,18 +10,18 @@ public class ResourceNotFoundException extends RuntimeException {
     }
 
     public static ResourceNotFoundException account(Long id) {
-        return new ResourceNotFoundException("Account not found: " + id);
+        return new ResourceNotFoundException("Account not found");
     }
 
     public static ResourceNotFoundException goal(Long id) {
-        return new ResourceNotFoundException("Goal not found: " + id);
+        return new ResourceNotFoundException("Goal not found");
     }
 
     public static ResourceNotFoundException requisition(String requisitionId) {
-        return new ResourceNotFoundException("Requisition not found: " + requisitionId);
+        return new ResourceNotFoundException("Requisition not found");
     }
 
     public static ResourceNotFoundException transaction(Long id) {
-        return new ResourceNotFoundException("Transaction not found: " + id);
+        return new ResourceNotFoundException("Transaction not found");
     }
 }

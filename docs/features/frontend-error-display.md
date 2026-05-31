@@ -1,39 +1,74 @@
-# Feature: Frontend Error Display (`extractErrorMessage`)
+# Feature: Frontend Error Display (`formatApiError` / `safeBackendMessage`)
 
-> Last updated: 2026-04-25
+> Last updated: 2026-05-31
 
 ## Context
 
 Sync flows used to surface raw payloads to the user — e.g. *"Enable Banking auth
 failed: {"code":400,"message":"Redirect URI not allowed",...}"* — because every
 caller did its own ad-hoc message extraction (`err.message`, `err.response.data`,
-or a hand-written regex). A single helper now normalises Axios errors into a
-human-readable string, with a fallback caller-controlled message.
+or a hand-written regex). Helpers in `lib/errors.ts` now normalise Axios errors
+into a friendly, **leak-free, translated** string.
+
+Two later additions hardened this:
+
+- **Leak guard** (`safeBackendMessage`): some backend strings carry internals
+  (a `TransientObjectException`, a `.java:NN` frame, the axios
+  `"Request failed with status code N"` boilerplate). Those must never reach the
+  user — they're filtered and replaced by a friendly fallback.
+- **Status-aware translation** (`formatApiError`): the default for component call
+  sites. Maps the HTTP status to an i18n key, falling back to a backend message
+  only when it's user-safe.
 
 ## How it works
 
-`extractErrorMessage(err, fallback)` walks the Axios error in priority order:
+### `safeBackendMessage(err): string | null`
+
+Walks the Axios error in priority order and returns the first **user-safe** string,
+or `null`:
 
 1. `err.response.data.detail` — Spring's RFC 7807 `ProblemDetail` field.
    - If the string contains `{`, slice from the first brace and try `JSON.parse`;
      on success use the embedded `message`. This handles adapter strings of the
      form `"Enable Banking auth failed: {...}"` where the upstream JSON body has
      been concatenated into the human message.
-   - Otherwise return `detail` verbatim.
+   - Otherwise consider `detail` verbatim.
 2. `err.response.data.message` — for endpoints that bypass `ProblemDetail`.
-3. `err.message` — last resort; if it starts with `{` try the same JSON parse;
-   skip the Axios boilerplate `"Request failed with status code N"` (useless to
-   users); otherwise return as-is.
-4. The caller-supplied `fallback` (defaults to French *"Une erreur est survenue"*).
+3. `err.message` — last resort; if it starts with `{` try the same JSON parse.
+
+Every candidate must pass `isSafeMessage` — non-empty **and** not matching
+`LEAK_PATTERN` (`Exception`, `.java`, `java.`/`org.`/`com.picsou`, the axios
+`"Request failed with status code N"` boilerplate, "stack trace"). Anything that
+fails is skipped; if nothing safe remains the function returns `null`.
+
+### `extractErrorMessage(err, fallback)`
+
+Now a thin wrapper: `safeBackendMessage(err) ?? fallback` (fallback defaults to the
+French *"Une erreur est survenue"*). Use it only outside React, where no translator
+is in scope.
+
+### `formatApiError(err, t, fallbackKey = 'common.error')`
+
+The preferred helper for components. Status-first, then safe-message, then key:
+
+1. **401 → `common.errors.unauthorized`, 429 → `common.errors.tooManyRequests`,
+   ≥500 → `common.errors.serverError`** — always translated (the backend body here
+   is absent or the vague "An unexpected error occurred").
+2. Otherwise `safeBackendMessage(err)` — a user-safe backend reason passes through
+   verbatim (this is why 4xx guard messages like *"Cannot delete the last
+   administrator"* survive and aren't flattened to a generic string).
+3. Else `403 → common.errors.forbidden`, anything else → `t(fallbackKey)`.
 
 ### Key files
 
-- `frontend/src/lib/errors.ts` — the helper plus a private `tryParseJson`. No
-  external deps.
-- `frontend/src/lib/errors.test.ts` — 8 Vitest cases covering each branch
-  (Spring detail, embedded JSON in detail, plain detail, message field, JSON in
-  `err.message`, plain `err.message`, the Axios-boilerplate skip, fallback when
-  no signal is available).
+- `frontend/src/lib/errors.ts` — `safeBackendMessage`, `extractErrorMessage`,
+  `formatApiError`, plus private `tryParseJson` / `isSafeMessage` / `LEAK_PATTERN`.
+  No external deps.
+- `frontend/src/lib/errors.test.ts` — 18 Vitest cases: the 8 original
+  `extractErrorMessage` branches, 5 leak-guard cases on `safeBackendMessage`
+  (rejects exception classes, `.java`/package strings, axios boilerplate, stack
+  traces; accepts a genuine message), and 5 `formatApiError` cases (status mapping,
+  4xx safe-message passthrough, 403 fallback, fallback key, no-leak-on-400).
 
 Used by:
 
@@ -47,6 +82,12 @@ Used by:
   `extractErrorMessage(error)`.
 - `frontend/src/pages/admin/sections/{Security,EnableBanking}Section.tsx` — TanStack
   Query mutation `error` rendered through the helper.
+- `frontend/src/pages/admin/sections/MembersSection.tsx` and
+  `frontend/src/pages/settings/FamilySettingsPage.tsx` — member-delete failure shown
+  **inside** `ConfirmDialog` via `formatApiError(deleteMember.error, t)`.
+- `frontend/src/pages/settings/security/{ExportDataDialog,RecoveryCodesDialog,MfaEnrollDialog}.tsx`
+  — replaced raw `err.message` / `` `${status} — …` `` displays with
+  `formatApiError(err, t)` (keeping their existing 401/429-specific branches).
 
 ## Technical choices
 
@@ -83,13 +124,19 @@ Used by:
 
 ## Tests
 
-- `frontend/src/lib/errors.test.ts` — 8 cases, all green via `npx vitest run`.
-  Branches covered: Spring detail with embedded JSON; plain Spring detail;
-  `data.message` when no detail; JSON inside `err.message`; plain `err.message`;
-  the Axios `"Request failed with status code N"` skip; fallback when only the
-  Axios boilerplate is present; fallback when nothing matches.
+- `frontend/src/lib/errors.test.ts` — 18 cases, all green via `bunx vitest run`.
+  - `extractErrorMessage` (8): Spring detail with embedded JSON; plain Spring
+    detail; `data.message` when no detail; JSON inside `err.message`; plain
+    `err.message`; the Axios `"Request failed with status code N"` skip; fallback
+    when only the Axios boilerplate is present; fallback when nothing matches.
+  - `safeBackendMessage` (5): rejects exception-class strings, `.java`/package
+    references, axios boilerplate, and stack traces; accepts a real user-facing
+    message; `null` when nothing safe is present.
+  - `formatApiError` (5): 401/429/5xx → generic translated keys ignoring the body;
+    user-safe 4xx reason passthrough; 403 → forbidden key when no safe message;
+    provided `fallbackKey` honoured; no internals leaked even on a 400.
 - No integration test wires this through a real Axios call — by design; the
-  helper is a pure function and the contract is asserted at the unit level.
+  helpers are pure functions and the contract is asserted at the unit level.
 
 ## Links
 

@@ -117,7 +117,7 @@ public class BoursoSyncService {
 
     private SessionStatusResponse storeSessionAndSync(String plainCookies, Long memberId) {
         FamilyMember member = familyMemberRepository.findById(memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+            .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
 
         sessionRepository.findByMemberId(memberId).ifPresent(sessionRepository::delete);
 
@@ -153,7 +153,7 @@ public class BoursoSyncService {
 
     public List<AccountResponse> sync(Long memberId) {
         BoursoSession stored = sessionRepository.findByMemberId(memberId)
-            .orElseThrow(() -> new SyncException("Aucune session BoursoBank. Veuillez vous connecter."));
+            .orElseThrow(() -> new SyncException("No BoursoBank session. Please connect from the BoursoBank page."));
         return syncWithCookies(encryption.decrypt(stored.getSessionCookies()), memberId);
     }
 
@@ -170,7 +170,7 @@ public class BoursoSyncService {
                 log.warn("BoursoBank session expired for member {} — clearing session", memberId);
                 sessionRepository.findByMemberId(memberId).ifPresent(sessionRepository::delete);
                 throw new SyncException(
-                    "Session BoursoBank expirée. Veuillez vous reconnecter depuis la page BoursoBank.");
+                    "Your BoursoBank session has expired. Please reconnect from the BoursoBank page.");
             }
             throw e;
         }
@@ -223,7 +223,7 @@ public class BoursoSyncService {
             account.setLastSyncedAt(Instant.now());
         } else {
             FamilyMember member = familyMemberRepository.findById(memberId)
-                .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+                .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
             account = Account.builder()
                 .member(member)
                 .name(data.name())

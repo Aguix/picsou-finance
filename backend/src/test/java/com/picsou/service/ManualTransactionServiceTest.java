@@ -115,9 +115,12 @@ class ManualTransactionServiceTest {
 
         when(accountRepository.findByIdAndMemberId(99L, 10L)).thenReturn(Optional.empty());
 
+        // The user-facing message must NOT leak the resource id (Account 99) — it
+        // is intentionally ID-free now, so assert on the friendly text instead.
         assertThatThrownBy(() -> manualTransactionService.addTransaction(99L, 10L, req))
             .isInstanceOf(ResourceNotFoundException.class)
-            .hasMessageContaining("99");
+            .hasMessageContaining("Account not found")
+            .hasMessageNotContaining("99");
     }
 
     @Test
@@ -176,8 +179,10 @@ class ManualTransactionServiceTest {
         when(accountRepository.findByIdAndMemberId(1L, 10L)).thenReturn(Optional.of(account));
         when(transactionRepository.findByIdAndAccountId(99L, 1L)).thenReturn(Optional.empty());
 
+        // ID-free user-facing message (no leaking of transaction id 99).
         assertThatThrownBy(() -> manualTransactionService.deleteTransaction(1L, 99L, 10L))
             .isInstanceOf(ResourceNotFoundException.class)
-            .hasMessageContaining("99");
+            .hasMessageContaining("Transaction not found")
+            .hasMessageNotContaining("99");
     }
 }

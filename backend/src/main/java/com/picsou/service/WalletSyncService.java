@@ -55,7 +55,7 @@ public class WalletSyncService {
 
     public AccountResponse addWallet(Chain chain, String address, String label, Long memberId) {
         FamilyMember member = familyMemberRepository.findById(memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+            .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
 
         WalletAddress wallet = WalletAddress.builder()
             .member(member)
@@ -70,7 +70,7 @@ public class WalletSyncService {
 
     public AccountResponse sync(Long walletId, Long memberId) {
         WalletAddress wallet = walletRepository.findByIdAndMemberId(walletId, memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Wallet not found: " + walletId));
+            .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
 
         WalletPort adapter = findAdapter(wallet.getChain());
 
@@ -124,13 +124,14 @@ public class WalletSyncService {
             return accountService.toResponse(account);
 
         } catch (Exception ex) {
-            throw new SyncException("Sync wallet " + wallet.getChain() + " echoue : " + ex.getMessage());
+            log.warn("Wallet sync failed for {} {}: {}", wallet.getChain(), wallet.getAddress(), ex.getMessage());
+            throw new SyncException("Could not sync your " + wallet.getChain() + " wallet. Please try again later.");
         }
     }
 
     public void removeWallet(Long walletId, Long memberId) {
         WalletAddress wallet = walletRepository.findByIdAndMemberId(walletId, memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Wallet not found: " + walletId));
+            .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
 
         String externalId = "wallet_" + wallet.getChain().name().toLowerCase() + "_" + wallet.getId();
         accountRepository.findByExternalAccountIdAndMemberId(externalId, memberId)
@@ -162,7 +163,7 @@ public class WalletSyncService {
         return walletAdapters.stream()
             .filter(a -> a.chain().equalsIgnoreCase(chain.name()))
             .findFirst()
-            .orElseThrow(() -> new SyncException("Aucun adapteur trouve pour la chain : " + chain));
+            .orElseThrow(() -> new SyncException("This wallet type isn't supported yet."));
     }
 
     private Account resolveAccount(String externalId, String name, BigDecimal balanceEur, String ticker, Long memberId) {
@@ -176,7 +177,7 @@ public class WalletSyncService {
             account.setTicker(null);
         } else {
             FamilyMember member = familyMemberRepository.findById(memberId)
-                .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+                .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
             account = Account.builder()
                 .member(member)
                 .name(name)

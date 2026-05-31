@@ -65,7 +65,7 @@ public class FinaryApiSyncService {
         String encryptedPassword = encryption.encrypt(password);
 
         FamilyMember member = familyMemberRepository.findById(memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+            .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
 
         Optional<FinarySession> existing = finarySessionRepository.findByMemberId(memberId);
         FinarySession session;
@@ -99,7 +99,7 @@ public class FinaryApiSyncService {
 
     public FinaryCheckTotpResponse checkTotp(Long memberId) {
         FinarySession session = finarySessionRepository.findByMemberId(memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("No Finary session for member: " + memberId));
+            .orElseThrow(() -> new ResourceNotFoundException("No Finary session for member"));
         String email = encryption.decrypt(session.getEmail());
         String password = encryption.decrypt(session.getPassword());
         String signInId = finaryApiClient.checkTotpRequired(email, password);
@@ -268,7 +268,7 @@ public class FinaryApiSyncService {
         cache.remove(syncToken);
 
         FamilyMember member = familyMemberRepository.findById(memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+            .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
 
         int accountsCreated = 0;
         int accountsMapped = 0;

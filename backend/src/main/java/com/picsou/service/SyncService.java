@@ -47,7 +47,7 @@ public class SyncService {
     /** Step 1: Initiate Enable Banking bank connection for a given institution. */
     public InitiateResponse initiateConnection(String institutionId, String institutionName, Long memberId) {
         FamilyMember member = familyMemberRepository.findById(memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Family member not found: " + memberId));
+            .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
 
         BankConnectorPort.InitiateResult result = bankConnector.initiateConnection(institutionId);
 
@@ -142,7 +142,7 @@ public class SyncService {
     @Transactional(noRollbackFor = SyncException.class)
     public List<AccountResponse> retrySync(Long id, Long memberId) {
         Requisition req = requisitionRepository.findByIdAndMemberId(id, memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Requisition not found: " + id));
+            .orElseThrow(() -> new ResourceNotFoundException("Requisition not found"));
 
         log.info("Retrying sync for {} (session={})", req.getInstitutionName(), req.getRequisitionId());
 
@@ -173,7 +173,7 @@ public class SyncService {
     /** Delete a requisition (cancel or remove a bank connection). */
     public void deleteRequisition(Long id, Long memberId) {
         Requisition req = requisitionRepository.findByIdAndMemberId(id, memberId)
-            .orElseThrow(() -> new ResourceNotFoundException("Requisition not found: " + id));
+            .orElseThrow(() -> new ResourceNotFoundException("Requisition not found"));
         requisitionRepository.delete(req);
         log.info("Deleted requisition {}", id);
     }

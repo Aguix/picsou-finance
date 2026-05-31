@@ -15,6 +15,7 @@ import { Switch } from '@/components/ui/switch'
 import { Loader2, Download } from 'lucide-react'
 import { useMfaStatus } from '@/features/mfa/hooks'
 import { useExportData } from '@/features/export/hooks'
+import { formatApiError } from '@/lib/errors'
 
 /**
  * GDPR self-service data export. Asks the user for re-auth (TOTP if 2FA is
@@ -70,7 +71,7 @@ export function ExportDataDialog({
       const status = err?.response?.status
       if (status === 401) setError(t('settings.exportInvalidCredentials'))
       else if (status === 429) setError(t('settings.exportRateLimited'))
-      else setError(err?.response?.data?.detail ?? err?.message ?? 'Error')
+      else setError(formatApiError(err, t))
     }
   }
 
