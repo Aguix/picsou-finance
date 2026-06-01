@@ -2,17 +2,27 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import PartitionBar, {
-  PartitionBarSegment,
-  PartitionBarSegmentTitle,
-  PartitionBarSegmentValue,
-} from '@/components/ui/partition-bar'
+import PartitionBar, { PartitionBarSegment } from '@/components/ui/partition-bar'
 import { useSecurityInsight } from '@/features/accounts/hooks'
 import type { WeightedSlice } from '@/types/api'
-import { formatDate } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 
-// Cycle through variants so adjacent segments are visually distinct.
-const SEGMENT_VARIANTS = ['default', 'secondary', 'outline', 'muted'] as const
+// Solid, theme-stable palette cycled across slices. The bar stays a pure
+// proportional visual; the legend below carries the labels, so this works at
+// any slice count and reflows cleanly on a phone (no sub-10px truncated text).
+const PALETTE = [
+  'bg-sky-500',
+  'bg-violet-500',
+  'bg-emerald-500',
+  'bg-amber-500',
+  'bg-rose-500',
+  'bg-teal-500',
+  'bg-indigo-500',
+  'bg-fuchsia-500',
+  'bg-lime-500',
+  'bg-orange-500',
+] as const
+const OTHERS_COLOR = 'bg-muted-foreground/30'
 
 interface HoldingInsightSectionProps {
   ticker: string | null
@@ -80,28 +90,42 @@ function CompositionBar({ title, slices, t, labelNs }: CompositionBarProps) {
   const sum = slices.reduce((acc, s) => acc + s.percent, 0)
   const others = Math.max(0, Math.round((100 - sum) * 10) / 10)
 
+  // One entry per legend item; the bar and the legend share the same list so
+  // colours line up. "Others" is only meaningful when the top-N undershoots 100%.
+  const items: { label: string; percent: number; color: string }[] = slices.map((slice, i) => ({
+    label: labelOf(slice.label),
+    percent: slice.percent,
+    color: PALETTE[i % PALETTE.length],
+  }))
+  if (others > 0.5) {
+    items.push({ label: t('holdings.insight.others'), percent: others, color: OTHERS_COLOR })
+  }
+
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      <PartitionBar size="md" gap={1}>
-        {slices.map((slice, i) => (
+
+      {/* Proportional bar — colour only, stays legible at any width. */}
+      <PartitionBar size="sm" gap={0.5} className="min-h-0">
+        {items.map((item, i) => (
           <PartitionBarSegment
-            key={`${slice.label}-${i}`}
-            num={slice.percent}
-            variant={SEGMENT_VARIANTS[i % SEGMENT_VARIANTS.length]}
-            alignment="left"
-          >
-            <PartitionBarSegmentTitle>{labelOf(slice.label)}</PartitionBarSegmentTitle>
-            <PartitionBarSegmentValue>{slice.percent.toFixed(1)}%</PartitionBarSegmentValue>
-          </PartitionBarSegment>
+            key={`${item.label}-${i}`}
+            num={item.percent}
+            className={cn('min-h-2.5 rounded-sm px-0 py-0', item.color)}
+          />
         ))}
-        {others > 0.5 && (
-          <PartitionBarSegment num={others} variant="muted" alignment="left">
-            <PartitionBarSegmentTitle>{t('holdings.insight.others')}</PartitionBarSegmentTitle>
-            <PartitionBarSegmentValue>{others.toFixed(1)}%</PartitionBarSegmentValue>
-          </PartitionBarSegment>
-        )}
       </PartitionBar>
+
+      {/* Legend — wraps to as many columns as fit, so it reads on a phone. */}
+      <ul className="flex flex-wrap gap-x-3 gap-y-1">
+        {items.map((item, i) => (
+          <li key={`${item.label}-${i}`} className="flex min-w-0 items-center gap-1.5 text-xs">
+            <span className={cn('size-2 shrink-0 rounded-[2px]', item.color)} aria-hidden />
+            <span className="truncate text-foreground">{item.label}</span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">{item.percent.toFixed(1)}%</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

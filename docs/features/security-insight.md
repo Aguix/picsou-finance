@@ -76,8 +76,8 @@ Backend:
 - `dto/SecurityInsightResponse.java`, `dto/EtfComposition.java` (adds `source` + `asOf`), `dto/WeightedSlice.java`.
 
 Frontend:
-- `components/ui/partition-bar.tsx` — partition-bar primitive (mobile-friendly: segments shrink, titles truncate).
-- `components/shared/HoldingInsightSection.tsx` — type badge + three partition bars (Companies / Countries / Sectors) with an `Others` remainder; translates country/sector keys (`labelNs`), renders company names verbatim; shows a `source · asOf` footnote.
+- `components/ui/partition-bar.tsx` — partition-bar primitive (proportional flex segments).
+- `components/shared/HoldingInsightSection.tsx` — type badge + three breakdowns (Companies / Countries / Sectors). Each is a **slim colour-only `PartitionBar`** (proportions at a glance) above a **wrapping legend** (colour swatch + label + %); labels are *not* placed inside segments, so it stays readable on a phone regardless of slice count. Includes an `Others` remainder; translates country/sector keys (`labelNs`), renders company names verbatim; shows a `source · asOf` footnote.
 - `components/shared/HoldingDetailModal.tsx` — renders `<HoldingInsightSection>` after the stats grid; gated on the modal being open.
 - `features/accounts/api.ts` (`securityInsight`) and `features/accounts/hooks.ts` (`useSecurityInsight`).
 - `i18n/locales/{en,fr}.json` — `holdings.insight.sectorNames` + `holdings.insight.countryNames` key maps.
