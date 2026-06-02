@@ -26,7 +26,14 @@ export function getLocale(): string {
 }
 
 export function formatCurrency(value: number, currency = 'EUR', locale = getLocale()): string {
-  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
+  try {
+    return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
+  } catch {
+    // An unknown/invalid ISO 4217 code makes Intl.NumberFormat throw a RangeError.
+    // Degrade to a plain decimal + the raw code instead of crashing the whole app (issue #9).
+    const num = new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+    return `${num} ${currency}`
+  }
 }
 
 export function formatDate(dateStr: string | null | undefined, locale = getLocale(), format?: DateFormat): string {

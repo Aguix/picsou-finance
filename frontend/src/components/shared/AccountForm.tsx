@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useForm, useWatch, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -9,8 +9,8 @@ import { NumericInput } from '@/components/shared/NumericInput'
 import { DateInput } from '@/components/shared/DateInput'
 import { Label } from '@/components/ui/label'
 import { ColorPicker } from '@/components/shared/ColorPicker'
-import { parseAmount } from '@/lib/utils'
-import { ACCOUNT_TYPES } from '@/lib/constants'
+import { parseAmount, getLocale } from '@/lib/utils'
+import { ACCOUNT_TYPES, SUPPORTED_CURRENCIES } from '@/lib/constants'
 
 /** RHF setValueAs: empty → undefined (optional), else comma-tolerant number. */
 const toOptionalNumber = (v: unknown): number | undefined =>
@@ -28,7 +28,7 @@ const accountSchema = z.object({
   name: z.string().min(1).max(100),
   type: z.enum(['LEP', 'PEA', 'COMPTE_TITRES', 'CRYPTO', 'CHECKING', 'SAVINGS', 'REAL_ESTATE', 'LOAN', 'OTHER']),
   provider: z.string().max(100).optional(),
-  currency: z.string().min(1).max(10),
+  currency: z.string().min(1),
   currentBalance: z.number().min(0).optional(),
   isManual: z.boolean(),
   color: z.string(),
@@ -81,6 +81,28 @@ export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title
 
   const selectedColor = useWatch({ control, name: 'color' })
   const selectedType = useWatch({ control, name: 'type' })
+  const selectedCurrency = useWatch({ control, name: 'currency' })
+
+  // Build the currency dropdown options. Labels are resolved live via Intl.DisplayNames
+  // (locale-aware, e.g. "EUR — Euro"). If the account being edited carries a code not in
+  // the curated list (a legacy or previously-invalid value), prepend it so opening the
+  // form for edit never silently rewrites the account's currency — issue #9.
+  const currencyOptions = useMemo(() => {
+    const codes =
+      selectedCurrency && !(SUPPORTED_CURRENCIES as readonly string[]).includes(selectedCurrency)
+        ? [selectedCurrency, ...SUPPORTED_CURRENCIES]
+        : [...SUPPORTED_CURRENCIES]
+    const display = new Intl.DisplayNames([getLocale()], { type: 'currency' })
+    return codes.map((code) => {
+      let name: string | undefined
+      try {
+        name = display.of(code)
+      } catch {
+        name = undefined
+      }
+      return { code, label: name && name !== code ? `${code} — ${name}` : code }
+    })
+  }, [selectedCurrency])
 
   // The dialog can be opened directly by the parent (open prop flips to true) — Radix's
   // onOpenChange does NOT fire in that case, so a one-shot reset on open inside the handler
@@ -127,7 +149,17 @@ export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="currency">Devise</Label>
-              <Input id="currency" {...register('currency')} placeholder="EUR" />
+              <select
+                id="currency"
+                {...register('currency')}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus:border-ring"
+              >
+                {currencyOptions.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="balance">

@@ -12,6 +12,17 @@ export const ACCOUNT_TYPES: { value: AccountType; labelKey: string }[] = [
   { value: 'OTHER', labelKey: 'accountTypes.other' },
 ]
 
+/**
+ * Curated list of valid ISO 4217 codes offered in the account form's currency
+ * dropdown (EUR first). Labels are rendered live via `Intl.DisplayNames`, so this
+ * stays codes-only and is trivial to extend. The backend `@ValidCurrency` constraint
+ * accepts any real ISO 4217 code, so this list can grow without backend changes.
+ */
+export const SUPPORTED_CURRENCIES = [
+  'EUR', 'USD', 'GBP', 'CHF', 'JPY', 'CAD', 'AUD', 'CNY',
+  'SEK', 'NOK', 'DKK', 'NZD', 'HKD', 'SGD', 'PLN',
+] as const
+
 export const ACCOUNT_COLORS = [
   '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
   '#ec4899', '#f43f5e', '#ef4444', '#f97316',

@@ -32,6 +32,13 @@ describe('formatCurrency', () => {
     const result = formatCurrency(-500, 'EUR', 'fr-FR')
     expect(result).toContain('500')
   })
+
+  it('degrades gracefully on an invalid currency code instead of throwing (issue #9)', () => {
+    expect(() => formatCurrency(100, 'AMAT', 'fr-FR')).not.toThrow()
+    const result = formatCurrency(100, 'AMAT', 'fr-FR')
+    expect(result).toContain('AMAT')
+    expect(result).toContain('100')
+  })
 })
 
 describe('formatDate', () => {

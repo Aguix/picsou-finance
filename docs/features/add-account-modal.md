@@ -1,6 +1,6 @@
 # Feature: Add Account Modal
 
-> Last updated: 2026-04-25
+> Last updated: 2026-06-02
 
 ## Context
 
@@ -44,6 +44,26 @@ Each wizard owns its error state as a local `useState<string | null>`. On mutati
 
 **Previously**, a global `isPending` overlay in the parent replaced all wizard content with a spinner during mutations. This caused a React unmounting bug: when the mutation completed with an error, `setError(...)` was called on the unmounted (old) wizard instance → no-op → error silently swallowed. That mechanism was removed. Each wizard's button is now disabled via `mutation.isPending` instead.
 
+### Currency field (validation & display resilience)
+
+The manual `AccountForm` currency field is a **curated `<select>`** (not free text), sourced from
+`SUPPORTED_CURRENCIES` in `frontend/src/lib/constants.ts`. Option labels are rendered live with
+`Intl.DisplayNames` (locale-aware, e.g. "EUR — Euro"), so the list stays codes-only. When editing an
+account whose code isn't in the curated list (a legacy or previously-invalid value), that code is
+prepended as an extra option so opening the form never silently rewrites the currency.
+
+Validation is layered:
+
+- **Frontend input** — the dropdown makes an invalid code unselectable; zod requires a non-empty string.
+- **Backend** — `AccountRequest.currency` carries `@ValidCurrency` (`com.picsou.validation`), which checks
+  the code against `java.util.Currency.getInstance(...)`. An unknown code now returns **400** instead of
+  persisting. Applies to both create and update (shared DTO).
+- **Display** — `formatCurrency` (`frontend/src/lib/utils.ts`) wraps `Intl.NumberFormat` in try/catch and
+  degrades to `"<amount> <code>"` on an unknown code, so a bad value can never blank the app again.
+
+This closed issue #9: a free-text code like `AMAT` used to throw a `RangeError` from
+`Intl.NumberFormat`, bubble to the root `ErrorBoundary`, and make the account unreachable/undeletable.
+
 ### SyncPage integration
 
 `SyncPage` reads `?tab=` from the URL query params to set the initial tab. This was added for forward-compatibility; the modal does not redirect there — all wizards are inline.
@@ -70,7 +90,10 @@ Each wizard owns its error state as a local `useState<string | null>`. On mutati
 
 ## Tests
 
-No dedicated test files for this feature yet.
+- `frontend/src/lib/utils.test.ts` — `formatCurrency` regression case: an invalid code does not throw
+  and the raw code appears in the output (issue #9).
+- `backend/src/test/java/com/picsou/validation/CurrencyValidatorTest.java` — accepts valid ISO 4217
+  codes, rejects unknown ones, leaves null/blank to `@NotBlank`.
 
 ## Links
 
