@@ -1,6 +1,9 @@
 services:
   app:
-    image: picsou:latest
+    # Pre-built image published to GHCR by .github/workflows/docker.yml.
+    # `docker compose pull` fetches it; `docker compose up --build` rebuilds
+    # from source instead (for contributors).
+    image: ghcr.io/zoeille/picsou-finance:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -28,6 +31,7 @@ services:
       - tr-auth
 
   tr-auth:
+    image: ghcr.io/zoeille/picsou-finance/tr-auth:latest
     build:
       context: ../services/tr-auth
       dockerfile: Dockerfile
