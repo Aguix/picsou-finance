@@ -1,0 +1,239 @@
+package com.picsou.adapter;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.web.reactive.function.client.ClientRequest;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.ExchangeFunction;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
+
+class YahooFinancePriceProviderTest {
+
+    private static final String AAPL_USD = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":100.0,"currency":"USD"},
+              "timestamp":[1700000000],"indicators":{"quote":[{"close":[100.0]}]}}]}}""";
+
+    private static final String ASML_EUR = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":700.0,"currency":"EUR"},
+              "timestamp":[1700000000],"indicators":{"quote":[{"close":[700.0]}]}}]}}""";
+
+    private static final String SONY_JPY = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":3000.0,"currency":"JPY"},
+              "timestamp":[1700000000],"indicators":{"quote":[{"close":[3000.0]}]}}]}}""";
+
+    private static final String LLOY_GBP_PENCE = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":5000.0,"currency":"GBp"},
+              "timestamp":[1700000000],"indicators":{"quote":[{"close":[5000.0]}]}}]}}""";
+
+    private static final String CURRENCYLESS = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":42.0}}]}}""";
+
+    private static final String FX_USD_EUR_092 = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":0.92,"currency":"EUR"}}]}}""";
+
+    private static final String FX_JPY_EUR = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":0.0060,"currency":"EUR"}}]}}""";
+
+    private static final String FX_GBP_EUR = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":1.18,"currency":"EUR"}}]}}""";
+
+    private static final String HISTORICAL_USD = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":100.0,"currency":"USD"},
+              "timestamp":[1700000000,1700086400,1700172800],
+              "indicators":{"quote":[{"close":[100.0,110.0,120.0]}]}}]}}""";
+
+    private static final String INTRADAY_JPY = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":3000.0,"currency":"JPY"},
+              "timestamp":[1700000000,1700003600],
+              "indicators":{"quote":[{"close":[3000.0,3100.0]}]}}]}}""";
+
+    private YahooFinancePriceProvider providerWith(Function<String, String> routeToJson, AtomicInteger callCounter) {
+        ExchangeFunction exchange = request -> {
+            if (callCounter != null) callCounter.incrementAndGet();
+            String url = request.url().toString();
+            String body = routeToJson.apply(url);
+            if (body == null) {
+                return Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND)
+                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .body("{\"error\":\"not found\"}").build());
+            }
+            return Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .body(body).build());
+        };
+        WebClient client = WebClient.builder().exchangeFunction(exchange).build();
+        return new YahooFinancePriceProvider(client);
+    }
+
+    @Test
+    void getPriceEur_returnsRawPrice_whenCurrencyIsEur() {
+        AtomicInteger calls = new AtomicInteger();
+        var provider = providerWith(url -> {
+            if (url.contains("/ASML.AS")) return ASML_EUR;
+            return null;
+        }, calls);
+
+        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("ASML.AS"));
+
+        assertThat(result).containsEntry("ASML.AS", BigDecimal.valueOf(700.0));
+        assertThat(calls.get()).isEqualTo(1); // no FX call needed for EUR
+    }
+
+    @Test
+    void getPriceEur_appliesFx_forUsdTicker() {
+        var provider = providerWith(url -> {
+            if (url.contains("/AAPL")) return AAPL_USD;
+            if (url.contains("/USDEUR%3DX") || url.contains("/USDEUR=X")) return FX_USD_EUR_092;
+            return null;
+        }, null);
+
+        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("AAPL"));
+
+        // 100 USD × 0.92 = 92 EUR
+        assertThat(result.get("AAPL").doubleValue()).isCloseTo(92.0, within(0.001));
+    }
+
+    @Test
+    void getPriceEur_appliesFx_forJpyTicker() {
+        var provider = providerWith(url -> {
+            if (url.contains("/8729.T")) return SONY_JPY;
+            if (url.contains("JPYEUR")) return FX_JPY_EUR;
+            return null;
+        }, null);
+
+        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("8729.T"));
+
+        // 3000 JPY × 0.0060 = 18 EUR
+        assertThat(result.get("8729.T").doubleValue()).isCloseTo(18.0, within(0.01));
+    }
+
+    @Test
+    void getPriceEur_dividesByHundred_forGbpPence() {
+        var provider = providerWith(url -> {
+            if (url.contains("/LLOY.L")) return LLOY_GBP_PENCE;
+            if (url.contains("GBPEUR")) return FX_GBP_EUR;
+            return null;
+        }, null);
+
+        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("LLOY.L"));
+
+        // 5000 GBp = 50 GBP × 1.18 = 59 EUR
+        assertThat(result.get("LLOY.L").doubleValue()).isCloseTo(59.0, within(0.01));
+    }
+
+    @Test
+    void getPriceEur_returnsEmpty_whenFxFetchFails() {
+        var provider = providerWith(url -> {
+            if (url.contains("/AAPL")) return AAPL_USD;
+            // USDEUR=X returns 404
+            return null;
+        }, null);
+
+        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("AAPL"));
+
+        assertThat(result).doesNotContainKey("AAPL"); // no fabricated EUR value
+    }
+
+    @Test
+    void getPriceEur_returnsRawPrice_whenCurrencyIsMissing() {
+        var provider = providerWith(url -> {
+            if (url.contains("/WEIRD")) return CURRENCYLESS;
+            return null;
+        }, null);
+
+        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("WEIRD"));
+
+        // Currency null → treat as EUR (preserves pre-fix behavior for broken payloads)
+        assertThat(result.get("WEIRD")).isEqualTo(BigDecimal.valueOf(42.0));
+    }
+
+    @Test
+    void fxCache_avoidsRefetch_acrossTickersInSameCurrency() {
+        List<String> fxCalls = new ArrayList<>();
+        ExchangeFunction exchange = request -> {
+            String url = request.url().toString();
+            if (url.contains("USDEUR")) fxCalls.add(url);
+            String body;
+            if (url.contains("/AAPL")) body = AAPL_USD;
+            else if (url.contains("/MSFT")) body = AAPL_USD;  // both USD, same payload shape
+            else if (url.contains("USDEUR")) body = FX_USD_EUR_092;
+            else body = null;
+            if (body == null) {
+                return Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND)
+                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .body("{}").build());
+            }
+            return Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .body(body).build());
+        };
+        var provider = new YahooFinancePriceProvider(
+            WebClient.builder().exchangeFunction(exchange).build());
+
+        provider.getPricesEur(Set.of("AAPL"));
+        provider.getPricesEur(Set.of("MSFT"));
+
+        // First USD ticker triggers FX fetch and caches; second USD ticker
+        // must reuse the cached rate.
+        assertThat(fxCalls).hasSize(1);
+    }
+
+    @Test
+    void getFxRateToEur_shortCircuits_forEur() {
+        var provider = providerWith(url -> null, null);
+
+        // Should never hit the network for EUR.
+        assertThat(provider.getFxRateToEur("EUR")).isEqualTo(BigDecimal.ONE);
+        assertThat(provider.getFxRateToEur("eur")).isEqualTo(BigDecimal.ONE);
+        assertThat(provider.getFxRateToEur(null)).isEqualTo(BigDecimal.ONE);
+        assertThat(provider.getFxRateToEur("")).isEqualTo(BigDecimal.ONE);
+    }
+
+    @Test
+    void getHistoricalPricesEur_appliesFx_toAllClosesInSeries() {
+        var provider = providerWith(url -> {
+            if (url.contains("/AAPL")) return HISTORICAL_USD;
+            if (url.contains("USDEUR")) return FX_USD_EUR_092;
+            return null;
+        }, null);
+
+        Map<LocalDate, BigDecimal> prices = provider.getHistoricalPricesEur(
+            "AAPL", LocalDate.of(2023, 11, 1), LocalDate.of(2023, 12, 1));
+
+        // All closes × 0.92, scaled to 8 decimals
+        assertThat(prices).isNotEmpty();
+        assertThat(prices.values().stream().map(BigDecimal::doubleValue).toList())
+            .allSatisfy(v -> assertThat(v).isIn(92.0, 101.2, 110.4));
+    }
+
+    @Test
+    void getIntradayPricesEur_appliesFx_toAllClosesInSeries() {
+        var provider = providerWith(url -> {
+            if (url.contains("/8729.T")) return INTRADAY_JPY;
+            if (url.contains("JPYEUR")) return FX_JPY_EUR;
+            return null;
+        }, null);
+
+        var from = java.time.LocalDateTime.of(2023, 1, 1, 0, 0);
+        var to = java.time.LocalDateTime.of(2030, 1, 1, 0, 0);
+        Map<java.time.LocalDateTime, BigDecimal> prices = provider.getIntradayPricesEur("8729.T", from, to);
+
+        // 3000 JPY × 0.006 = 18; 3100 JPY × 0.006 = 18.6 — both must be present
+        assertThat(prices.values().stream().map(BigDecimal::doubleValue).toList())
+            .anySatisfy(v -> assertThat(v).isCloseTo(18.0, within(0.01)));
+    }
+}

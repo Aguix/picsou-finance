@@ -1,0 +1,71 @@
+package com.picsou.config;
+
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.stereotype.Component;
+
+/**
+ * Single source of truth for writing/clearing auth cookies. Centralised so
+ * AuthController, MfaController, and PersistentTokenAuthFilter all emit
+ * identical cookie attributes — diverging on a single attribute (HttpOnly,
+ * SameSite, Secure) is a silent auth bypass risk.
+ *
+ * <p>Cookie names handled here:
+ * <ul>
+ *   <li>{@code access_token} — short-lived JWT, every API call</li>
+ *   <li>{@code refresh_token} — rotates access token at /api/auth/refresh</li>
+ *   <li>{@code mfa_challenge_token} — single-purpose token for /api/auth/mfa/verify</li>
+ *   <li>{@code persistent_token} — long-lived "Remember Me" / trusted-device</li>
+ * </ul>
+ */
+@Component
+public class AuthCookieWriter {
+
+    public static final String ACCESS_COOKIE = "access_token";
+    public static final String REFRESH_COOKIE = "refresh_token";
+    public static final String MFA_CHALLENGE_COOKIE = "mfa_challenge_token";
+    public static final String PERSISTENT_COOKIE = "persistent_token";
+
+    private final SecureCookieProvider secureCookieProvider;
+    private final JwtUtil jwtUtil;
+
+    public AuthCookieWriter(SecureCookieProvider secureCookieProvider, JwtUtil jwtUtil) {
+        this.secureCookieProvider = secureCookieProvider;
+        this.jwtUtil = jwtUtil;
+    }
+
+    public void setAccessAndRefresh(HttpServletResponse response, String accessToken, String refreshToken) {
+        addCookie(response, ACCESS_COOKIE, accessToken, (int) jwtUtil.getAccessExpirySeconds());
+        addCookie(response, REFRESH_COOKIE, refreshToken, (int) jwtUtil.getRefreshExpirySeconds());
+    }
+
+    public void setMfaChallenge(HttpServletResponse response, String challengeToken) {
+        addCookie(response, MFA_CHALLENGE_COOKIE, challengeToken, (int) jwtUtil.getMfaChallengeExpirySeconds());
+    }
+
+    public void clearMfaChallenge(HttpServletResponse response) {
+        addCookie(response, MFA_CHALLENGE_COOKIE, "", 0);
+    }
+
+    public void setPersistent(HttpServletResponse response, String cookieValue, long maxAgeSeconds) {
+        addCookie(response, PERSISTENT_COOKIE, cookieValue, (int) maxAgeSeconds);
+    }
+
+    public void clearPersistent(HttpServletResponse response) {
+        addCookie(response, PERSISTENT_COOKIE, "", 0);
+    }
+
+    public void clearAuthCookies(HttpServletResponse response) {
+        addCookie(response, ACCESS_COOKIE, "", 0);
+        addCookie(response, REFRESH_COOKIE, "", 0);
+        addCookie(response, MFA_CHALLENGE_COOKIE, "", 0);
+        addCookie(response, PERSISTENT_COOKIE, "", 0);
+    }
+
+    private void addCookie(HttpServletResponse response, String name, String value, int maxAge) {
+        String cookieHeader = String.format(
+            "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s",
+            name, value, maxAge, secureCookieProvider.isSecure() ? "; Secure" : ""
+        );
+        response.addHeader("Set-Cookie", cookieHeader);
+    }
+}

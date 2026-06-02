@@ -1,217 +1,347 @@
-import { useState } from 'react'
-import { motion } from 'motion/react'
-import { ShieldCheck, Key, Info, Loader2, CheckCircle2 } from 'lucide-react'
-import { GlassCard, GlowBackground, PageHeader } from '../../components/shared'
-import { api } from '../../lib/api'
-import { useAuth } from '../../hooks/useAuth'
+import React, { useEffect, useState } from 'react'
+import { type Theme, applyTheme, getStoredTheme } from '@/lib/theme'
+import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router'
+import { useAuthStore } from '@/stores/auth-store'
+import { useAppStore, type DateFormat } from '@/stores/app-store'
+import { PageHeader } from '@/components/shared/PageHeader'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { getErrorStatus } from '@/lib/errors'
+import {
+  Paintbrush,
+  Globe,
+  User,
+  LogOut,
+  Users,
+  ChevronRight,
+  Check,
+  X,
+  Pencil,
+  Shield,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { api } from '@/lib/api-client'
+import { SecuritySection } from './security/SecuritySection'
 
-export function SettingsPage() {
-  const { username } = useAuth()
-  const [currentPw, setCurrentPw] = useState('')
-  const [newPw, setNewPw] = useState('')
-  const [confirmPw, setConfirmPw] = useState('')
-  const [pwStatus, setPwStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
-  const [pwError, setPwError] = useState<string | null>(null)
+// ---------------------------------------------------------------------------
+// Toggle group button (theme / language)
+// ---------------------------------------------------------------------------
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (newPw !== confirmPw) {
-      setPwError('Les mots de passe ne correspondent pas.')
-      return
-    }
-    if (newPw.length < 8) {
-      setPwError('Minimum 8 caractères.')
-      return
-    }
-    setPwStatus('loading')
-    setPwError(null)
-    try {
-      await api.post('/auth/change-password', { currentPassword: currentPw, newPassword: newPw })
-      setPwStatus('done')
-      setCurrentPw('')
-      setNewPw('')
-      setConfirmPw('')
-    } catch {
-      setPwStatus('error')
-      setPwError('Mot de passe actuel incorrect.')
-    }
-  }
-
-  return (
-    <GlowBackground
-      glows={[
-        { color: 'bg-gray-200/20', size: 350, blur: 120, position: '-top-10 right-1/3' },
-      ]}
-    >
-      <PageHeader surtitle="Configuration" title="Paramètres" />
-
-      <div className="flex flex-col gap-4 max-w-lg">
-        {/* User info */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        >
-          <GlassCard>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-9 h-9 rounded-[12px] bg-gray-100 flex items-center justify-center">
-                <ShieldCheck size={16} className="text-gray-500" />
-              </div>
-              <p className="text-gray-900" style={{ fontSize: 15, fontWeight: 600 }}>Compte</p>
-            </div>
-            <div className="flex items-center gap-3 p-3 rounded-[12px] bg-black/[0.02]">
-              <div
-                className="w-9 h-9 rounded-[14px] bg-gray-100 flex items-center justify-center text-gray-500"
-                style={{ fontSize: 13, fontWeight: 600 }}
-              >
-                {(username ?? 'ME').slice(0, 2).toUpperCase()}
-              </div>
-              <div>
-                <p className="text-gray-900" style={{ fontSize: 13, fontWeight: 600 }}>{username}</p>
-                <p className="text-gray-400" style={{ fontSize: 11, fontWeight: 500 }}>Utilisateur unique</p>
-              </div>
-            </div>
-          </GlassCard>
-        </motion.div>
-
-        {/* Change password */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
-        >
-          <GlassCard>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-9 h-9 rounded-[12px] bg-gray-100 flex items-center justify-center">
-                <Key size={16} className="text-gray-500" />
-              </div>
-              <p className="text-gray-900" style={{ fontSize: 15, fontWeight: 600 }}>
-                Changer de mot de passe
-              </p>
-            </div>
-
-            <form onSubmit={handleChangePassword} className="flex flex-col gap-3">
-              <PwField
-                label="Mot de passe actuel"
-                value={currentPw}
-                onChange={setCurrentPw}
-                autoComplete="current-password"
-              />
-              <PwField
-                label="Nouveau mot de passe"
-                value={newPw}
-                onChange={setNewPw}
-                autoComplete="new-password"
-              />
-              <PwField
-                label="Confirmer le nouveau mot de passe"
-                value={confirmPw}
-                onChange={setConfirmPw}
-                autoComplete="new-password"
-              />
-
-              {pwError && (
-                <p className="text-red-500" style={{ fontSize: 12, fontWeight: 500 }}>{pwError}</p>
-              )}
-              {pwStatus === 'done' && (
-                <p className="text-green-600 flex items-center gap-1.5" style={{ fontSize: 12, fontWeight: 500 }}>
-                  <CheckCircle2 size={13} /> Mot de passe modifié.
-                </p>
-              )}
-
-              <motion.button
-                type="submit"
-                disabled={pwStatus === 'loading'}
-                whileTap={{ scale: 0.97 }}
-                className="h-9 bg-gray-900 text-white rounded-[10px] flex items-center justify-center gap-1.5 mt-1 disabled:opacity-60"
-                style={{ fontSize: 12, fontWeight: 600 }}
-              >
-                {pwStatus === 'loading' ? <Loader2 size={13} className="animate-spin" /> : null}
-                Mettre à jour
-              </motion.button>
-            </form>
-          </GlassCard>
-        </motion.div>
-
-        {/* Enable Banking info */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
-        >
-          <GlassCard>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-9 h-9 rounded-[12px] bg-blue-50 flex items-center justify-center">
-                <Info size={16} className="text-blue-500" />
-              </div>
-              <p className="text-gray-900" style={{ fontSize: 15, fontWeight: 600 }}>
-                Enable Banking — Configuration
-              </p>
-            </div>
-            <p className="text-gray-500 mb-3" style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.5 }}>
-              Les identifiants Enable Banking sont configurés via variables d'environnement dans le fichier{' '}
-              <code className="text-[#c2c4c9] bg-black/[0.04] px-1 py-0.5 rounded-[4px]" style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                .env
-              </code>{' '}
-              pour des raisons de sécurité.
-            </p>
-            <div className="p-3 rounded-[12px] bg-black/[0.02] space-y-2">
-              <EnvRow name="ENABLEBANKING_APPLICATION_ID" />
-              <EnvRow name="ENABLEBANKING_KEY_ID" />
-              <EnvRow name="ENABLEBANKING_REDIRECT_URI" />
-              <EnvRow name="ENABLEBANKING_PRIVATE_KEY" />
-            </div>
-            <p className="text-gray-400 mt-3" style={{ fontSize: 11, fontWeight: 500 }}>
-              Inscrivez-vous gratuitement sur{' '}
-              <a
-                href="https://enablebanking.com/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-indigo-500 hover:underline"
-              >
-                enablebanking.com
-              </a>
-              {' '}· Clé RSA : <code style={{ fontFamily: 'monospace' }}>openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048</code>
-            </p>
-          </GlassCard>
-        </motion.div>
-
-        {/* Version info */}
-        <p className="text-gray-300 text-center" style={{ fontSize: 11, fontWeight: 500 }}>
-          Picsou v1.0.0 — Open source, self-hosted
-        </p>
-      </div>
-    </GlowBackground>
-  )
+interface ToggleOption {
+  value: string
+  label: string
 }
 
-function PwField({
-  label, value, onChange, autoComplete
+function ToggleGroup({
+  options,
+  value,
+  onChange,
 }: {
-  label: string; value: string; onChange: (v: string) => void; autoComplete?: string
+  options: ToggleOption[]
+  value: string
+  onChange: (value: string) => void
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-gray-500" style={{ fontSize: 11, fontWeight: 600 }}>
-        {label.toUpperCase()}
-      </label>
-      <input
-        type="password"
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        autoComplete={autoComplete}
-        required
-        className="h-8 px-3 rounded-[10px] bg-black/[0.03] text-[13px] border-none outline-none focus:ring-2 focus:ring-gray-900/10"
-      />
+    <div className="inline-flex items-center rounded-lg bg-muted p-1">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            value === opt.value
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   )
 }
 
-function EnvRow({ name }: { name: string }) {
+// ---------------------------------------------------------------------------
+// Settings section card wrapper
+// ---------------------------------------------------------------------------
+
+function SectionCard({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon: LucideIcon
+  title: string
+  description: string
+  children: React.ReactNode
+}) {
   return (
-    <div className="flex items-center justify-between">
-      <code className="text-[#c2c4c9]" style={{ fontFamily: 'monospace', fontSize: 12 }}>{name}</code>
-      <span className="text-gray-400" style={{ fontSize: 11, fontWeight: 500 }}>•••••••</span>
+    <Card className="rounded-4xl bg-card shadow-md">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          {React.createElement(icon, { className: "size-5 text-muted-foreground" })}
+          {title}
+        </CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SettingsPage
+// ---------------------------------------------------------------------------
+
+export function SettingsPage() {
+  const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const logout = useAuthStore((s) => s.logout)
+  const setUsername = useAuthStore((s) => s.setUsername)
+  const { dateFormat, setDateFormat } = useAppStore()
+
+  // Username editing -------------------------------------------------------
+  const [editingUsername, setEditingUsername] = useState(false)
+  const [newUsername, setNewUsername] = useState('')
+  const [usernameError, setUsernameError] = useState<string | null>(null)
+  const [usernameSaving, setUsernameSaving] = useState(false)
+
+  function startEditUsername() {
+    setNewUsername(user?.username ?? '')
+    setUsernameError(null)
+    setEditingUsername(true)
+  }
+
+  function cancelEditUsername() {
+    setEditingUsername(false)
+    setUsernameError(null)
+  }
+
+  async function saveUsername() {
+    const trimmed = newUsername.trim()
+    if (!trimmed || trimmed === user?.username) { setEditingUsername(false); return }
+    if (trimmed.length < 3) { setUsernameError('3 caractères minimum'); return }
+    if (!/^[a-zA-Z0-9._-]+$/.test(trimmed)) { setUsernameError('Lettres, chiffres, . _ - uniquement'); return }
+    setUsernameSaving(true)
+    setUsernameError(null)
+    try {
+      await api.patch('/auth/username', { newUsername: trimmed })
+      setUsername(trimmed)
+      setEditingUsername(false)
+    } catch (err: unknown) {
+      setUsernameError(getErrorStatus(err) === 409 ? 'Nom d\'utilisateur déjà pris' : 'Erreur, réessayez')
+    } finally {
+      setUsernameSaving(false)
+    }
+  }
+
+  // Theme -----------------------------------------------------------------
+  const [theme, setTheme] = useState<Theme>(getStoredTheme)
+
+  useEffect(() => {
+    applyTheme(theme)
+  }, [theme])
+
+  // Language --------------------------------------------------------------
+  const [locale, setLocale] = useState(i18n.language)
+
+  const handleLocaleChange = (lng: string) => {
+    i18n.changeLanguage(lng)
+    localStorage.setItem('locale', lng)
+    setLocale(lng)
+  }
+
+  // Logout ----------------------------------------------------------------
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
+
+  // Theme / locale options
+  const themeOptions: ToggleOption[] = [
+    { value: 'light', label: t('settings.themeLight') },
+    { value: 'dark', label: t('settings.themeDark') },
+    { value: 'system', label: t('settings.themeSystem') },
+  ]
+
+  const localeOptions: ToggleOption[] = [
+    { value: 'fr', label: 'FR' },
+    { value: 'en', label: 'EN' },
+  ]
+
+  const dateFormatOptions: ToggleOption[] = [
+    { value: 'locale', label: t('settings.dateFormatLocale') },
+    { value: 'iso', label: t('settings.dateFormatIso') },
+  ]
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6">
+      <PageHeader title={t('settings.title')} />
+
+      {/* Appearance ------------------------------------------------------- */}
+      <SectionCard
+        icon={Paintbrush}
+        title={t('settings.appearance')}
+        description={t('settings.appearanceDescription')}
+      >
+        <div className="space-y-6">
+          {/* Theme */}
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">{t('settings.theme')}</Label>
+            <ToggleGroup
+              options={themeOptions}
+              value={theme}
+              onChange={(v) => setTheme(v as Theme)}
+            />
+          </div>
+
+          {/* Language */}
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">{t('settings.language')}</Label>
+            <ToggleGroup
+              options={localeOptions}
+              value={locale.startsWith('fr') ? 'fr' : 'en'}
+              onChange={handleLocaleChange}
+            />
+          </div>
+
+          {/* Date format */}
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">{t('settings.dateFormat')}</Label>
+            <ToggleGroup
+              options={dateFormatOptions}
+              value={dateFormat}
+              onChange={(v) => setDateFormat(v as DateFormat)}
+            />
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Account ---------------------------------------------------------- */}
+      <SectionCard
+        icon={User}
+        title={t('settings.account')}
+        description={t('settings.accountDescription')}
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <Label className="text-sm font-medium shrink-0">
+              {t('settings.username')}
+            </Label>
+            {editingUsername ? (
+              <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-1">
+                  <Input
+                    value={newUsername}
+                    onChange={e => setNewUsername(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveUsername(); if (e.key === 'Escape') cancelEditUsername() }}
+                    className="w-44"
+                    autoFocus
+                    disabled={usernameSaving}
+                  />
+                  <Button size="icon-sm" variant="ghost" onClick={saveUsername} disabled={usernameSaving}>
+                    <Check className="size-4 text-green-600" />
+                  </Button>
+                  <Button size="icon-sm" variant="ghost" onClick={cancelEditUsername} disabled={usernameSaving}>
+                    <X className="size-4" />
+                  </Button>
+                </div>
+                {usernameError && <p className="text-xs text-destructive">{usernameError}</p>}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">{user?.username}</span>
+                <Button size="icon-sm" variant="ghost" onClick={startEditUsername}>
+                  <Pencil className="size-3.5" />
+                </Button>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <Button variant="destructive" onClick={handleLogout}>
+              <LogOut className="mr-2 size-4" />
+              {t('settings.logout')}
+            </Button>
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Security --------------------------------------------------------- */}
+      <SectionCard
+        icon={Shield}
+        title={t('settings.security')}
+        description={t('settings.securityDescription')}
+      >
+        <SecuritySection />
+      </SectionCard>
+
+      {/* Family ----------------------------------------------------------- */}
+      <SectionCard
+        icon={Users}
+        title={t('settings.family', 'Family')}
+        description={t('settings.familyDescription', 'Manage members and sharing settings')}
+      >
+        <button
+          type="button"
+          onClick={() => navigate('/settings/family')}
+          className="flex w-full items-center justify-between rounded-lg p-2 text-sm font-medium transition-colors hover:bg-muted"
+        >
+          <span>{t('settings.familyManage', 'Manage family members & sharing')}</span>
+          <ChevronRight className="size-4 text-muted-foreground" />
+        </button>
+      </SectionCard>
+
+      {/* Admin (admin-only) ----------------------------------------------- */}
+      {user?.role === 'ADMIN' && (
+        <SectionCard
+          icon={Shield}
+          title={t('settings.adminSection')}
+          description={t('settings.adminDescription')}
+        >
+          <button
+            type="button"
+            onClick={() => navigate('/admin')}
+            className="flex w-full items-center justify-between rounded-lg p-2 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            <span>{t('settings.adminButton')}</span>
+            <ChevronRight className="size-4 text-muted-foreground" />
+          </button>
+        </SectionCard>
+      )}
+
+      {/* About ------------------------------------------------------------ */}
+      <SectionCard
+        icon={Globe}
+        title={t('settings.about')}
+        description={t('settings.aboutDescription')}
+      >
+        <div className="space-y-3 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Picsou</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">
+              {t('settings.version')}
+            </span>
+            <span className="font-medium">1.0.0</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">GitHub</span>
+            <span className="font-medium">github.com/zoeille/picsou</span>
+          </div>
+        </div>
+      </SectionCard>
     </div>
   )
 }

@@ -36,3 +36,42 @@ frontend/.vite/
 # Docker overrides (may contain local ports, credentials)
 docker-compose.override.yml
 docker-compose.override.*.yml
+.docker-cache/
+
+# Dev screenshots & images at repo root
+/*.png
+/*.jpg
+/*.jpeg
+/*.svg
+/Capture*.png
+/Image*.png
+
+# Accidental root npm artifacts (frontend lives in frontend/)
+/package.json
+/package-lock.json
+/bun.lock
+/node_modules/
+
+# Build artifacts & local prod snapshots
+picsou-build-*.tar.gz
+picsou-latest.tar.gz
+picsou_prod/
+chrome
+test-results/
+
+# External imports / drafts (not part of the source tree)
+BANK_SYNC.md
+CLAUDE_old.md
+FINARY_IMPORT_SUMMARY.md
+FinaryExport-main/
+FinaryExport-main.zip
+docs_template/
+docs_template*/
+docs_template*.zip
+
+# Tooling caches / local-only
+.playwright-mcp/
+.superpowers/
+docs/superpowers/
+.mcp.json
+*.plan.md

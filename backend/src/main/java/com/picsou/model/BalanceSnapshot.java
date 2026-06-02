@@ -1,5 +1,6 @@
 package com.picsou.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -22,6 +23,7 @@ public class BalanceSnapshot {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "account_id", nullable = false)
     private Account account;
@@ -31,6 +33,10 @@ public class BalanceSnapshot {
 
     @Column(nullable = false, precision = 20, scale = 8)
     private BigDecimal balance;
+
+    @Column(name = "invested_amount", nullable = false, precision = 20, scale = 8)
+    @Builder.Default
+    private BigDecimal investedAmount = BigDecimal.ZERO;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default

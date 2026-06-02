@@ -5,83 +5,152 @@ import com.picsou.dto.DashboardResponse.DistributionItem;
 import com.picsou.dto.DashboardResponse.NetWorthPoint;
 import com.picsou.dto.GoalProgressResponse;
 import com.picsou.model.Account;
+import com.picsou.model.AccountHolding;
+import com.picsou.model.AccountType;
+import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.AccountRepository;
-import com.picsou.repository.BalanceSnapshotRepository;
 import com.picsou.repository.GoalRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 @Service
 @Transactional(readOnly = true)
 public class DashboardService {
 
+    private static final Logger log = LoggerFactory.getLogger(DashboardService.class);
+
     private final AccountRepository accountRepository;
-    private final BalanceSnapshotRepository snapshotRepository;
     private final GoalService goalService;
     private final GoalRepository goalRepository;
     private final PriceService priceService;
+    private final AccountHoldingRepository holdingRepository;
+    private final HistoryService historyService;
 
     public DashboardService(
         AccountRepository accountRepository,
-        BalanceSnapshotRepository snapshotRepository,
         GoalService goalService,
         GoalRepository goalRepository,
-        PriceService priceService
+        PriceService priceService,
+        AccountHoldingRepository holdingRepository,
+        HistoryService historyService
     ) {
         this.accountRepository = accountRepository;
-        this.snapshotRepository = snapshotRepository;
         this.goalService = goalService;
         this.goalRepository = goalRepository;
         this.priceService = priceService;
+        this.holdingRepository = holdingRepository;
+        this.historyService = historyService;
     }
 
-    public DashboardResponse getDashboard() {
-        List<Account> accounts = accountRepository.findAllByOrderByCreatedAtAsc();
+    public DashboardResponse getDashboard(Long memberId, String range) {
+        List<Account> accounts = accountRepository.findAllByMemberIdOrderByCreatedAtAsc(memberId);
 
-        // Total net worth in EUR
-        BigDecimal totalNetWorth = accounts.stream()
-            .map(a -> priceService.toEur(a.getCurrentBalance(), a.getCurrency(), a.getTicker()))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Pre-load all holdings and group by account
+        Map<Long, List<AccountHolding>> holdingsByAccount = new HashMap<>();
+        for (Account account : accounts) {
+            holdingsByAccount.put(account.getId(), holdingRepository.findByAccount_Id(account.getId()));
+        }
 
-        // Net worth history (last 12 months)
-        List<NetWorthPoint> history = buildNetWorthHistory();
+        // Calculate live total and invested from holdings + cash
+        BigDecimal totalAssets = BigDecimal.ZERO;
+        BigDecimal totalLiabilities = BigDecimal.ZERO;
+        BigDecimal totalInvested = BigDecimal.ZERO;
 
-        // Distribution (per account)
-        List<DistributionItem> distribution = buildDistribution(accounts, totalNetWorth);
+        for (Account account : accounts) {
+            List<AccountHolding> holdings = holdingsByAccount.get(account.getId());
 
-        // Goal summaries
-        List<GoalProgressResponse> goals = goalRepository.findAllWithAccounts().stream()
+            BigDecimal accountValue;
+            BigDecimal accountInvested;
+
+            if (holdings.isEmpty()) {
+                accountValue = priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getTicker());
+                accountInvested = accountValue;
+            } else {
+                BigDecimal liveValue = BigDecimal.ZERO;
+                BigDecimal investedValue = BigDecimal.ZERO;
+                for (AccountHolding h : holdings) {
+                    BigDecimal qty = h.getQuantity();
+                    BigDecimal avgBuy = h.getAverageBuyIn() != null ? h.getAverageBuyIn() : BigDecimal.ZERO;
+
+                    BigDecimal livePrice = h.getTicker() != null ? priceService.getPriceEur(h.getTicker()) : null;
+                    if (livePrice == null) {
+                        livePrice = h.getCurrentPrice() != null ? h.getCurrentPrice() : BigDecimal.ZERO;
+                    }
+
+                    liveValue = liveValue.add(qty.multiply(livePrice));
+                    investedValue = investedValue.add(qty.multiply(avgBuy));
+                }
+                log.info("getDashboard: account={} holdings={} liveValue={} investedValue={}",
+                    account.getId(), holdings.size(), liveValue, investedValue);
+                accountValue = liveValue;
+                accountInvested = investedValue;
+            }
+
+            if (account.getType() == AccountType.LOAN) {
+                totalLiabilities = totalLiabilities.add(accountValue);
+            } else {
+                totalAssets = totalAssets.add(accountValue);
+                totalInvested = totalInvested.add(accountInvested);
+            }
+        }
+
+        BigDecimal totalNetWorth = totalAssets.subtract(totalLiabilities);
+
+        log.info("getDashboard: totalAssets={}, totalLiabilities={}, totalNetWorth={}, totalInvested={}, pnl={}",
+            totalAssets, totalLiabilities, totalNetWorth, totalInvested, totalNetWorth.subtract(totalInvested));
+
+        // Build history using shared HistoryService
+        List<Long> allAccountIds = accounts.stream().map(Account::getId).toList();
+        int months = switch (range != null ? range : "1Y") {
+            case "7D", "1M" -> 1;
+            case "3M" -> 3;
+            case "YTD" -> LocalDate.now().getMonthValue();
+            case "ALL" -> 1200;
+            default -> 12;
+        };
+        List<NetWorthPoint> updatedHistory = historyService.buildHistory(allAccountIds, months, memberId);
+
+        List<DistributionItem> distribution = buildDistribution(accounts, totalNetWorth, holdingsByAccount, false);
+        List<DistributionItem> liabilities = buildDistribution(accounts, totalNetWorth, holdingsByAccount, true);
+
+        List<GoalProgressResponse> goals = goalRepository.findAllByMemberIdOrderByCreatedAtAsc(memberId).stream()
             .map(goalService::toProgressResponse)
             .toList();
 
-        return new DashboardResponse(totalNetWorth, history, distribution, goals);
+        return new DashboardResponse(totalNetWorth, totalLiabilities, updatedHistory, distribution, liabilities, goals);
     }
 
-    private List<NetWorthPoint> buildNetWorthHistory() {
-        LocalDate from = LocalDate.now().minusMonths(12);
-        List<Object[]> rows = snapshotRepository.findDailyNetWorth(from);
-
-        return rows.stream()
-            .map(row -> new NetWorthPoint(
-                ((java.sql.Date) row[0]).toLocalDate(),
-                (BigDecimal) row[1]
-            ))
-            .toList();
-    }
-
-    private List<DistributionItem> buildDistribution(List<Account> accounts, BigDecimal totalNetWorth) {
+    private List<DistributionItem> buildDistribution(List<Account> accounts, BigDecimal totalNetWorth,
+                                                       Map<Long, List<AccountHolding>> holdingsByAccount,
+                                                       boolean liabilitiesOnly) {
         List<DistributionItem> items = new ArrayList<>();
 
         for (Account account : accounts) {
-            BigDecimal balanceEur = priceService.toEur(
-                account.getCurrentBalance(), account.getCurrency(), account.getTicker()
-            );
+            boolean isLoan = account.getType() == AccountType.LOAN;
+            if (liabilitiesOnly != isLoan) continue;
+
+            List<AccountHolding> holdings = holdingsByAccount.getOrDefault(account.getId(), List.of());
+            BigDecimal balanceEur;
+            if (holdings.isEmpty()) {
+                balanceEur = priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getTicker());
+            } else {
+                balanceEur = BigDecimal.ZERO;
+                for (AccountHolding h : holdings) {
+                    BigDecimal qty = h.getQuantity();
+                    BigDecimal livePrice = h.getTicker() != null ? priceService.getPriceEur(h.getTicker()) : null;
+                    if (livePrice == null) {
+                        livePrice = h.getCurrentPrice() != null ? h.getCurrentPrice() : BigDecimal.ZERO;
+                    }
+                    balanceEur = balanceEur.add(qty.multiply(livePrice));
+                }
+            }
 
             double percentage = totalNetWorth.compareTo(BigDecimal.ZERO) > 0
                 ? balanceEur.divide(totalNetWorth, 6, RoundingMode.HALF_UP)
@@ -94,7 +163,9 @@ public class DashboardService {
                 account.getName(),
                 account.getColor(),
                 balanceEur,
-                Math.round(percentage * 100.0) / 100.0
+                Math.round(percentage * 100.0) / 100.0,
+                account.getType().name(),
+                !holdings.isEmpty()
             ));
         }
 

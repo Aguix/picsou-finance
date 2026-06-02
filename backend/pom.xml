@@ -14,7 +14,7 @@
 
     <groupId>com.picsou</groupId>
     <artifactId>picsou-backend</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <name>picsou-backend</name>
     <description>Personal finance tracker backend</description>
 
@@ -89,6 +89,13 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Bouncy Castle — BIP32 key derivation (secp256k1, RIPEMD-160) for Bitcoin xpub/zpub support -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>1.78.1</version>
+        </dependency>
+
         <!-- Rate limiting -->
         <dependency>
             <groupId>com.bucket4j</groupId>
@@ -96,10 +103,24 @@
             <version>${bucket4j.version}</version>
         </dependency>
 
+        <!-- TOTP (RFC 6238) for 2FA: secret generation, QR code, code verification -->
+        <dependency>
+            <groupId>dev.samstevens.totp</groupId>
+            <artifactId>totp</artifactId>
+            <version>1.7.1</version>
+        </dependency>
+
         <!-- HTTP client for Enable Banking / price APIs -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <!-- Apache POI - Excel file parsing -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.3.0</version>
         </dependency>
 
         <!-- Lombok -->

@@ -6,6 +6,7 @@ import com.picsou.exception.SyncException;
 import com.picsou.model.*;
 import com.picsou.port.BankConnectorPort;
 import com.picsou.repository.AccountRepository;
+import com.picsou.repository.FamilyMemberRepository;
 import com.picsou.repository.RequisitionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,25 +27,32 @@ public class SyncService {
     private final BankConnectorPort bankConnector;
     private final AccountRepository accountRepository;
     private final RequisitionRepository requisitionRepository;
+    private final FamilyMemberRepository familyMemberRepository;
     private final AccountService accountService;
 
     public SyncService(
         BankConnectorPort bankConnector,
         AccountRepository accountRepository,
         RequisitionRepository requisitionRepository,
+        FamilyMemberRepository familyMemberRepository,
         AccountService accountService
     ) {
         this.bankConnector = bankConnector;
         this.accountRepository = accountRepository;
         this.requisitionRepository = requisitionRepository;
+        this.familyMemberRepository = familyMemberRepository;
         this.accountService = accountService;
     }
 
     /** Step 1: Initiate Enable Banking bank connection for a given institution. */
-    public InitiateResponse initiateConnection(String institutionId, String institutionName) {
+    public InitiateResponse initiateConnection(String institutionId, String institutionName, Long memberId) {
+        FamilyMember member = familyMemberRepository.findById(memberId)
+            .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
+
         BankConnectorPort.InitiateResult result = bankConnector.initiateConnection(institutionId);
 
         Requisition requisition = Requisition.builder()
+            .member(member)
             .requisitionId(result.requisitionId())
             .institutionId(institutionId)
             .institutionName(institutionName)
@@ -57,12 +65,12 @@ public class SyncService {
         return new InitiateResponse(result.requisitionId(), result.authLink());
     }
 
-    /** Step 2: Complete Enable Banking flow — exchange OAuth code, fetch balances, upsert accounts. */
+    /** Step 2: Complete Enable Banking flow -- exchange OAuth code, fetch balances, upsert accounts. */
     @Transactional(noRollbackFor = SyncException.class)
-    public List<AccountResponse> completeConnection(String oauthCode) {
-        // Find the pending requisition (single-user app: take the latest CREATED one)
+    public List<AccountResponse> completeConnection(String oauthCode, Long memberId) {
+        // Find the pending requisition for this member
         Requisition requisition = requisitionRepository
-            .findByStatusOrderByCreatedAtDesc(RequisitionStatus.CREATED)
+            .findByStatusAndMemberIdOrderByCreatedAtDesc(RequisitionStatus.CREATED, memberId)
             .stream().findFirst()
             .orElseThrow(() -> new SyncException("No pending bank connection found. Please initiate a new connection."));
 
@@ -70,10 +78,10 @@ public class SyncService {
         try {
             sessionId = bankConnector.exchangeCode(oauthCode);
         } catch (SyncException ex) {
-            // Code already used → find existing linked session and just refresh balances
+            // Code already used -> find existing linked session and just refresh balances
             if (ex.getMessage().contains("ALREADY_AUTHORIZED")) {
                 log.info("Code already used, refreshing latest linked session");
-                return resyncLatest();
+                return resyncLatest(memberId);
             }
             requisition.setStatus(RequisitionStatus.FAILED);
             requisitionRepository.save(requisition);
@@ -92,11 +100,26 @@ public class SyncService {
             throw ex;
         }
 
+        FamilyMember member = requisition.getMember();
+
         List<AccountResponse> responses = accountDataList.stream()
-            .map(data -> upsertAccount(data, requisition.getInstitutionName()))
+            .map(data -> upsertAccount(data, requisition.getInstitutionName(), member))
+            .flatMap(Optional::stream)
             .toList();
 
+        // If the bank hasn't finished linking accounts yet, leave the
+        // requisition retryable (status=FAILED so the UI shows the retry
+        // button). The session id is preserved, so retrySync() just refetches
+        // without going back through OAuth.
+        if (accountDataList.isEmpty()) {
+            requisition.setStatus(RequisitionStatus.FAILED);
+            requisitionRepository.save(requisition);
+            log.info("Enable Banking session {} not yet populated — marking retryable", sessionId);
+            return responses;
+        }
+
         requisition.setStatus(RequisitionStatus.LINKED);
+        requisition.setLastSyncedAt(Instant.now());
         requisitionRepository.save(requisition);
 
         log.info("Completed Enable Banking sync for {}: {} accounts linked", requisition.getInstitutionName(), responses.size());
@@ -109,17 +132,17 @@ public class SyncService {
         return bankConnector.searchInstitutions(query, country);
     }
 
-    /** Get all requisitions ordered by date. */
+    /** Get all requisitions for a member ordered by date. */
     @Transactional(readOnly = true)
-    public List<Requisition> getAllRequisitions() {
-        return requisitionRepository.findAllByOrderByCreatedAtDesc();
+    public List<Requisition> getAllRequisitions(Long memberId) {
+        return requisitionRepository.findAllByMemberId(memberId);
     }
 
     /** Retry fetching accounts for a FAILED requisition using the stored session_id. */
     @Transactional(noRollbackFor = SyncException.class)
-    public List<AccountResponse> retrySync(Long id) {
-        Requisition req = requisitionRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("Requisition not found: " + id));
+    public List<AccountResponse> retrySync(Long id, Long memberId) {
+        Requisition req = requisitionRepository.findByIdAndMemberId(id, memberId)
+            .orElseThrow(() -> new ResourceNotFoundException("Requisition not found"));
 
         log.info("Retrying sync for {} (session={})", req.getInstitutionName(), req.getRequisitionId());
 
@@ -132,11 +155,15 @@ public class SyncService {
             throw ex;
         }
 
+        FamilyMember member = req.getMember();
+
         List<AccountResponse> responses = accountDataList.stream()
-            .map(data -> upsertAccount(data, req.getInstitutionName()))
+            .map(data -> upsertAccount(data, req.getInstitutionName(), member))
+            .flatMap(Optional::stream)
             .toList();
 
         req.setStatus(RequisitionStatus.LINKED);
+        req.setLastSyncedAt(Instant.now());
         requisitionRepository.save(req);
 
         log.info("Retry sync OK for {}: {} accounts linked", req.getInstitutionName(), responses.size());
@@ -144,47 +171,69 @@ public class SyncService {
     }
 
     /** Delete a requisition (cancel or remove a bank connection). */
-    public void deleteRequisition(Long id) {
-        if (!requisitionRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Requisition not found: " + id);
-        }
-        requisitionRepository.deleteById(id);
+    public void deleteRequisition(Long id, Long memberId) {
+        Requisition req = requisitionRepository.findByIdAndMemberId(id, memberId)
+            .orElseThrow(() -> new ResourceNotFoundException("Requisition not found"));
+        requisitionRepository.delete(req);
         log.info("Deleted requisition {}", id);
     }
 
-    /** Re-sync all LINKED requisitions (called by scheduler). */
-    public void resyncAll() {
-        List<Requisition> linked = requisitionRepository.findByStatusOrderByCreatedAtDesc(RequisitionStatus.LINKED);
+    /** Re-sync all LINKED requisitions for a specific member (called by scheduler). */
+    public void resyncAll(Long memberId) {
+        List<Requisition> linked = requisitionRepository.findByStatusAndMemberIdOrderByCreatedAtDesc(RequisitionStatus.LINKED, memberId);
         for (Requisition req : linked) {
             try {
                 List<BankConnectorPort.AccountData> accounts = bankConnector.fetchBalances(req.getRequisitionId());
-                accounts.forEach(data -> upsertAccount(data, req.getInstitutionName()));
+                FamilyMember member = req.getMember();
+                accounts.forEach(data -> upsertAccount(data, req.getInstitutionName(), member));
+                req.setLastSyncedAt(Instant.now());
+                requisitionRepository.save(req);
                 log.info("Auto-resync OK for {}: {} accounts", req.getInstitutionName(), accounts.size());
             } catch (Exception ex) {
+                req.setStatus(RequisitionStatus.FAILED);
+                requisitionRepository.save(req);
                 log.warn("Auto-resync failed for {}: {}", req.getInstitutionName(), ex.getMessage());
             }
         }
     }
 
-    /** Refresh balances for the most recent LINKED session. */
-    private List<AccountResponse> resyncLatest() {
+    /** Refresh balances for the most recent LINKED session for a member. */
+    private List<AccountResponse> resyncLatest(Long memberId) {
         Requisition req = requisitionRepository
-            .findByStatusOrderByCreatedAtDesc(RequisitionStatus.LINKED)
+            .findByStatusAndMemberIdOrderByCreatedAtDesc(RequisitionStatus.LINKED, memberId)
             .stream().findFirst()
             .orElseThrow(() -> new SyncException("No linked session found to refresh."));
 
+        FamilyMember member = req.getMember();
+
         List<BankConnectorPort.AccountData> accountDataList = bankConnector.fetchBalances(req.getRequisitionId());
         List<AccountResponse> responses = accountDataList.stream()
-            .map(data -> upsertAccount(data, req.getInstitutionName()))
+            .map(data -> upsertAccount(data, req.getInstitutionName(), member))
+            .flatMap(Optional::stream)
             .toList();
+        req.setLastSyncedAt(Instant.now());
+        requisitionRepository.save(req);
         log.info("Refreshed {} accounts for {}", responses.size(), req.getInstitutionName());
         return responses;
     }
 
-    // ─── Private ─────────────────────────────────────────────────────────────
+    // --- Private ---
 
-    private AccountResponse upsertAccount(BankConnectorPort.AccountData data, String provider) {
-        Optional<Account> existing = accountRepository.findByExternalAccountId(data.externalId());
+    /**
+     * Returns {@link Optional#empty()} when the matching account was soft-deleted
+     * by the user — we must not resurrect it on the next sync. The bank may keep
+     * returning the same external id forever; that's not consent to bring it back.
+     */
+    private Optional<AccountResponse> upsertAccount(BankConnectorPort.AccountData data, String provider, FamilyMember member) {
+        Optional<Account> existing = accountRepository
+            .findByExternalAccountIdAndMemberId(data.externalId(), member.getId());
+
+        if (existing.isEmpty() &&
+            accountRepository.existsSoftDeletedByExternalAccountIdAndMemberId(data.externalId(), member.getId())) {
+            log.info("Skipping resurrection of soft-deleted account externalId={} member={}",
+                data.externalId(), member.getId());
+            return Optional.empty();
+        }
 
         Account account;
         if (existing.isPresent()) {
@@ -193,6 +242,7 @@ public class SyncService {
             account.setLastSyncedAt(Instant.now());
         } else {
             account = Account.builder()
+                .member(member)
                 .name(data.name() != null ? data.name() : "Account")
                 .type(AccountType.CHECKING)
                 .provider(provider)
@@ -208,7 +258,7 @@ public class SyncService {
         account = accountRepository.save(account);
         accountService.upsertSnapshot(account, data.balance(), LocalDate.now());
 
-        return accountService.toResponse(account);
+        return Optional.of(accountService.toResponse(account));
     }
 
     public record InitiateResponse(String requisitionId, String authLink) {}

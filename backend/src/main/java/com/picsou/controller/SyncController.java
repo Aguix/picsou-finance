@@ -5,6 +5,7 @@ import com.picsou.dto.AccountResponse;
 import com.picsou.model.Requisition;
 import com.picsou.port.BankConnectorPort;
 import com.picsou.service.SyncService;
+import com.picsou.service.UserContext;
 import io.github.bucket4j.Bucket;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -20,13 +21,16 @@ import java.util.Map;
 public class SyncController {
 
     private final SyncService syncService;
+    private final UserContext userContext;
     private final Map<String, Bucket> syncBuckets;
 
     public SyncController(
         SyncService syncService,
+        UserContext userContext,
         @org.springframework.beans.factory.annotation.Qualifier("syncBuckets") Map<String, Bucket> syncBuckets
     ) {
         this.syncService = syncService;
+        this.userContext = userContext;
         this.syncBuckets = syncBuckets;
     }
 
@@ -51,30 +55,31 @@ public class SyncController {
 
         SyncService.InitiateResponse response = syncService.initiateConnection(
             req.institutionId(),
-            req.institutionName()
+            req.institutionName(),
+            userContext.currentMemberId()
         );
         return ResponseEntity.ok(response);
     }
 
     @GetMapping("/complete")
     public List<AccountResponse> complete(@RequestParam String code) {
-        return syncService.completeConnection(code);
+        return syncService.completeConnection(code, userContext.currentMemberId());
     }
 
     @GetMapping("/status")
     public List<Requisition> getStatus() {
-        return syncService.getAllRequisitions();
+        return syncService.getAllRequisitions(userContext.currentMemberId());
     }
 
     @PostMapping("/{id}/retry")
     public ResponseEntity<?> retry(@PathVariable Long id) {
-        List<AccountResponse> accounts = syncService.retrySync(id);
+        List<AccountResponse> accounts = syncService.retrySync(id, userContext.currentMemberId());
         return ResponseEntity.ok(accounts);
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteRequisition(@PathVariable Long id) {
-        syncService.deleteRequisition(id);
+        syncService.deleteRequisition(id, userContext.currentMemberId());
         return ResponseEntity.noContent().build();
     }
 

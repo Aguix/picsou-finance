@@ -2,12 +2,16 @@ package com.picsou.service;
 
 import com.picsou.adapter.CoinGeckoPriceProvider;
 import com.picsou.adapter.YahooFinancePriceProvider;
+import com.picsou.model.PriceSnapshot;
+import com.picsou.repository.PriceSnapshotRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -19,13 +23,16 @@ public class PriceService {
 
     private final CoinGeckoPriceProvider coinGecko;
     private final YahooFinancePriceProvider yahoo;
+    private final PriceSnapshotRepository priceSnapshotRepository;
 
     // Simple in-memory price cache: ticker → (price, cachedAt)
     private final Map<String, CachedPrice> priceCache = new ConcurrentHashMap<>();
 
-    public PriceService(CoinGeckoPriceProvider coinGecko, YahooFinancePriceProvider yahoo) {
+    public PriceService(CoinGeckoPriceProvider coinGecko, YahooFinancePriceProvider yahoo,
+                        PriceSnapshotRepository priceSnapshotRepository) {
         this.coinGecko = coinGecko;
         this.yahoo = yahoo;
+        this.priceSnapshotRepository = priceSnapshotRepository;
     }
 
     /**
@@ -100,6 +107,25 @@ public class PriceService {
         }
 
         log.debug("Refreshed prices for {} tickers", result.size());
+
+        // Persist daily price snapshots
+        LocalDate today = LocalDate.now();
+        for (var entry : result.entrySet()) {
+            if ("EUR".equals(entry.getKey())) continue;
+            if (entry.getValue() == null) continue;
+            Optional<PriceSnapshot> existing = priceSnapshotRepository.findByTickerAndDate(entry.getKey(), today);
+            if (existing.isPresent()) {
+                existing.get().setPriceEur(entry.getValue());
+                priceSnapshotRepository.save(existing.get());
+            } else {
+                priceSnapshotRepository.save(PriceSnapshot.builder()
+                    .ticker(entry.getKey())
+                    .date(today)
+                    .priceEur(entry.getValue())
+                    .build());
+            }
+        }
+
         return result;
     }
 
@@ -124,9 +150,69 @@ public class PriceService {
         return balance.multiply(price);
     }
 
+    /**
+     * Backfill historical prices for the given tickers from external APIs.
+     * Fetches daily prices for the last 12 months and saves as PriceSnapshots.
+     * Skips dates that already have a snapshot.
+     */
+    public int backfillHistoricalPrices(Set<String> tickers, LocalDate from) {
+        LocalDate to = LocalDate.now();
+        int saved = 0;
+
+        for (String ticker : tickers) {
+            String upper = ticker.toUpperCase();
+            if ("EUR".equals(upper)) continue;
+
+            Map<LocalDate, BigDecimal> prices;
+            if (coinGecko.supports(upper)) {
+                prices = coinGecko.getHistoricalPricesEur(upper, from, to);
+            } else {
+                prices = yahoo.getHistoricalPricesEur(upper, from, to);
+            }
+
+            for (var entry : prices.entrySet()) {
+                if (priceSnapshotRepository.findByTickerAndDate(upper, entry.getKey()).isEmpty()) {
+                    priceSnapshotRepository.save(PriceSnapshot.builder()
+                        .ticker(upper)
+                        .date(entry.getKey())
+                        .priceEur(entry.getValue())
+                        .build());
+                    saved++;
+                }
+            }
+
+            log.info("Backfilled {} prices for {}", prices.size(), upper);
+        }
+
+        return saved;
+    }
+
     private record CachedPrice(BigDecimal price, Instant cachedAt) {
         boolean isExpired() {
             return Instant.now().isAfter(cachedAt.plusSeconds(CACHE_TTL_SECONDS));
+        }
+    }
+
+    /** Drop the in-memory price cache. Used by PriceFxCleanupRunner. */
+    public void clearPriceCache() {
+        priceCache.clear();
+    }
+
+    /**
+     * Fetch intraday (hourly) prices for a ticker over the given time range.
+     * Routes to CoinGecko for crypto, Yahoo Finance for stocks/ETFs.
+     */
+    public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(String ticker, LocalDateTime from, LocalDateTime to) {
+        if (ticker == null || ticker.isBlank() || "EUR".equalsIgnoreCase(ticker)) {
+            return Map.of();
+        }
+
+        String upper = ticker.toUpperCase();
+
+        if (coinGecko.supports(upper)) {
+            return coinGecko.getIntradayPricesEur(upper, from, to);
+        } else {
+            return yahoo.getIntradayPricesEur(upper, from, to);
         }
     }
 }

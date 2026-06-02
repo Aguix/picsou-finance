@@ -56,22 +56,29 @@ management:
       show-details: never
 
 app:
+  admin-recovery:
+    enabled: ${ADMIN_RECOVERY_ENABLED:false}
+  public-base-url: ${PUBLIC_BASE_URL:http://localhost:5173}
   jwt:
     secret: ${JWT_SECRET}
     access-token-expiry-minutes: 15
     refresh-token-expiry-days: 7
   user:
-    username: ${APP_USERNAME}
-    password-hash: ${APP_PASSWORD_HASH}
+    username: ${APP_USERNAME:}
+    password-hash: ${APP_PASSWORD_HASH:}
   cors:
-    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
-  secure-cookies: true   # set Secure flag on JWT cookies; override to false for local HTTP dev
+    allowed-origins: ${ALLOWED_ORIGINS:}
+  secure-cookies: ${SECURE_COOKIES:true}
+  crypto:
+    encryption-key: ${CRYPTO_ENCRYPTION_KEY:}
   tr-auth:
     url: ${TR_AUTH_URL:http://tr-auth:8001}
+  bourso-auth:
+    url: ${BOURSO_AUTH_URL:http://bourso-auth:8001}
   enablebanking:
     application-id: ${ENABLEBANKING_APPLICATION_ID:}
     key-id: ${ENABLEBANKING_KEY_ID:}
     redirect-uri: ${ENABLEBANKING_REDIRECT_URI:http://localhost:5173/sync/callback}
     private-key: ${ENABLEBANKING_PRIVATE_KEY:}
-    private-key-path: ${ENABLEBANKING_PRIVATE_KEY_PATH:}
+    private-key-path: ${ENABLEBANKING_PRIVATE_KEY_PATH:/data/keys/enablebanking-private.pem}
     base-url: ${ENABLEBANKING_BASE_URL:https://api.enablebanking.com}

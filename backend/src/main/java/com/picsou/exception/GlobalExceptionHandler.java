@@ -23,6 +23,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
+    @ExceptionHandler(TotpRequiredException.class)
+    ProblemDetail handleTotpRequired(TotpRequiredException ex) {
+        log.info("TOTP required: {}", ex.getMessage());
+        return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
     @ExceptionHandler(SyncException.class)
     ProblemDetail handleSync(SyncException ex) {
         log.warn("Sync error: {}", ex.getMessage());
@@ -37,6 +43,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(MfaException.class)
+    ProblemDetail handleMfa(MfaException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(com.picsou.service.ReAuthService.ReAuthFailedException.class)
+    ProblemDetail handleReAuthFailed(com.picsou.service.ReAuthService.ReAuthFailedException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
+        pd.setTitle("REAUTH_FAILED");
+        return pd;
     }
 
     @Override

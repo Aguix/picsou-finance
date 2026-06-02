@@ -46,10 +46,18 @@ public interface TradeRepublicPort {
      */
     List<TrAccountData> fetchAccounts(String sessionToken);
 
+    record TrPosition(
+        String isin,
+        BigDecimal quantity,
+        BigDecimal averageBuyIn,
+        BigDecimal currentPrice
+    ) {}
+
     record TrAccountData(
         String externalId,   // e.g. "tr_pea", "tr_cto", "tr_cash"
         String name,
         AccountType type,
-        BigDecimal balanceEur
+        BigDecimal balanceEur,
+        List<TrPosition> positions
     ) {}
 }

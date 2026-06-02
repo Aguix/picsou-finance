@@ -1,5 +1,6 @@
 package com.picsou.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -18,11 +19,16 @@ public class TradeRepublicSession extends AuditableEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "session_token", nullable = false, length = 1000)
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "member_id", nullable = false)
+    private FamilyMember member;
+
+    @Column(name = "session_token", nullable = false, length = 2000)
     private String sessionToken;
 
     /** Refresh token — valid ~2h, used to obtain a new session token without 2FA. */
-    @Column(name = "refresh_token", length = 2000)
+    @Column(name = "refresh_token", length = 4000)
     private String refreshToken;
 
     /** Set to now + 2h based on observed refresh token expiry. */

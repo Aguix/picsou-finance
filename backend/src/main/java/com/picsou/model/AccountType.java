@@ -7,5 +7,7 @@ public enum AccountType {
     CRYPTO,
     CHECKING,
     SAVINGS,
+    REAL_ESTATE,
+    LOAN,
     OTHER
 }

@@ -1,6 +1,10 @@
 # ─── Stage 1: Build ────────────────────────────────────────────────────────
 FROM node:20-alpine AS build
 
+# Allow overriding demo mode at build time (default: false for production)
+ARG VITE_DEMO_MODE=false
+ENV VITE_DEMO_MODE=$VITE_DEMO_MODE
+
 WORKDIR /app
 
 COPY package*.json ./

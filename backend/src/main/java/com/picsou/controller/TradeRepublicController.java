@@ -3,6 +3,7 @@ package com.picsou.controller;
 import com.picsou.config.RateLimitConfig;
 import com.picsou.dto.AccountResponse;
 import com.picsou.service.TradeRepublicSyncService;
+import com.picsou.service.UserContext;
 import io.github.bucket4j.Bucket;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -19,13 +20,16 @@ import java.util.Map;
 public class TradeRepublicController {
 
     private final TradeRepublicSyncService trService;
+    private final UserContext userContext;
     private final Map<String, Bucket>      trAuthBuckets;
 
     public TradeRepublicController(
         TradeRepublicSyncService trService,
+        UserContext userContext,
         @org.springframework.beans.factory.annotation.Qualifier("trAuthBuckets") Map<String, Bucket> trAuthBuckets
     ) {
         this.trService     = trService;
+        this.userContext   = userContext;
         this.trAuthBuckets = trAuthBuckets;
     }
 
@@ -43,38 +47,38 @@ public class TradeRepublicController {
         return ResponseEntity.ok(trService.initiateAuth(req.phoneNumber(), req.pin()));
     }
 
-    /** Step 2: Exchange 2FA code → session stored, accounts synced. */
+    /** Step 2: Exchange 2FA code -> session stored, sync runs in background. */
     @PostMapping("/auth/complete")
-    public List<AccountResponse> completeAuth(@RequestBody CompleteAuthRequest req) {
-        return trService.completeAuth(req.processId(), req.tan());
+    public TradeRepublicSyncService.SessionStatusResponse completeAuth(@RequestBody CompleteAuthRequest req) {
+        return trService.completeAuth(req.processId(), req.tan(), userContext.currentMemberId());
     }
 
     /** Manual sync using the stored session. */
     @PostMapping("/sync")
     public List<AccountResponse> sync() {
-        return trService.sync();
+        return trService.sync(userContext.currentMemberId());
     }
 
     /** Session status: is there an active session, and when does it expire? */
     @GetMapping("/status")
     public TradeRepublicSyncService.SessionStatusResponse getStatus() {
-        return trService.getSessionStatus();
+        return trService.getSessionStatus(userContext.currentMemberId());
     }
 
     /** CSV fallback import. */
     @PostMapping("/import")
     public List<AccountResponse> importCsv(@RequestParam("file") MultipartFile file) {
-        return trService.importCsv(file);
+        return trService.importCsv(file, userContext.currentMemberId());
     }
 
     /** Clear stored session token (forces re-authentication). */
     @DeleteMapping("/session")
     public ResponseEntity<Void> clearSession() {
-        trService.clearSession();
+        trService.clearSession(userContext.currentMemberId());
         return ResponseEntity.noContent().build();
     }
 
-    // ─── Rate limiting ────────────────────────────────────────────────────────
+    // --- Rate limiting ---
 
     private boolean checkAuthRateLimit(HttpServletRequest request) {
         String ip = request.getRemoteAddr();

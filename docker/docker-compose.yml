@@ -1,0 +1,56 @@
+services:
+  app:
+    image: picsou:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      # /data holds auto-generated secrets, Enable Banking keys, and the
+      # wizard's crypto key. Mounted named volume so they persist across
+      # container replacement and are shared with the db when it needs them.
+      - picsou_data:/data
+      - ./secrets/enablebanking.pem:/run/secrets/enablebanking.pem:ro
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-picsou}?sslmode=prefer
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-picsou}
+      # POSTGRES_PASSWORD intentionally not forwarded here: the entrypoint
+      # resolves it from env or /data/.secrets/postgres_password and exports
+      # SPRING_DATASOURCE_PASSWORD itself. The app reads $POSTGRES_PASSWORD
+      # internally via application.yml.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      TR_AUTH_URL: http://tr-auth:8001
+    depends_on:
+      - db
+      - tr-auth
+
+  tr-auth:
+    build:
+      context: ../services/tr-auth
+      dockerfile: Dockerfile
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-picsou}
+      POSTGRES_USER: ${POSTGRES_USER:-picsou}
+      # Fallback order: user-supplied POSTGRES_PASSWORD env > default literal
+      # 'picsou'. On first-boot zero-config flows, the app entrypoint writes
+      # the same auto-generated password to /data/.secrets/postgres_password
+      # and the operator is instructed to source it into .env (see
+      # docs/features/setup-wizard.md). On existing installs, .env already
+      # sets POSTGRES_PASSWORD so this fallback never triggers.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-picsou}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+
+volumes:
+  pgdata:
+  picsou_data:

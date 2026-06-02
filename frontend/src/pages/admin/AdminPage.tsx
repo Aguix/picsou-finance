@@ -1,0 +1,29 @@
+import { useTranslation } from 'react-i18next'
+import { PageHeader } from '@/components/shared/PageHeader'
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton'
+import { useAdminSettings } from '@/features/admin/hooks'
+import { SecuritySection } from './sections/SecuritySection'
+import { EnableBankingSection } from './sections/EnableBankingSection'
+import { IntegrationsSection } from './sections/IntegrationsSection'
+import { MembersSection } from './sections/MembersSection'
+
+export function AdminPage() {
+  const { t } = useTranslation()
+  const { data, isLoading } = useAdminSettings()
+
+  if (isLoading) return <LoadingSkeleton />
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6">
+      <PageHeader title={t('admin.title')} />
+      {data && (
+        <>
+          <MembersSection />
+          <SecuritySection settings={data.security} />
+          <EnableBankingSection settings={data.enableBanking} />
+          <IntegrationsSection integrations={data.integrations} />
+        </>
+      )}
+    </div>
+  )
+}

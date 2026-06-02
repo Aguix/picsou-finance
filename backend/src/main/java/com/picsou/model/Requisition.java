@@ -1,7 +1,10 @@
 package com.picsou.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
+
+import java.time.Instant;
 
 @Entity
 @Table(name = "requisition")
@@ -15,6 +18,11 @@ public class Requisition extends AuditableEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "member_id", nullable = false)
+    private FamilyMember member;
 
     /** Enable Banking session ID */
     @Column(name = "requisition_id", nullable = false, unique = true, length = 100)
@@ -34,4 +42,8 @@ public class Requisition extends AuditableEntity {
 
     @Column(name = "auth_link", columnDefinition = "TEXT")
     private String authLink;
+
+    /** When this connection last successfully synced */
+    @Column(name = "last_synced_at")
+    private Instant lastSyncedAt;
 }

@@ -1,0 +1,59 @@
+# ============================================================
+# Picsou — All-in-one Docker image (frontend + backend)
+# Build context: project root (..)
+# ============================================================
+
+# ---------- Stage 1: Build frontend ----------
+FROM oven/bun:alpine AS frontend-build
+
+WORKDIR /build/frontend
+
+ARG VITE_DEMO_MODE=false
+ENV VITE_DEMO_MODE=$VITE_DEMO_MODE
+
+COPY frontend/package.json frontend/bun.lock ./
+RUN bun install --frozen-lockfile
+
+COPY frontend/ .
+RUN bun run build
+
+# ---------- Stage 2: Build backend ----------
+FROM maven:3.9-eclipse-temurin-21-alpine AS backend-build
+
+WORKDIR /build/backend
+
+COPY backend/pom.xml .
+RUN mvn dependency:go-offline -q
+
+COPY backend/src ./src
+RUN mvn package -DskipTests -q
+
+# ---------- Stage 3: Runtime ----------
+FROM eclipse-temurin:21-jre-jammy
+
+# Install Nginx + supervisor + openssl (entrypoint auto-generates secrets on first boot)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        nginx \
+        supervisor \
+        openssl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy built frontend
+COPY --from=frontend-build /build/frontend/dist /usr/share/nginx/html
+
+# Copy built backend
+COPY --from=backend-build /build/backend/target/*.jar /app/app.jar
+
+# Copy configs
+COPY docker/nginx.conf /etc/nginx/sites-available/picsou
+RUN rm -f /etc/nginx/sites-enabled/default \
+    && ln -s /etc/nginx/sites-available/picsou /etc/nginx/sites-enabled/picsou
+
+COPY docker/supervisord.conf /etc/supervisor/conf.d/picsou.conf
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/entrypoint.sh"]

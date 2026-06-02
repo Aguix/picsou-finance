@@ -5,10 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev   # Run locally (needs PostgreSQL on :5432)
-./mvnw test                                              # Run all tests
-./mvnw test -Dtest=GoalServiceTest                       # Run a single test class
-./mvnw package -DskipTests                               # Build JAR
+mvn spring-boot:run -Dspring-boot.run.profiles=dev   # Run locally (needs PostgreSQL on :5432)
+mvn test                                              # Run all tests
+mvn test -Dtest=GoalServiceTest                       # Run a single test class
+mvn package -DskipTests                               # Build JAR
 ```
 
 Tests use H2 in-memory — no external database needed.
@@ -32,20 +32,20 @@ com.picsou/
 
 **Ports & adapters:** External integrations hide behind `BankConnectorPort` and `PriceProviderPort`. To swap a provider, implement the port and swap the `@Primary` bean — controllers/services never import adapters directly.
 
-**Auth flow:** `JwtAuthenticationFilter` reads the `access_token` HttpOnly cookie and sets the `SecurityContext`. `AuthController` issues and rotates tokens. CSRF is disabled — SameSite=Strict cookies provide equivalent protection.
+**Auth flow:** `JwtAuthenticationFilter` reads the `access_token` HttpOnly cookie, validates the `tv` (token-version) claim against `AppUser.tokenVersion`, and sets the `SecurityContext`. `AuthController` issues and rotates access/refresh tokens; `MfaController` issues `mfa_challenge` JWTs and verifies TOTP; `PersistentTokenAuthFilter` re-issues access tokens from rotating "Remember Me" tokens. CSRF is disabled — `SameSite=Lax` cookies + JSON-only API surface provide equivalent protection (`Lax` rather than `Strict` for Safari iOS compatibility).
+
+**Member-scoped authorization:** every controller resolves `UserContext.currentMemberId()` (or `currentMemberIdOverride()` for admin impersonation), and every service/repository scopes queries by `member_id`. Family-shared access goes through `SharingSettings` + `SharedResource`. Never query a repo without a member filter.
 
 **Rate limiting:** `RateLimitConfig` configures Bucket4j buckets; the actual enforcement is in the controllers via annotations. Login: 5 attempts/15 min. Sync endpoints are also throttled.
 
 **Scheduled tasks** (`SchedulerService`): daily balance snapshots and price cache refresh. `PriceService` holds a 15-minute in-memory cache to avoid hammering external APIs.
 
-**Flyway owns the schema** — never use `ddl-auto: create/update`. New columns/tables always go in a new migration file `Vn__description.sql`.
+**Flyway owns the schema** — never use `ddl-auto: create/update`. Migration details and entity conventions: see [`docs/conventions/database.md`](../docs/conventions/database.md).
 
 ## Configuration
 
-`application.yml` — production defaults. `application-dev.yml` — enables SQL logging and devtools; activated with `-Dspring-boot.run.profiles=dev`.
+`application.yml` (prod), `application-dev.yml` (dev, enables SQL logging). All secrets from env vars — see `.env.example` at project root.
 
-All secrets come from environment variables. Required at startup: `JWT_SECRET`, `APP_USERNAME`, `APP_PASSWORD_HASH` (bcrypt, cost 12). Enable Banking variables are optional if bank sync is not used.
+## Testing
 
-## Testing conventions
-
-Existing tests use Mockito (`@ExtendWith(MockitoExtension.class)`) with `@Mock`/`@InjectMocks` — no Spring context loaded, no H2 involved. Service-layer unit tests follow this pattern. Integration tests that need JPA should use `@DataJpaTest` (H2 auto-configures).
+Mockito unit tests (`@ExtendWith(MockitoExtension.class)`), `@DataJpaTest` with H2 for integration. Full conventions: see [`docs/conventions/testing.md`](../docs/conventions/testing.md).

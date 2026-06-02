@@ -1,43 +1,44 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+# Frontend — CLAUDE.md
 
 ## Commands
 
 ```bash
-npm run dev      # Dev server on :5173 — proxies /api/* to http://localhost:8080
-npm run build    # tsc + vite build (fails on type errors)
-npm run lint     # ESLint with --max-warnings 0 (zero-tolerance)
-npm run preview  # Serve the production build locally
+bun run dev          # Dev server :5173, proxies /api/* → localhost:8080
+bun run build        # tsc + vite build (fails on type errors)
+bun run typecheck    # TypeScript only
+bun run lint         # ESLint (zero-warnings)
+bunx vitest run      # Unit tests
+bun run test:e2e     # Playwright E2E tests
 ```
 
-## Source structure
+## Architecture (quick ref)
 
 ```
 src/
-├── lib/api.ts        All API calls + shared TypeScript types (Account, Goal, etc.)
-├── lib/utils.ts      Utility helpers
-├── hooks/            Custom hooks wrapping React Query (useAccounts, useGoals, useDashboard, useAuth)
-├── router.tsx        Route definitions + RequireAuth guard
-├── components/
-│   ├── layout/       Layout + Sidebar (persistent shell around all authenticated pages)
-│   └── shared/       Reusable primitives: GlassCard, GlowBackground, PageHeader
-└── pages/            One directory per route: login, dashboard, accounts, goals, sync, settings
+  app/              providers.tsx, routes.tsx (lazy routing + guards)
+  pages/            One dir per route (lazy-loaded)
+  features/         Domain slices: api.ts + hooks.ts per feature
+  components/
+    layout/         AppSidebar, AppLayout
+    ui/             shadcn/ui — DO NOT EDIT
+    shared/         App-specific reusable (PageHeader, etc.)
+  stores/           Zustand (auth-store, app-store)
+  lib/              api-client.ts, utils.ts, constants.ts, query-client.ts
+  types/            api.ts (mirrors backend DTOs), app.ts (frontend-only)
+  demo/             Demo mode interceptor + mock data
+  i18n/             react-i18next (FR/EN)
 ```
 
 ## Key patterns
 
-**API layer (`lib/api.ts`):** Single Axios instance with `withCredentials: true`. A response interceptor silently calls `POST /auth/refresh` on any 401, queues concurrent retries, then re-fires the original requests. Auth calls (`/auth/*`) are excluded to avoid infinite loops. All typed API functions (`accountsApi`, `goalsApi`, etc.) live here — add new endpoints here, not inline in components.
+**API layer (`lib/api-client.ts`):** Single Axios instance, `withCredentials: true`. Response interceptor silently refreshes on 401 (queues concurrent retries). Auth calls excluded to avoid loops. Feature-specific API functions live in `features/*/api.ts`.
 
-**Server state:** React Query manages all remote data. Hooks in `hooks/` own query keys and mutation logic; pages just call the hooks. Keep query keys co-located in the hook file.
+**Server state:** TanStack Query via hooks in `features/*/hooks.ts`. No Redux, no Context for server data. Query keys co-located in hook files. Stale times in `lib/constants.ts`.
 
-**Auth guard:** `RequireAuth` in `router.tsx` checks `sessionStorage.getItem('picsou_user')`. The auth cookie is HttpOnly (invisible to JS) — `picsou_user` is the JS-readable signal that a session exists. It is set on login and cleared on logout.
+**Auth guard:** `RequireAuth` in `features/auth/guards.tsx` checks `sessionStorage.getItem('picsou_user')`. Cookie is HttpOnly (invisible to JS) — sessionStorage is the JS-readable signal.
 
-**Routing:** `/sync/callback` and `/sync` share `SyncPage` — the callback path is the OAuth redirect target from Enable Banking.
+**Routing:** React Router v7 in `app/routes.tsx`. Lazy code-splitting per page. `/sync/callback` and `/sync` share SyncPage (OAuth redirect target).
 
 ## Conventions
 
-- TypeScript types for the API surface are all in `lib/api.ts` — do not redefine them in component files.
-- ESLint is zero-warnings; fix lint errors before considering a change done.
-- `tsc` runs as part of `npm run build` — the build will fail on type errors.
-- Tailwind for all styling; no CSS modules or styled-components.
+Full conventions (styling, icons, i18n, charts, state management details): see [`docs/conventions/frontend.md`](../docs/conventions/frontend.md)

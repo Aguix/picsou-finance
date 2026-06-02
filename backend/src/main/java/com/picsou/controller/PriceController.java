@@ -1,15 +1,15 @@
 package com.picsou.controller;
 
+import com.picsou.model.PriceSnapshot;
+import com.picsou.repository.PriceSnapshotRepository;
 import com.picsou.service.PriceService;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
-import java.util.Arrays;
-import java.util.Map;
-import java.util.Set;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
@@ -17,9 +17,11 @@ import java.util.stream.Collectors;
 public class PriceController {
 
     private final PriceService priceService;
+    private final PriceSnapshotRepository priceSnapshotRepository;
 
-    public PriceController(PriceService priceService) {
+    public PriceController(PriceService priceService, PriceSnapshotRepository priceSnapshotRepository) {
         this.priceService = priceService;
+        this.priceSnapshotRepository = priceSnapshotRepository;
     }
 
     @GetMapping
@@ -30,5 +32,47 @@ public class PriceController {
             .collect(Collectors.toSet());
 
         return priceService.refreshPrices(tickerSet);
+    }
+
+    /**
+     * Historical daily prices for a single ticker from the price_snapshot table.
+     */
+    @GetMapping("/{ticker}/history")
+    public List<Map<String, Object>> getPriceHistory(
+        @PathVariable String ticker,
+        @RequestParam(defaultValue = "12") int months
+    ) {
+        LocalDate to = LocalDate.now();
+        LocalDate from = to.minusMonths(months);
+        List<PriceSnapshot> snapshots = priceSnapshotRepository
+            .findByTickerInAndDateBetween(Set.of(ticker.toUpperCase()), from, to);
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (PriceSnapshot ps : snapshots) {
+            Map<String, Object> point = new LinkedHashMap<>();
+            point.put("date", ps.getDate().toString());
+            point.put("priceEur", ps.getPriceEur());
+            result.add(point);
+        }
+        return result;
+    }
+
+    /**
+     * Intraday hourly prices for a single ticker (last 24h) from external providers.
+     */
+    @GetMapping("/{ticker}/intraday")
+    public List<Map<String, Object>> getPriceIntraday(@PathVariable String ticker) {
+        LocalDateTime to = LocalDateTime.now();
+        LocalDateTime from = to.minusHours(24);
+        Map<LocalDateTime, BigDecimal> prices = priceService.getIntradayPricesEur(ticker, from, to);
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (var entry : prices.entrySet()) {
+            Map<String, Object> point = new LinkedHashMap<>();
+            point.put("timestamp", entry.getKey().toString());
+            point.put("priceEur", entry.getValue());
+            result.add(point);
+        }
+        return result;
     }
 }

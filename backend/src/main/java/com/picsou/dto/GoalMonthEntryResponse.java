@@ -6,6 +6,7 @@ public record GoalMonthEntryResponse(
     String yearMonth,        // "2025-03"
     BigDecimal objective,    // monthly needed (pre-calculated)
     BigDecimal actual,       // derived from balance snapshots, null if no data
-    BigDecimal override,     // manual override, null if not set
-    BigDecimal effective     // override ?? actual
+    BigDecimal manualActual, // manual declaration, null if not set
+    BigDecimal override,     // manual override of objective, null if not set
+    BigDecimal effective     // override ?? manualActual ?? actual
 ) {}

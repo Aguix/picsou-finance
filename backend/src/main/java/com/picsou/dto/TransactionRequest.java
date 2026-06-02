@@ -1,0 +1,19 @@
+package com.picsou.dto;
+
+import com.picsou.model.TransactionType;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+public record TransactionRequest(
+    @NotNull LocalDate date,
+    @NotBlank String description,
+    @NotNull BigDecimal amount,
+    TransactionType txType,
+    String ticker,
+    BigDecimal quantity,
+    BigDecimal pricePerUnit,
+    String currency
+) {}

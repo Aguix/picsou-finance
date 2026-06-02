@@ -1,5 +1,6 @@
 package com.picsou.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -8,6 +9,7 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "account")
+@org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -18,6 +20,11 @@ public class Account extends AuditableEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "member_id", nullable = false)
+    private FamilyMember member;
 
     @Column(nullable = false, length = 100)
     private String name;
@@ -55,4 +62,7 @@ public class Account extends AuditableEntity {
     /** Ticker symbol for live price lookup, e.g. "BTC", "IWDA.AS" */
     @Column(length = 20)
     private String ticker;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 }

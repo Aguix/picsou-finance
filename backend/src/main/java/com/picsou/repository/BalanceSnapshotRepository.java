@@ -15,6 +15,8 @@ public interface BalanceSnapshotRepository extends JpaRepository<BalanceSnapshot
         Long accountId, LocalDate from, LocalDate to
     );
 
+    List<BalanceSnapshot> findByAccountIdOrderByDateAsc(Long accountId);
+
     Optional<BalanceSnapshot> findByAccountIdAndDate(Long accountId, LocalDate date);
 
     /** Latest snapshot per account for dashboard aggregate */
@@ -25,15 +27,23 @@ public interface BalanceSnapshotRepository extends JpaRepository<BalanceSnapshot
         """)
     Optional<BalanceSnapshot> findLatestByAccountId(@Param("accountId") Long accountId);
 
-    /** Aggregate daily net worth: sum of all account balances per day */
+    /** Aggregate daily net worth and invested capital: sum of all account balances per day */
     @Query(value = """
-        SELECT s.date, SUM(s.balance)
+        SELECT s.date, SUM(s.balance), SUM(s.invested_amount)
         FROM balance_snapshot s
         WHERE s.date >= :from
         GROUP BY s.date
         ORDER BY s.date ASC
         """, nativeQuery = true)
     List<Object[]> findDailyNetWorth(@Param("from") LocalDate from);
+
+    /** Raw snapshot data for forward-fill: account_id, date, balance, invested_amount */
+    @Query("SELECT s.account.id, s.date, s.balance, s.investedAmount FROM BalanceSnapshot s WHERE s.date >= :from ORDER BY s.account.id, s.date")
+    List<Object[]> findForwardFillData(@Param("from") LocalDate from);
+
+    /** Raw snapshot data for forward-fill filtered by account IDs */
+    @Query("SELECT s.account.id, s.date, s.balance, s.investedAmount FROM BalanceSnapshot s WHERE s.date >= :from AND s.account.id IN :accountIds ORDER BY s.account.id, s.date")
+    List<Object[]> findForwardFillDataByAccountIds(@Param("from") LocalDate from, @Param("accountIds") List<Long> accountIds);
 
     /** Last 3 months of snapshots for a given account (for monthly contribution calc) */
     @Query("""

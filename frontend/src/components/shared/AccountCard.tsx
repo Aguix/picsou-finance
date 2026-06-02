@@ -1,0 +1,70 @@
+import { useTranslation } from 'react-i18next'
+import type { Account } from '@/types/api'
+import { Card, CardContent } from '@/components/ui/card'
+import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
+import { AccountTypeBadge } from '@/components/shared/AccountTypeBadge'
+import { formatDate } from '@/lib/utils'
+
+interface AccountCardProps {
+  account: Account
+  onClick?: () => void
+}
+
+export function AccountCard({ account, onClick }: AccountCardProps) {
+  const { t } = useTranslation()
+  const isLoan = account.type === 'LOAN'
+  const isRealEstate = account.type === 'REAL_ESTATE'
+
+  const pnl = isRealEstate && account.realEstate
+    ? account.currentBalanceEur - account.realEstate.purchasePrice
+    : null
+  const pnlPct = isRealEstate && account.realEstate && account.realEstate.purchasePrice > 0
+    ? ((pnl! / account.realEstate.purchasePrice) * 100).toFixed(1)
+    : null
+
+  return (
+    <Card
+      className="cursor-pointer transition-shadow hover:shadow-md"
+      onClick={onClick}
+    >
+      <CardContent className="flex items-start gap-3 p-4">
+        <div
+          className="mt-1 h-10 w-1 shrink-0 rounded-full"
+          style={{ backgroundColor: account.color }}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium">{account.name}</span>
+            <AccountTypeBadge type={account.type} />
+          </div>
+          {account.provider && (
+            <p className="text-xs text-muted-foreground">{account.provider}</p>
+          )}
+          <div className="mt-2">
+            <CurrencyDisplay
+              value={isLoan ? -account.currentBalanceEur : account.currentBalanceEur}
+              currency={account.currency}
+              className={`text-lg font-semibold ${isLoan ? 'text-red-500' : ''}`}
+            />
+          </div>
+          {isRealEstate && pnl !== null && (
+            <p className={`mt-1 text-xs ${pnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+              {pnl >= 0 ? '+' : ''}{pnl.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+              {pnlPct !== null && ` (${pnl >= 0 ? '+' : ''}${pnlPct}%)`}
+            </p>
+          )}
+          {isLoan && account.debt && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('debt.borrowedAmount')}: {account.debt.borrowedAmount.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+            </p>
+          )}
+          {account.lastSyncedAt && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('accounts.lastSync')}: {formatDate(account.lastSyncedAt)}
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
