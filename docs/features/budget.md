@@ -1,6 +1,6 @@
 # Feature: Budget & Cashflow
 
-> Last updated: 2026-06-02
+> Last updated: 2026-06-03
 
 ## Context
 
@@ -21,9 +21,9 @@ aggregations over the `transaction` table sliced by the **pay cycle** and the ca
 
 **Foundation (ingestion + categorization)**
 - `model/Category.java`, `model/CategorizationRule.java`, `model/BudgetSettings.java`, enum `model/CategoryKind.java`
-- `service/budget/CategoryService.java` — CRUD + `seedDefaults(member)`; categories are archived, never deleted
+- `service/budget/CategoryService.java` — CRUD + `ensureSeeded(member)`; the default category set is **seeded lazily on first read** (`findAll`), so pre-1.1.0 members get defaults with no SQL backfill; categories are archived, never deleted
 - `service/budget/CategorizationService.java` — `apply(tx)` runs rules on sync; `learnRule(...)` memorizes a rule from a manual categorization; bulk recategorize
-- `service/budget/BudgetSettingsService.java` — get/update `cycleStartDay`
+- `service/budget/BudgetSettingsService.java` — get/update `cycleStartDay`; the settings row is **lazily created on first read** (`get` → `getOrCreate`, default day 1)
 - `service/budget/BudgetCycle.java` — pure `CycleRange cycleFor(LocalDate, int cycleStartDay)`, unit-tested on month-edge cases
 - `controller/CategoryController.java`, `CategorizationRuleController.java`, `BudgetSettingsController.java`, `TransactionCategorizationController.java`
 - Ingestion: `port/BankConnectorPort.java` (`fetchTransactions` + `TransactionData`), `adapter/EnableBankingBankConnector.java`, `service/SyncService.java` (dedup by `(account, externalId)`, then `CategorizationService.apply`)
@@ -67,6 +67,7 @@ Enable Banking sync ─▶ SyncService.fetchTransactions ─▶ dedup ─▶ per
 - The cycle is **not** the calendar month. `cycleStartDay` 28 on a short month clamps to the month's last day — see `BudgetCycleTest`.
 - Categorization runs at sync time; a category change can trigger a learned `USER` rule, which has priority over `AUTO` rules on the next recategorize.
 - Detection needs **≥3 regular occurrences** with a stable amount; one-off charges never become a series.
+- **Lazy seeding writes from a read path — the read method must be writable.** `CategoryService.findAll` and `BudgetSettingsService.get` create default rows on first access. Both services are `@Transactional(readOnly = true)` at class level, and the seed runs via an *internal* call (`ensureSeeded` / `getOrCreate`) which Spring's proxy **cannot intercept** — so the seed inherits the caller's transaction. The read methods are therefore annotated `@Transactional` (read-write) on purpose; the seed helpers use `Propagation.REQUIRES_NEW` so external callers in a read-only transaction still get a writable one. Drop either annotation and the first load 500s with Postgres `25006 cannot execute INSERT in a read-only transaction`. **This does not reproduce under H2** (the test profile), which ignores read-only transactions — only the Dockerized Postgres stack surfaces it.
 
 ## Tests
 

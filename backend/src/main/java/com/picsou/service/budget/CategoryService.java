@@ -10,6 +10,7 @@ import com.picsou.repository.CategoryRepository;
 import com.picsou.repository.FamilyMemberRepository;
 import com.picsou.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -76,6 +77,14 @@ public class CategoryService {
         new DefaultCategory("Virement interne", CategoryKind.TRANSFER, "#64748b", "arrow-left-right")
     );
 
+    /**
+     * Read-write on purpose: the first read for a member lazily seeds the defaults via
+     * {@link #ensureSeeded}. That seed runs as an <em>internal</em> call, so Spring's proxy
+     * is bypassed and the seed inherits THIS transaction — it must therefore be writable,
+     * otherwise Postgres rejects the INSERT ("cannot execute INSERT in a read-only
+     * transaction"). The class-level {@code readOnly = true} still covers the pure reads.
+     */
+    @Transactional
     public List<CategoryResponse> findAll(Long memberId) {
         ensureSeeded(memberId);
         return categoryRepository.findAllByMemberIdOrderBySortOrderAscIdAsc(memberId).stream()
@@ -84,10 +93,12 @@ public class CategoryService {
     }
 
     /**
-     * Seed the default categories for a member that has none yet. Public + transactional
-     * so other budget services can guarantee categories exist before they aggregate.
+     * Seed the default categories for a member that has none yet. Public so other budget
+     * services can guarantee categories exist before they aggregate; {@code REQUIRES_NEW}
+     * guarantees a writable transaction even when the caller holds a {@code readOnly} one
+     * (a plain {@code REQUIRED} would join — and inherit — the caller's read-only flag).
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void ensureSeeded(Long memberId) {
         if (categoryRepository.existsByMemberId(memberId)) {
             return;
