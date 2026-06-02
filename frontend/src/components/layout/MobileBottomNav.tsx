@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Wallet,
   Target,
+  PieChart,
   Settings,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -14,6 +15,7 @@ const NAV_ITEMS = [
   { path: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard', end: true },
   { path: '/accounts', icon: Wallet, labelKey: 'nav.accounts', end: false },
   { path: '/goals', icon: Target, labelKey: 'nav.goals', end: false },
+  { path: '/budget', icon: PieChart, labelKey: 'nav.budget', end: false },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings', end: false },
 ] as const
 

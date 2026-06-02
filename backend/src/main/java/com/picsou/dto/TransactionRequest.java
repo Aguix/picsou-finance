@@ -15,5 +15,6 @@ public record TransactionRequest(
     String ticker,
     BigDecimal quantity,
     BigDecimal pricePerUnit,
-    String currency
+    String currency,
+    Long categoryId
 ) {}

@@ -20,7 +20,10 @@ public record TransactionResponse(
     TransactionType txType,
     String ticker,
     BigDecimal quantity,
-    BigDecimal pricePerUnit
+    BigDecimal pricePerUnit,
+    Long categoryId,
+    String categoryName,
+    String counterparty
 ) {
     public static TransactionResponse from(Transaction t) {
         return new TransactionResponse(
@@ -36,7 +39,10 @@ public record TransactionResponse(
             t.getTxType(),
             t.getTicker(),
             t.getQuantity(),
-            t.getPricePerUnit()
+            t.getPricePerUnit(),
+            t.getCategoryRef() != null ? t.getCategoryRef().getId() : null,
+            t.getCategoryRef() != null ? t.getCategoryRef().getName() : null,
+            t.getCounterparty()
         );
     }
 }

@@ -351,3 +351,187 @@ export interface TransactionRequest {
   pricePerUnit?: number
   currency?: string
 }
+
+// ─── Budget & Cashflow module (mirrors com.picsou.dto.*) ─────────────────────
+
+/** Drives cashflow/envelope/allocation behaviour. Transfers feed only allocation. */
+export type CategoryKind = 'INCOME' | 'EXPENSE' | 'TRANSFER'
+export type RuleMatchType = 'COUNTERPARTY' | 'KEYWORD'
+export type RuleSource = 'USER' | 'AUTO'
+export type RecurringCadence = 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY'
+export type RecurringStatus = 'SUGGESTED' | 'CONFIRMED' | 'IGNORED'
+export type AssetClass = 'CURRENT' | 'SAVINGS' | 'INVESTMENT' | 'OTHER'
+export type CashflowPeriod = 'CYCLE' | 'YTD'
+
+export interface Category {
+  id: number
+  name: string
+  kind: CategoryKind
+  color: string | null
+  icon: string | null
+  isDefault: boolean
+  archived: boolean
+  sortOrder: number
+}
+
+export interface CategoryRequest {
+  name: string
+  kind: CategoryKind
+  color?: string
+  icon?: string
+  sortOrder?: number
+}
+
+export interface CategorizationRule {
+  id: number
+  matchType: RuleMatchType
+  pattern: string
+  categoryId: number
+  categoryName: string
+  priority: number
+  source: RuleSource
+}
+
+export interface CategorizationRuleRequest {
+  matchType: RuleMatchType
+  pattern: string
+  categoryId: number
+  priority?: number
+}
+
+/** Assign a category to a transaction, optionally learning a rule from it. */
+export interface CategorizeRequest {
+  categoryId: number
+  createRule: boolean
+}
+
+/** A transaction still missing a managed category (the "to categorize" inbox). */
+export interface UncategorizedTransaction {
+  id: number
+  date: string
+  description: string
+  amount: number
+  type: string | null
+  category: string | null
+  nativeCurrency: string
+  createdAt: string
+  isManual: boolean
+  txType: 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | null
+  ticker: string | null
+  quantity: number | null
+  pricePerUnit: number | null
+  categoryId: number | null
+  categoryName: string | null
+  counterparty: string | null
+}
+
+/** A monthly envelope with its current-cycle progress (computed on read). */
+export interface Budget {
+  id: number
+  categoryId: number
+  categoryName: string
+  categoryKind: CategoryKind
+  categoryColor: string | null
+  categoryIcon: string | null
+  monthlyLimit: number
+  spent: number
+  remaining: number
+  percent: number
+  overBudget: boolean
+  cycleStart: string
+  cycleEnd: string
+}
+
+export interface BudgetRequest {
+  categoryId: number
+  monthlyLimit: number
+}
+
+export interface BudgetSettings {
+  cycleStartDay: number
+  currentCycleStart: string
+  currentCycleEnd: string
+}
+
+export interface BudgetSettingsRequest {
+  cycleStartDay: number
+}
+
+export interface CashflowBucket {
+  start: string
+  end: string
+  label: string
+  income: number
+  expense: number   // positive magnitude
+  net: number
+}
+
+export interface CashflowResponse {
+  period: CashflowPeriod
+  from: string
+  to: string
+  income: number
+  expense: number   // positive magnitude
+  net: number
+  series: CashflowBucket[]
+}
+
+export interface AllocationStock {
+  assetClass: AssetClass
+  amount: number
+  percent: number
+}
+
+export interface AllocationContribution {
+  accountId: number
+  accountName: string
+  assetClass: AssetClass
+  color: string | null
+  amount: number
+}
+
+export interface AllocationResponse {
+  period: CashflowPeriod
+  from: string
+  to: string
+  totalStock: number
+  stock: AllocationStock[]
+  totalContributions: number
+  contributions: AllocationContribution[]
+}
+
+export interface RecurringSeries {
+  id: number
+  label: string
+  counterparty: string | null
+  expectedAmount: number   // signed
+  cadence: RecurringCadence
+  status: RecurringStatus
+  nextDueDate: string | null
+  lastSeenDate: string | null
+  categoryId: number | null
+  categoryName: string | null
+  categoryColor: string | null
+  categoryIcon: string | null
+}
+
+export interface RecurringSeriesRequest {
+  label: string
+  counterparty?: string
+  expectedAmount: number
+  cadence: RecurringCadence
+  nextDueDate?: string
+  categoryId?: number
+}
+
+export interface RecurringOccurrence {
+  seriesId: number
+  label: string
+  counterparty: string | null
+  expectedAmount: number
+  dueDate: string
+  categoryId: number | null
+  categoryName: string | null
+  categoryColor: string | null
+  categoryIcon: string | null
+}

@@ -36,4 +36,5 @@ export const QUERY_STALE_TIMES = {
   accountDetail: 2 * 60 * 1000,
   sync: 30 * 1000,
   goals: 2 * 60 * 1000,
+  budget: 2 * 60 * 1000,
 } as const

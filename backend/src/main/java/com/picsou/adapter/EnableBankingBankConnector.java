@@ -16,7 +16,9 @@ import java.math.BigDecimal;
 import java.security.PrivateKey;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -193,6 +195,90 @@ public class EnableBankingBankConnector implements BankConnectorPort {
     }
 
     @Override
+    public List<TransactionData> fetchTransactions(String sessionId, String externalAccountId, LocalDate from) {
+        List<TransactionData> result = new ArrayList<>();
+        String continuationKey = null;
+        int maxPages = 20; // safety bound — ~20 pages of history is plenty for a sync
+
+        for (int page = 0; page < maxPages; page++) {
+            final String contKey = continuationKey;
+            TransactionsResponse response;
+            try {
+                response = webClient.get()
+                    .uri(uriBuilder -> {
+                        var b = uriBuilder.path("/accounts/{id}/transactions")
+                            .queryParam("date_from", from.toString());
+                        if (contKey != null) b.queryParam("continuation_key", contKey);
+                        return b.build(externalAccountId);
+                    })
+                    .header("Authorization", "Bearer " + buildJwt())
+                    .retrieve()
+                    .bodyToMono(TransactionsResponse.class)
+                    .timeout(TIMEOUT)
+                    .block();
+            } catch (WebClientResponseException ex) {
+                // Some ASPSPs / account types don't expose transactions — treat as "none"
+                // rather than failing the whole sync (balances already succeeded).
+                log.warn("Transaction fetch failed for account {} ({}): {}",
+                    externalAccountId, ex.getStatusCode(), ex.getResponseBodyAsString());
+                break;
+            }
+
+            if (response == null || response.transactions() == null) break;
+
+            for (TransactionItem t : response.transactions()) {
+                TransactionData mapped = mapTransaction(t);
+                if (mapped != null) result.add(mapped);
+            }
+
+            continuationKey = response.continuationKey();
+            if (continuationKey == null || continuationKey.isBlank()) break;
+        }
+
+        log.info("Fetched {} transactions for account {} since {}", result.size(), externalAccountId, from);
+        return result;
+    }
+
+    /** Maps one Enable Banking transaction, signing the amount and picking the counterparty. */
+    private TransactionData mapTransaction(TransactionItem t) {
+        if (t.transactionAmount() == null || t.transactionAmount().amount() == null) {
+            return null;
+        }
+        boolean isDebit = "DBIT".equalsIgnoreCase(t.creditDebitIndicator());
+        BigDecimal amount = new BigDecimal(t.transactionAmount().amount());
+        if (isDebit) {
+            amount = amount.negate(); // outflow → negative, matching manual-entry convention
+        }
+        String currency = t.transactionAmount().currency() != null ? t.transactionAmount().currency() : "EUR";
+
+        // Counterparty is whoever is on the other side of the flow.
+        String counterparty = isDebit
+            ? nameOf(t.creditor())
+            : nameOf(t.debtor());
+
+        String description = t.remittanceInformation() != null && !t.remittanceInformation().isEmpty()
+            ? String.join(" ", t.remittanceInformation()).trim()
+            : counterparty;
+
+        LocalDate date = t.bookingDate() != null ? LocalDate.parse(t.bookingDate())
+            : t.valueDate() != null ? LocalDate.parse(t.valueDate())
+            : LocalDate.now();
+
+        String externalId = t.entryReference() != null ? t.entryReference() : t.transactionId();
+        if (externalId == null) {
+            // No bank-provided id — synthesize a stable one so dedup still works across syncs.
+            externalId = "syn-" + date + "-" + amount.stripTrailingZeros().toPlainString()
+                + "-" + (counterparty != null ? counterparty.hashCode() : 0);
+        }
+
+        return new TransactionData(externalId, date, amount, currency, counterparty, description);
+    }
+
+    private static String nameOf(TransactionParty party) {
+        return party != null ? party.name() : null;
+    }
+
+    @Override
     public List<InstitutionData> searchInstitutions(String query, String country) {
         log.info("Searching institutions: query='{}' country='{}'", query, country);
         AspspsResponse response = webClient.get()
@@ -330,6 +416,31 @@ public class EnableBankingBankConnector implements BankConnectorPort {
         @JsonIgnoreProperties(ignoreUnknown = true)
         record BalanceAmount(String amount, String currency) {}
     }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record TransactionsResponse(
+        List<TransactionItem> transactions,
+        @com.fasterxml.jackson.annotation.JsonProperty("continuation_key") String continuationKey
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record TransactionItem(
+        @com.fasterxml.jackson.annotation.JsonProperty("entry_reference") String entryReference,
+        @com.fasterxml.jackson.annotation.JsonProperty("transaction_id") String transactionId,
+        @com.fasterxml.jackson.annotation.JsonProperty("booking_date") String bookingDate,
+        @com.fasterxml.jackson.annotation.JsonProperty("value_date") String valueDate,
+        @com.fasterxml.jackson.annotation.JsonProperty("transaction_amount") TransactionAmount transactionAmount,
+        @com.fasterxml.jackson.annotation.JsonProperty("credit_debit_indicator") String creditDebitIndicator,
+        TransactionParty creditor,
+        TransactionParty debtor,
+        @com.fasterxml.jackson.annotation.JsonProperty("remittance_information") List<String> remittanceInformation
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record TransactionAmount(String amount, String currency) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record TransactionParty(String name) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record AccountDetailsResponse(AccountDetail account) {

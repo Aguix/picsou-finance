@@ -1,0 +1,67 @@
+package com.picsou.service.budget;
+
+import com.picsou.dto.BudgetSettingsRequest;
+import com.picsou.dto.BudgetSettingsResponse;
+import com.picsou.model.BudgetSettings;
+import com.picsou.repository.BudgetSettingsRepository;
+import com.picsou.repository.FamilyMemberRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.time.LocalDate;
+
+/**
+ * Reads/writes the per-member {@code cycleStartDay} (the payday the budget cycle resets on)
+ * and resolves the current cycle bounds via {@link BudgetCycle}. Settings are created
+ * on-demand with the default day (1) so callers never see an empty state.
+ */
+@Service
+@Transactional(readOnly = true)
+public class BudgetSettingsService {
+
+    private final BudgetSettingsRepository settingsRepository;
+    private final FamilyMemberRepository familyMemberRepository;
+
+    public BudgetSettingsService(
+        BudgetSettingsRepository settingsRepository,
+        FamilyMemberRepository familyMemberRepository
+    ) {
+        this.settingsRepository = settingsRepository;
+        this.familyMemberRepository = familyMemberRepository;
+    }
+
+    /** The member's cycle start day, defaulting to 1 if they have no settings row yet. */
+    public int cycleStartDay(Long memberId) {
+        return settingsRepository.findByMemberId(memberId)
+            .map(BudgetSettings::getCycleStartDay)
+            .orElse(1);
+    }
+
+    public BudgetSettingsResponse get(Long memberId) {
+        BudgetSettings settings = getOrCreate(memberId);
+        return toResponse(settings, LocalDate.now());
+    }
+
+    @Transactional
+    public BudgetSettingsResponse update(BudgetSettingsRequest req, Long memberId) {
+        BudgetSettings settings = getOrCreate(memberId);
+        settings.setCycleStartDay(req.cycleStartDay());
+        settings.setUpdatedAt(Instant.now());
+        return toResponse(settingsRepository.save(settings), LocalDate.now());
+    }
+
+    @Transactional
+    public BudgetSettings getOrCreate(Long memberId) {
+        return settingsRepository.findByMemberId(memberId)
+            .orElseGet(() -> settingsRepository.save(BudgetSettings.builder()
+                .member(familyMemberRepository.getReferenceById(memberId))
+                .cycleStartDay(1)
+                .build()));
+    }
+
+    private BudgetSettingsResponse toResponse(BudgetSettings settings, LocalDate on) {
+        BudgetCycle.CycleRange cycle = BudgetCycle.cycleFor(on, settings.getCycleStartDay());
+        return BudgetSettingsResponse.of(settings, cycle.start(), cycle.end());
+    }
+}

@@ -5,6 +5,39 @@ All notable changes to Picsou are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-06-02
+
+Minor release: a complete **Budget & Cashflow** module, fed by Enable Banking
+transaction sync with a full manual fallback.
+
+### Added
+
+- **Budget & Cashflow section.** A single `Budget` nav item opens a recap dashboard with
+  drill-down into six views:
+  - **Envelopes** — one monthly cap per category, spent/remaining tracked against a
+    configurable **pay cycle** (`cycleStartDay`, 1–28, not the calendar month), no rollover.
+  - **Cashflow** — income / expense / net over the current cycle and YTD, with internal
+    transfers excluded.
+  - **Allocation** — savings/investment *stock* (balances by asset class) plus *contribution
+    flux* (incoming transfers per account).
+  - **Recurring** — auto-detected subscriptions/charges (≥3 regular occurrences) that the user
+    confirms or ignores, with a projected calendar.
+  - **Categorize** — an inbox of uncategorized transactions; categorizing one can learn a
+    reusable rule.
+  - **Manage** — categories (hybrid: seeded defaults + fully customizable), categorization
+    rules, and the pay-cycle setting.
+- **Transaction ingestion from Enable Banking.** Sync now pulls transactions (not just
+  balances), deduplicates them, and auto-categorizes via a rule engine. The module also works
+  with **no synced bank** — manual transactions accept a category.
+- New categories with kinds **INCOME / EXPENSE / TRANSFER**; transfers are excluded from
+  cashflow and envelopes and feed allocation instead.
+
+### Notes
+
+- See [`docs/features/budget.md`](docs/features/budget.md) and the ADR
+  [budget cycle & categorization](docs/decisions/2026-06-02-budget-cycle-and-categorization.md).
+- Custom reports and the Picsou MCP server are out of scope for this release.
+
 ## [1.0.2] — 2026-06-02
 
 Patch release: fixes a **403** that blocked login and the setup wizard's **Origins**

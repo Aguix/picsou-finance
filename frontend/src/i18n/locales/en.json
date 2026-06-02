@@ -35,6 +35,8 @@
     "accounts.desc": "Balances & transactions",
     "goals": "Goals",
     "goals.desc": "Track your savings",
+    "budget": "Budget",
+    "budget.desc": "Spending & cashflow",
     "sync": "Sync",
     "settings": "Settings",
     "settings.desc": "Preferences & account",
@@ -314,6 +316,155 @@
     "linkedAccounts": "Linked accounts",
     "history": "History",
     "atCurrentPace": "At current pace"
+  },
+  "budget": {
+    "surtitle": "FINANCES",
+    "title": "Budget & Cashflow",
+    "tab": {
+      "overview": "Overview",
+      "envelopes": "Envelopes",
+      "cashflow": "Cashflow",
+      "allocation": "Allocation",
+      "recurring": "Recurring",
+      "categorize": "To categorize",
+      "manage": "Manage"
+    },
+    "kind": {
+      "income": "Income",
+      "expense": "Expense",
+      "transfer": "Transfer"
+    },
+    "cadence": {
+      "weekly": "Weekly",
+      "biweekly": "Bi-weekly",
+      "monthly": "Monthly",
+      "quarterly": "Quarterly",
+      "yearly": "Yearly"
+    },
+    "period": {
+      "cycle": "Cycle",
+      "ytd": "Year"
+    },
+    "asset": {
+      "current": "Checking",
+      "savings": "Savings",
+      "investment": "Investment",
+      "other": "Other"
+    },
+    "overview": {
+      "netThisCycle": "Net this cycle",
+      "incomeVsExpense": "{{income}} € in · {{expense}} € out",
+      "envelopes": "Envelopes",
+      "onTrack": "Everything on track",
+      "overBudget": "{{count}} envelope over budget",
+      "overBudget_other": "{{count}} envelopes over budget",
+      "upcoming30": "Upcoming (30 d)",
+      "upcomingCount": "{{count}} payment due",
+      "upcomingCount_other": "{{count}} payments due",
+      "investable": "Savings & invest.",
+      "contributedThisCycle": "{{amount}} € contributed this cycle",
+      "toCategorize": "{{count}} transaction to categorize",
+      "toCategorize_other": "{{count}} transactions to categorize",
+      "topEnvelopes": "Most-used envelopes"
+    },
+    "cashflow": {
+      "subtitle": "Money in, money out and net balance (transfers excluded).",
+      "income": "Income",
+      "expense": "Expense",
+      "net": "Net",
+      "byCycle": "By cycle",
+      "empty": "No transactions in this period.",
+      "error": "Could not load cashflow."
+    },
+    "allocation": {
+      "subtitle": "How your savings and investments break down.",
+      "stock": "Holdings by asset class",
+      "contributions": "Contributions this period",
+      "totalContributed": "Total contributed",
+      "noStock": "No holdings to show.",
+      "noContributions": "No contributions in this period.",
+      "noContributionsHint": "Transfers into your savings and investment accounts will show up here.",
+      "error": "Could not load allocation."
+    },
+    "envelope": {
+      "add": "New envelope",
+      "edit": "Edit envelope",
+      "subtitle": "One monthly cap per expense category.",
+      "category": "Category",
+      "selectCategory": "Pick a category",
+      "monthlyLimit": "Monthly limit",
+      "formHint": "Set the maximum to spend over the cycle.",
+      "empty": "No envelopes",
+      "emptyHint": "Create an envelope to track spending by category.",
+      "error": "Could not load envelopes.",
+      "deleteTitle": "Delete envelope",
+      "deleteDescription": "Delete the \"{{name}}\" envelope? Transactions are kept."
+    },
+    "recurring": {
+      "detect": "Detect",
+      "add": "Add",
+      "subtitle": "Subscriptions and recurring payments.",
+      "series": "Recurring series",
+      "upcoming": "Upcoming payments",
+      "noSeries": "No recurring series detected yet.",
+      "noUpcoming": "No upcoming payments",
+      "noUpcomingHint": "Upcoming charges will appear here once detected.",
+      "label": "Label",
+      "counterparty": "Counterparty",
+      "amount": "Amount",
+      "cadence": "Cadence",
+      "nextDue": "Next due",
+      "category": "Category",
+      "noCategory": "No category",
+      "formHint": "Manually add a recurring payment.",
+      "status": {
+        "suggested": "Suggested",
+        "confirmed": "Confirmed",
+        "ignored": "Ignored"
+      }
+    },
+    "categorize": {
+      "subtitle": "Assign a category to unclassified transactions.",
+      "recategorize": "Re-categorize",
+      "selectCategory": "Pick a category",
+      "learnRule": "Remember a rule",
+      "assign": "Assign",
+      "empty": "Everything is categorized",
+      "emptyHint": "New transactions to classify will appear here."
+    },
+    "category": {
+      "title": "Categories",
+      "hint": "Rename, recolor or archive your categories.",
+      "add": "Add",
+      "edit": "Edit category",
+      "name": "Name",
+      "namePlaceholder": "e.g. Groceries",
+      "kind": "Kind",
+      "color": "Color",
+      "default": "Default",
+      "formHint": "The kind sets whether the category counts as income, expense or transfer."
+    },
+    "rule": {
+      "title": "Categorization rules",
+      "hint": "Automatically categorize matching transactions.",
+      "add": "New rule",
+      "empty": "No rules defined.",
+      "learned": "Auto",
+      "matchType": "Match on",
+      "pattern": "Pattern",
+      "category": "Category",
+      "formHint": "Any matching transaction will be categorized automatically.",
+      "match": {
+        "counterparty": "Counterparty",
+        "keyword": "Keyword"
+      }
+    },
+    "settings": {
+      "cycleTitle": "Payday",
+      "cycleHint": "Your budget cycle starts on this day each month, not the 1st.",
+      "cycleStartDay": "Cycle start day",
+      "currentCycle": "Current cycle: {{start}} – {{end}}"
+    }
   },
   "addAccount": {
     "title": "Add account",

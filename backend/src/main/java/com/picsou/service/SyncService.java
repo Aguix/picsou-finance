@@ -8,6 +8,9 @@ import com.picsou.port.BankConnectorPort;
 import com.picsou.repository.AccountRepository;
 import com.picsou.repository.FamilyMemberRepository;
 import com.picsou.repository.RequisitionRepository;
+import com.picsou.repository.TransactionRepository;
+import com.picsou.service.budget.CategorizationService;
+import com.picsou.service.budget.RecurringDetectionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,19 +32,43 @@ public class SyncService {
     private final RequisitionRepository requisitionRepository;
     private final FamilyMemberRepository familyMemberRepository;
     private final AccountService accountService;
+    private final TransactionRepository transactionRepository;
+    private final CategorizationService categorizationService;
+    private final RecurringDetectionService recurringDetectionService;
+
+    /** How far back to pull transactions on each sync; dedup makes the overlap harmless. */
+    private static final int TRANSACTION_LOOKBACK_DAYS = 90;
 
     public SyncService(
         BankConnectorPort bankConnector,
         AccountRepository accountRepository,
         RequisitionRepository requisitionRepository,
         FamilyMemberRepository familyMemberRepository,
-        AccountService accountService
+        AccountService accountService,
+        TransactionRepository transactionRepository,
+        CategorizationService categorizationService,
+        RecurringDetectionService recurringDetectionService
     ) {
         this.bankConnector = bankConnector;
         this.accountRepository = accountRepository;
         this.requisitionRepository = requisitionRepository;
         this.familyMemberRepository = familyMemberRepository;
         this.accountService = accountService;
+        this.transactionRepository = transactionRepository;
+        this.categorizationService = categorizationService;
+        this.recurringDetectionService = recurringDetectionService;
+    }
+
+    /**
+     * Re-run recurring detection for a member after a sync, isolating any failure so it never
+     * rolls back the freshly-ingested balances and transactions.
+     */
+    private void detectRecurring(Long memberId) {
+        try {
+            recurringDetectionService.detect(memberId, LocalDate.now());
+        } catch (Exception ex) {
+            log.warn("Recurring detection skipped for member {}: {}", memberId, ex.getMessage());
+        }
     }
 
     /** Step 1: Initiate Enable Banking bank connection for a given institution. */
@@ -103,7 +130,7 @@ public class SyncService {
         FamilyMember member = requisition.getMember();
 
         List<AccountResponse> responses = accountDataList.stream()
-            .map(data -> upsertAccount(data, requisition.getInstitutionName(), member))
+            .map(data -> upsertAccount(data, requisition.getInstitutionName(), member, sessionId))
             .flatMap(Optional::stream)
             .toList();
 
@@ -121,6 +148,8 @@ public class SyncService {
         requisition.setStatus(RequisitionStatus.LINKED);
         requisition.setLastSyncedAt(Instant.now());
         requisitionRepository.save(requisition);
+
+        detectRecurring(member.getId());
 
         log.info("Completed Enable Banking sync for {}: {} accounts linked", requisition.getInstitutionName(), responses.size());
         return responses;
@@ -158,13 +187,15 @@ public class SyncService {
         FamilyMember member = req.getMember();
 
         List<AccountResponse> responses = accountDataList.stream()
-            .map(data -> upsertAccount(data, req.getInstitutionName(), member))
+            .map(data -> upsertAccount(data, req.getInstitutionName(), member, req.getRequisitionId()))
             .flatMap(Optional::stream)
             .toList();
 
         req.setStatus(RequisitionStatus.LINKED);
         req.setLastSyncedAt(Instant.now());
         requisitionRepository.save(req);
+
+        detectRecurring(member.getId());
 
         log.info("Retry sync OK for {}: {} accounts linked", req.getInstitutionName(), responses.size());
         return responses;
@@ -185,9 +216,10 @@ public class SyncService {
             try {
                 List<BankConnectorPort.AccountData> accounts = bankConnector.fetchBalances(req.getRequisitionId());
                 FamilyMember member = req.getMember();
-                accounts.forEach(data -> upsertAccount(data, req.getInstitutionName(), member));
+                accounts.forEach(data -> upsertAccount(data, req.getInstitutionName(), member, req.getRequisitionId()));
                 req.setLastSyncedAt(Instant.now());
                 requisitionRepository.save(req);
+                detectRecurring(member.getId());
                 log.info("Auto-resync OK for {}: {} accounts", req.getInstitutionName(), accounts.size());
             } catch (Exception ex) {
                 req.setStatus(RequisitionStatus.FAILED);
@@ -208,11 +240,12 @@ public class SyncService {
 
         List<BankConnectorPort.AccountData> accountDataList = bankConnector.fetchBalances(req.getRequisitionId());
         List<AccountResponse> responses = accountDataList.stream()
-            .map(data -> upsertAccount(data, req.getInstitutionName(), member))
+            .map(data -> upsertAccount(data, req.getInstitutionName(), member, req.getRequisitionId()))
             .flatMap(Optional::stream)
             .toList();
         req.setLastSyncedAt(Instant.now());
         requisitionRepository.save(req);
+        detectRecurring(member.getId());
         log.info("Refreshed {} accounts for {}", responses.size(), req.getInstitutionName());
         return responses;
     }
@@ -224,7 +257,7 @@ public class SyncService {
      * by the user — we must not resurrect it on the next sync. The bank may keep
      * returning the same external id forever; that's not consent to bring it back.
      */
-    private Optional<AccountResponse> upsertAccount(BankConnectorPort.AccountData data, String provider, FamilyMember member) {
+    private Optional<AccountResponse> upsertAccount(BankConnectorPort.AccountData data, String provider, FamilyMember member, String sessionId) {
         Optional<Account> existing = accountRepository
             .findByExternalAccountIdAndMemberId(data.externalId(), member.getId());
 
@@ -258,7 +291,54 @@ public class SyncService {
         account = accountRepository.save(account);
         accountService.upsertSnapshot(account, data.balance(), LocalDate.now());
 
+        ingestTransactions(account, sessionId, member);
+
         return Optional.of(accountService.toResponse(account));
+    }
+
+    /**
+     * Pull recent transactions for a synced account, skipping any already stored
+     * (dedup by {@code (account, externalId)}), and auto-categorize each new one via the
+     * member's rules. The account's authoritative balance still comes from the balance
+     * endpoint — we never recompute it from this partial transaction window. Failures here
+     * are logged and swallowed so a transaction hiccup never breaks the balance sync.
+     */
+    private void ingestTransactions(Account account, String sessionId, FamilyMember member) {
+        if (account.getExternalAccountId() == null) {
+            return;
+        }
+        LocalDate from = LocalDate.now().minusDays(TRANSACTION_LOOKBACK_DAYS);
+        List<BankConnectorPort.TransactionData> fetched;
+        try {
+            fetched = bankConnector.fetchTransactions(sessionId, account.getExternalAccountId(), from);
+        } catch (Exception ex) {
+            log.warn("Transaction ingestion skipped for account {}: {}", account.getId(), ex.getMessage());
+            return;
+        }
+
+        int inserted = 0;
+        for (BankConnectorPort.TransactionData data : fetched) {
+            if (data.externalId() != null
+                && transactionRepository.existsByAccountIdAndExternalId(account.getId(), data.externalId())) {
+                continue;
+            }
+            Transaction tx = Transaction.builder()
+                .account(account)
+                .date(data.date())
+                .description(data.description())
+                .amount(data.amount())
+                .counterparty(data.counterparty())
+                .externalId(data.externalId())
+                .nativeCurrency(data.currency() != null ? data.currency() : "EUR")
+                .isManual(false)
+                .build();
+            categorizationService.apply(tx, member.getId());
+            transactionRepository.save(tx);
+            inserted++;
+        }
+        if (inserted > 0) {
+            log.info("Ingested {} new transactions for account {}", inserted, account.getId());
+        }
     }
 
     public record InitiateResponse(String requisitionId, String authLink) {}

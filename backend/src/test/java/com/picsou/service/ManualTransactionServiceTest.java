@@ -9,7 +9,9 @@ import com.picsou.model.AccountType;
 import com.picsou.model.Transaction;
 import com.picsou.model.TransactionType;
 import com.picsou.repository.AccountRepository;
+import com.picsou.repository.CategoryRepository;
 import com.picsou.repository.TransactionRepository;
+import com.picsou.service.budget.CategorizationService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -32,6 +34,8 @@ class ManualTransactionServiceTest {
     @Mock TransactionRepository transactionRepository;
     @Mock HoldingComputeService holdingComputeService;
     @Mock FinaryPersistenceHelper finaryPersistenceHelper;
+    @Mock CategoryRepository categoryRepository;
+    @Mock CategorizationService categorizationService;
 
     @InjectMocks ManualTransactionService manualTransactionService;
 
@@ -63,7 +67,7 @@ class ManualTransactionServiceTest {
             "Salary",
             new BigDecimal("1000"),
             TransactionType.DEPOSIT,
-            null, null, null, "EUR"
+            null, null, null, "EUR", null
         );
 
         when(accountRepository.findByIdAndMemberId(1L, 10L)).thenReturn(Optional.of(account));
@@ -91,7 +95,7 @@ class ManualTransactionServiceTest {
             "AAPL",
             new BigDecimal("5"),
             new BigDecimal("100"),
-            "EUR"
+            "EUR", null
         );
 
         when(accountRepository.findByIdAndMemberId(2L, 10L)).thenReturn(Optional.of(account));
@@ -110,7 +114,7 @@ class ManualTransactionServiceTest {
     void addTransaction_accountNotFound_throws() {
         TransactionRequest req = new TransactionRequest(
             LocalDate.now(), "Test", BigDecimal.TEN,
-            TransactionType.DEPOSIT, null, null, null, "EUR"
+            TransactionType.DEPOSIT, null, null, null, "EUR", null
         );
 
         when(accountRepository.findByIdAndMemberId(99L, 10L)).thenReturn(Optional.empty());

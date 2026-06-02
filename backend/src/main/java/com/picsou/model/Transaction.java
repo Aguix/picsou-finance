@@ -39,6 +39,23 @@ public class Transaction {
     @Column(length = 100)
     private String category;
 
+    /** Managed budget category (replaces the free-string {@link #category} for budgeting). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id")
+    private Category categoryRef;
+
+    /** Creditor/debtor name from the bank — used for rule matching and recurring detection. */
+    @Column(length = 255)
+    private String counterparty;
+
+    /** Provider entry reference; deduplicates synced transactions. Null for manual ones. */
+    @Column(name = "external_id", length = 255)
+    private String externalId;
+
+    /** Links this transaction to a detected {@code RecurringSeries} (nullable). */
+    @Column(name = "recurring_series_id")
+    private Long recurringSeriesId;
+
     @Column(name = "native_currency", nullable = false, length = 10)
     @Builder.Default
     private String nativeCurrency = "EUR";

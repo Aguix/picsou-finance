@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Wallet,
   Target,
+  PieChart,
   Settings,
   LogOut,
   Languages,
@@ -81,6 +82,7 @@ const NAV_ITEMS = [
   { path: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard', descKey: 'nav.dashboard.desc' },
   { path: '/accounts', icon: Wallet, labelKey: 'nav.accounts', descKey: 'nav.accounts.desc' },
   { path: '/goals', icon: Target, labelKey: 'nav.goals', descKey: 'nav.goals.desc' },
+  { path: '/budget', icon: PieChart, labelKey: 'nav.budget', descKey: 'nav.budget.desc' },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings', descKey: 'nav.settings.desc' },
 ] as const
 

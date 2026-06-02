@@ -37,6 +37,7 @@
 | 2026-05-19 | [FX conversion inside the Yahoo price provider](./decisions/2026-05-19-yahoo-fx-conversion.md) | Active |
 | 2026-05-31 | [ETF composition from issuer holdings files (no auth)](./decisions/2026-05-31-etf-composition-issuer-holdings.md) | ⚠️ Superseded |
 | 2026-06-01 | [ETF composition via Boursorama (single source)](./decisions/2026-06-01-etf-composition-via-boursorama.md) | Active |
+| 2026-06-02 | [Budget cycle, categorization engine, and transfer kind](./decisions/2026-06-02-budget-cycle-and-categorization.md) | Active |
 
 ## Feature notes
 
@@ -46,7 +47,8 @@
 | Demo mode | 2026-04-08 | [demo-mode.md](./features/demo-mode.md) |
 | Theme (dark / light / system) + theme-adaptive rendering | 2026-06-02 | [theme-persistence.md](./features/theme-persistence.md) |
 | Dashboard — Time range isolation | 2026-04-13 | [dashboard-time-range-isolation.md](./features/dashboard-time-range-isolation.md) |
-| Bank sync | 2026-05-03 | [bank-sync.md](./features/bank-sync.md) |
+| Bank sync | 2026-06-02 | [bank-sync.md](./features/bank-sync.md) |
+| Budget & Cashflow | 2026-06-02 | [budget.md](./features/budget.md) |
 | Trade Republic | 2026-05-18 | [trade-republic.md](./features/trade-republic.md) |
 | Trade Republic — Holdings deduplication | 2026-05-18 | [trade-republic-holding-deduplication.md](./features/trade-republic-holding-deduplication.md) |
 | ISIN → Ticker conversion | 2026-04-13 | [ISIN_TO_TICKER_CONVERSION.md](./features/ISIN_TO_TICKER_CONVERSION.md) |

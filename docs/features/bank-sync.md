@@ -1,6 +1,6 @@
 # Feature: Bank Sync
 
-> Last updated: 2026-04-26
+> Last updated: 2026-06-02
 
 > **Status (1.0.0).** Enable Banking is the only enabled provider. The Powens
 > adapter ships in the codebase but is **experimental and untested** —
@@ -17,7 +17,11 @@ Picsou syncs bank accounts from French banks. In 1.0.0 the active provider is En
 
 ### Provider architecture
 
-Both providers implement the `BankConnectorPort` interface with four operations: `initiateConnection`, `exchangeCode`, `fetchBalances`, and `searchInstitutions`. The service layer (`SyncService`) never imports adapters directly -- it depends only on the port.
+Both providers implement the `BankConnectorPort` interface: `initiateConnection`, `exchangeCode`, `fetchBalances`, `searchInstitutions`, and (since 1.1.0) `fetchTransactions`. The service layer (`SyncService`) never imports adapters directly -- it depends only on the port.
+
+### Transaction ingestion (1.1.0)
+
+Since 1.1.0 the sync also ingests **transactions**, not just balances. After upserting balances, `SyncService` calls `BankConnectorPort.fetchTransactions(sessionId, externalAccountId, from)` for each Enable Banking account (`GET /accounts/{id}/transactions`, mapping creditor/debtor → `counterparty`, remittance → `description`). Transactions are deduplicated by `(account, externalId)`, persisted with `isManual=false`, then categorized by `CategorizationService.apply`. Ingestion is incremental on `lastSyncedAt`; the first attach pulls the maximum available window (≈90 days). This feeds the entire Budget module — see [budget.md](./budget.md).
 
 **Enable Banking** (`EnableBankingBankConnector`): Uses the PSD2 Bank Account Data API. Auth is JWT-based (RS256 signed with an RSA private key). Sessions are created via OAuth redirect. After the user authorizes, accounts are linked asynchronously and polled up to 3 times with 1.5-second delays (≤ 4.5 s total). If the session still has no accounts, the adapter returns an empty list rather than throwing — the requisition is left LINKED so the user can retry from the UI without losing the session id. The previous 24 s blocking poll caused 502 errors at the reverse proxy.
 
@@ -110,3 +114,4 @@ Two pitfalls cost real users a lot of time during 1.0.0 testing — both are sur
 
 - Related ADR: [Dual bank providers](../decisions/2026-03-01-dual-bank-providers.md)
 - Related ADR: [Ports and adapters](../decisions/2026-01-01-ports-and-adapters.md)
+- Downstream feature: [Budget & Cashflow](./budget.md) (consumes ingested transactions)

@@ -6,9 +6,12 @@ import com.picsou.exception.ResourceNotFoundException;
 import com.picsou.finary.FinaryPersistenceHelper;
 import com.picsou.model.Account;
 import com.picsou.model.AccountType;
+import com.picsou.model.Category;
 import com.picsou.model.Transaction;
 import com.picsou.repository.AccountRepository;
+import com.picsou.repository.CategoryRepository;
 import com.picsou.repository.TransactionRepository;
+import com.picsou.service.budget.CategorizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +27,8 @@ public class ManualTransactionService {
     private final TransactionRepository transactionRepository;
     private final HoldingComputeService holdingComputeService;
     private final FinaryPersistenceHelper finaryPersistenceHelper;
+    private final CategoryRepository categoryRepository;
+    private final CategorizationService categorizationService;
 
     private static final Set<AccountType> INVESTMENT_TYPES =
         Set.of(AccountType.PEA, AccountType.COMPTE_TITRES, AccountType.CRYPTO);
@@ -45,6 +50,13 @@ public class ManualTransactionService {
             .isManual(true)
             .nativeCurrency(req.currency() != null ? req.currency() : "EUR")
             .build();
+
+        // Explicit category wins; otherwise let the rules engine try to assign one.
+        if (req.categoryId() != null) {
+            tx.setCategoryRef(resolveCategory(req.categoryId(), memberId));
+        } else {
+            categorizationService.apply(tx, memberId);
+        }
 
         transactionRepository.save(tx);
 
@@ -78,6 +90,7 @@ public class ManualTransactionService {
         if (req.quantity() != null) tx.setQuantity(req.quantity());
         if (req.pricePerUnit() != null) tx.setPricePerUnit(req.pricePerUnit());
         if (req.currency() != null) tx.setNativeCurrency(req.currency());
+        if (req.categoryId() != null) tx.setCategoryRef(resolveCategory(req.categoryId(), memberId));
         transactionRepository.save(tx);
 
         if (INVESTMENT_TYPES.contains(account.getType())) {
@@ -110,6 +123,11 @@ public class ManualTransactionService {
             recomputeCashBalance(account);
             finaryPersistenceHelper.reconstructSnapshotsFromDb(account);
         }
+    }
+
+    private Category resolveCategory(Long categoryId, Long memberId) {
+        return categoryRepository.findByIdAndMemberId(categoryId, memberId)
+            .orElseThrow(() -> ResourceNotFoundException.category(categoryId));
     }
 
     private void recomputeCashBalance(Account account) {

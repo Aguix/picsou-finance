@@ -6,6 +6,18 @@ import { mockGoals } from './data/goals'
 import { mockHoldings } from './data/holdings'
 import { mockTransactions } from './data/transactions'
 import { mockExchangeStatuses, mockWalletStatuses, mockRequisitions } from './data/sync-status'
+import {
+  mockAllocation,
+  mockBudgetSettings,
+  mockBudgets,
+  mockCalendar,
+  mockCashflow,
+  mockCategories,
+  mockRecurring,
+  mockRules,
+  mockUncategorized,
+} from './data/budget'
+import type { CashflowPeriod } from '@/types/api'
 
 function randomDelay(): number {
   return 200 + Math.random() * 400
@@ -317,6 +329,111 @@ handlers.set(key('POST', '/finary/api-sync/execute'), () => ({
   transactionsImported: 42,
   importedAccounts: [],
 }))
+
+// ── Budget module ─────────────────────────────────────────────────────────────
+// Read endpoints serve the mock fixtures; mutations echo a plausible object so the
+// optimistic UI flows. Demo state is not persisted — refetches return the fixtures.
+
+// Categories
+handlers.set(key('GET', '/categories'), () => mockCategories)
+handlers.set(key('POST', '/categories'), (config) => {
+  const body = JSON.parse(config.data || '{}')
+  return {
+    id: Date.now(), name: body.name ?? 'Catégorie', kind: body.kind ?? 'EXPENSE',
+    color: body.color ?? '#6366f1', icon: body.icon ?? null,
+    isDefault: false, archived: false, sortOrder: 99,
+  }
+})
+for (const c of mockCategories) {
+  handlers.set(key('PUT', `/categories/${c.id}`), (config) => ({
+    ...c, ...JSON.parse(config.data || '{}'),
+  }))
+  handlers.set(key('DELETE', `/categories/${c.id}`), () => ({}))
+  handlers.set(key('POST', `/categories/${c.id}/unarchive`), () => ({ ...c, archived: false }))
+}
+
+// Categorization rules
+handlers.set(key('GET', '/categorization-rules'), () => mockRules)
+handlers.set(key('POST', '/categorization-rules'), (config) => {
+  const body = JSON.parse(config.data || '{}')
+  const cat = mockCategories.find((c) => c.id === body.categoryId)
+  return {
+    id: Date.now(), matchType: body.matchType ?? 'COUNTERPARTY', pattern: body.pattern ?? '',
+    categoryId: body.categoryId ?? 0, categoryName: cat?.name ?? '', priority: body.priority ?? 0,
+    source: 'USER',
+  }
+})
+for (const r of mockRules) {
+  handlers.set(key('PUT', `/categorization-rules/${r.id}`), (config) => ({
+    ...r, ...JSON.parse(config.data || '{}'),
+  }))
+  handlers.set(key('DELETE', `/categorization-rules/${r.id}`), () => ({}))
+}
+handlers.set(key('POST', '/categorization-rules/recategorize'), () => ({ categorized: 4 }))
+
+// To-categorize inbox
+handlers.set(key('GET', '/transactions/uncategorized'), () => mockUncategorized)
+for (const tx of mockUncategorized) {
+  handlers.set(key('PUT', `/transactions/${tx.id}/category`), () => ({}))
+}
+
+// Envelopes
+handlers.set(key('GET', '/budgets'), () => mockBudgets)
+handlers.set(key('POST', '/budgets'), (config) => {
+  const body = JSON.parse(config.data || '{}')
+  const cat = mockCategories.find((c) => c.id === body.categoryId)
+  const limit = body.monthlyLimit ?? 0
+  return {
+    id: Date.now(), categoryId: body.categoryId ?? 0, categoryName: cat?.name ?? 'Catégorie',
+    categoryKind: cat?.kind ?? 'EXPENSE', categoryColor: cat?.color ?? null, categoryIcon: null,
+    monthlyLimit: limit, spent: 0, remaining: limit, percent: 0, overBudget: false,
+    cycleStart: mockBudgetSettings.currentCycleStart, cycleEnd: mockBudgetSettings.currentCycleEnd,
+  }
+})
+for (const b of mockBudgets) {
+  handlers.set(key('PUT', `/budgets/${b.id}`), (config) => {
+    const body = JSON.parse(config.data || '{}')
+    const limit = body.monthlyLimit ?? b.monthlyLimit
+    return { ...b, monthlyLimit: limit, remaining: Math.round((limit - b.spent) * 100) / 100,
+      percent: limit > 0 ? Math.round((b.spent / limit) * 100) : 0, overBudget: b.spent > limit }
+  })
+  handlers.set(key('DELETE', `/budgets/${b.id}`), () => ({}))
+}
+
+// Settings (payday cycle)
+handlers.set(key('GET', '/budget/settings'), () => mockBudgetSettings)
+handlers.set(key('PUT', '/budget/settings'), (config) => {
+  const body = JSON.parse(config.data || '{}')
+  return { ...mockBudgetSettings, cycleStartDay: body.cycleStartDay ?? mockBudgetSettings.cycleStartDay }
+})
+
+// Cashflow & allocation (period comes from the query string)
+handlers.set(key('GET', '/cashflow'), (config) =>
+  mockCashflow(((config.params?.period as CashflowPeriod) ?? 'CYCLE')))
+handlers.set(key('GET', '/allocation'), (config) =>
+  mockAllocation(((config.params?.period as CashflowPeriod) ?? 'CYCLE')))
+
+// Recurring series
+handlers.set(key('GET', '/recurring'), () => mockRecurring)
+handlers.set(key('GET', '/recurring/calendar'), (config) =>
+  mockCalendar(Number(config.params?.horizonDays ?? 60)))
+handlers.set(key('POST', '/recurring'), (config) => {
+  const body = JSON.parse(config.data || '{}')
+  const cat = mockCategories.find((c) => c.id === body.categoryId)
+  return {
+    id: Date.now(), label: body.label ?? 'Récurrent', counterparty: body.counterparty ?? null,
+    expectedAmount: body.expectedAmount ?? 0, cadence: body.cadence ?? 'MONTHLY', status: 'CONFIRMED',
+    nextDueDate: body.nextDueDate ?? null, lastSeenDate: null, categoryId: body.categoryId ?? null,
+    categoryName: cat?.name ?? null, categoryColor: cat?.color ?? null, categoryIcon: null,
+  }
+})
+for (const s of mockRecurring) {
+  handlers.set(key('PUT', `/recurring/${s.id}`), (config) => ({ ...s, ...JSON.parse(config.data || '{}') }))
+  handlers.set(key('POST', `/recurring/${s.id}/confirm`), () => ({ ...s, status: 'CONFIRMED' }))
+  handlers.set(key('POST', `/recurring/${s.id}/ignore`), () => ({ ...s, status: 'IGNORED' }))
+  handlers.set(key('DELETE', `/recurring/${s.id}`), () => ({}))
+}
+handlers.set(key('POST', '/recurring/detect'), () => ({ detected: 2 }))
 
 function generateMockMonths(goal: GoalProgress) {
   const start = new Date('2025-01-01')

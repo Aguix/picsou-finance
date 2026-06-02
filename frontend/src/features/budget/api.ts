@@ -1,0 +1,91 @@
+import { api } from '@/lib/api-client'
+import type {
+  AllocationResponse,
+  Budget,
+  BudgetRequest,
+  BudgetSettings,
+  BudgetSettingsRequest,
+  CashflowPeriod,
+  CashflowResponse,
+  Category,
+  CategorizationRule,
+  CategorizationRuleRequest,
+  CategoryRequest,
+  CategorizeRequest,
+  RecurringOccurrence,
+  RecurringSeries,
+  RecurringSeriesRequest,
+  RecurringStatus,
+  UncategorizedTransaction,
+} from '@/types/api'
+
+/**
+ * One flat namespace for the whole Budget module. The endpoints mirror the backend
+ * controllers verbatim (the Budget, Category, Cashflow and Recurring controllers in
+ * com.picsou.controller). Aggregations (cashflow, allocation) are read-only; everything
+ * else has a Request twin.
+ */
+export const budgetApi = {
+  // ─── Categories ───────────────────────────────────────────────────────────
+  listCategories: () => api.get<Category[]>('/categories').then(r => r.data),
+  createCategory: (data: CategoryRequest) =>
+    api.post<Category>('/categories', data).then(r => r.data),
+  updateCategory: (id: number, data: CategoryRequest) =>
+    api.put<Category>(`/categories/${id}`, data).then(r => r.data),
+  archiveCategory: (id: number) => api.delete(`/categories/${id}`),
+  unarchiveCategory: (id: number) =>
+    api.post<Category>(`/categories/${id}/unarchive`).then(r => r.data),
+
+  // ─── Categorization rules ─────────────────────────────────────────────────
+  listRules: () => api.get<CategorizationRule[]>('/categorization-rules').then(r => r.data),
+  createRule: (data: CategorizationRuleRequest) =>
+    api.post<CategorizationRule>('/categorization-rules', data).then(r => r.data),
+  updateRule: (id: number, data: CategorizationRuleRequest) =>
+    api.put<CategorizationRule>(`/categorization-rules/${id}`, data).then(r => r.data),
+  deleteRule: (id: number) => api.delete(`/categorization-rules/${id}`),
+  recategorize: () =>
+    api.post<{ categorized: number }>('/categorization-rules/recategorize').then(r => r.data),
+
+  // ─── To-categorize inbox ──────────────────────────────────────────────────
+  listUncategorized: () =>
+    api.get<UncategorizedTransaction[]>('/transactions/uncategorized').then(r => r.data),
+  categorize: (id: number, data: CategorizeRequest) =>
+    api.put(`/transactions/${id}/category`, data),
+
+  // ─── Envelopes ────────────────────────────────────────────────────────────
+  listBudgets: () => api.get<Budget[]>('/budgets').then(r => r.data),
+  createBudget: (data: BudgetRequest) => api.post<Budget>('/budgets', data).then(r => r.data),
+  updateBudget: (id: number, data: BudgetRequest) =>
+    api.put<Budget>(`/budgets/${id}`, data).then(r => r.data),
+  deleteBudget: (id: number) => api.delete(`/budgets/${id}`),
+
+  // ─── Settings (payday cycle) ──────────────────────────────────────────────
+  getSettings: () => api.get<BudgetSettings>('/budget/settings').then(r => r.data),
+  updateSettings: (data: BudgetSettingsRequest) =>
+    api.put<BudgetSettings>('/budget/settings', data).then(r => r.data),
+
+  // ─── Cashflow & allocation (read-only aggregations) ───────────────────────
+  getCashflow: (period: CashflowPeriod) =>
+    api.get<CashflowResponse>('/cashflow', { params: { period } }).then(r => r.data),
+  getAllocation: (period: CashflowPeriod) =>
+    api.get<AllocationResponse>('/allocation', { params: { period } }).then(r => r.data),
+
+  // ─── Recurring series ─────────────────────────────────────────────────────
+  listRecurring: (status?: RecurringStatus) =>
+    api.get<RecurringSeries[]>('/recurring', { params: status ? { status } : undefined })
+      .then(r => r.data),
+  getCalendar: (horizonDays = 60) =>
+    api.get<RecurringOccurrence[]>('/recurring/calendar', { params: { horizonDays } })
+      .then(r => r.data),
+  createRecurring: (data: RecurringSeriesRequest) =>
+    api.post<RecurringSeries>('/recurring', data).then(r => r.data),
+  updateRecurring: (id: number, data: RecurringSeriesRequest) =>
+    api.put<RecurringSeries>(`/recurring/${id}`, data).then(r => r.data),
+  confirmRecurring: (id: number) =>
+    api.post<RecurringSeries>(`/recurring/${id}/confirm`).then(r => r.data),
+  ignoreRecurring: (id: number) =>
+    api.post<RecurringSeries>(`/recurring/${id}/ignore`).then(r => r.data),
+  deleteRecurring: (id: number) => api.delete(`/recurring/${id}`),
+  detectRecurring: () =>
+    api.post<{ detected: number }>('/recurring/detect').then(r => r.data),
+}
