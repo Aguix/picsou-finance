@@ -5,6 +5,27 @@ All notable changes to Picsou are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] — 2026-06-03
+
+Patch release: closes a session-bleed where, on a shared browser, logging in as a
+2FA-protected user could drop you onto a *different* (no-MFA) member's account.
+
+### Fixed
+
+- **Logging in as a 2FA user no longer lands you on someone else's account.** On a
+  shared browser still holding a leftover "Remember Me" cookie for a *no-MFA* account,
+  a 2FA user's login correctly stopped at the TOTP step and issued no session — so the
+  next request fell back on the lingering cookie and authenticated the *other* user.
+  `POST /api/auth/login` now severs any pre-existing session cookies the moment a
+  password is verified while the second factor is still pending, and drops a leftover
+  persistent ("Remember Me") cookie belonging to a different user when completing a
+  login without Remember Me. A trusted device's own cookie is preserved.
+- **The login path now resets per-user client state.** The cache and impersonation
+  reset that already ran on logout (1.0.4) now also runs the instant a login
+  establishes a session (non-MFA login and MFA verification), centralised in a single
+  `resetClientState` helper. This stops a freshly logged-in user from briefly seeing
+  the previous user's cached balance/history on a shared browser.
+
 ## [1.0.4] — 2026-06-03
 
 Patch release: fixes two issues hitting non-admin family members — a spurious 403

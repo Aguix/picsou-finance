@@ -32,7 +32,14 @@ Non-admin users always use their own memberId (override is ignored server-side, 
 
 ### Client-state isolation across the login boundary
 
-`profile-store` persists `activeMemberId` to **localStorage** (`picsou-profile`) and the TanStack Query cache holds user-agnostic keys (`['dashboard', range]`, `['accounts']`, …). On a **shared family browser** both survive a logout, so without an explicit reset the next person's login would carry the previous user's impersonation target and see their cached balance/history (staleTime is 60 s). To prevent this, `useLogin` (onSuccess) and `useLogout` (onSettled) both call `useProfileStore.getState().reset()` **and** `queryClient.clear()` (`features/auth/hooks.ts`). This is the authoritative client-side privacy boundary; the `?memberId` admin-gating and backend scoping are defense-in-depth.
+`profile-store` persists `activeMemberId` to **localStorage** (`picsou-profile`) and the TanStack Query cache holds user-agnostic keys (`['dashboard', range]`, `['accounts']`, …). On a **shared family browser** both survive a logout, so without an explicit reset the next person's login would carry the previous user's impersonation target and see their cached balance/history (staleTime is 60 s).
+
+A single helper, `resetClientState(queryClient)` in `lib/reset-client-state.ts`, calls `useProfileStore.getState().reset()` **and** `queryClient.clear()`. It runs on **every** auth-boundary crossing:
+
+- **logout** — `useLogout` (`onSettled`, `features/auth/hooks.ts`);
+- **a login that establishes a session** — the non-MFA branch of `useLoginWithRememberMe` and the post-verify branch of `useVerifyMfa` (`features/mfa/hooks.ts`), i.e. the exact moment the new identity is written to the auth store.
+
+It is deliberately **not** called on the `mfaRequired` branch — no session exists yet there (the user is mid-challenge). The reset is the authoritative client-side privacy boundary; the `?memberId` admin-gating and backend scoping are defense-in-depth. Its server-side complement — severing a *different* user's leftover cookies during login so they can't silently re-authenticate — lives in [mfa-and-remember-me.md](./mfa-and-remember-me.md#cross-identity-session-bleed-at-login).
 
 ### History endpoints reject foreign / unscoped accounts
 
@@ -189,7 +196,9 @@ Step 3 is critical: without it, the next request would fail because the old JWT 
 - `features/family/members.ts` — `selectSwitchableMembers()` (admin switcher excludes independent members)
 - `components/layout/AppSidebar.tsx` — profile switcher in dropdown
 - `lib/api-client.ts` — Axios interceptor adds `?memberId=X` only when an **admin** has a managed profile active
-- `features/auth/hooks.ts` — `useLogin`/`useLogout` reset profile-store + clear the Query cache (cross-session isolation)
+- `lib/reset-client-state.ts` — `resetClientState(queryClient)`: resets profile-store + clears the Query cache; the one shared auth-boundary reset
+- `features/auth/hooks.ts` — `useLogout` calls `resetClientState` (logout side)
+- `features/mfa/hooks.ts` — `useLoginWithRememberMe` / `useVerifyMfa` call `resetClientState` before writing the new identity (login side)
 - `pages/settings/FamilySettingsPage.tsx` — member management + sharing config UI
 - `pages/family/FamilyDashboardPage.tsx` — shared overview
 - `pages/activation/ActivationPage.tsx` — activation flow for new members
@@ -235,13 +244,14 @@ Admin clicks managed profile in sidebar dropdown
 - **Cannot impersonate an activated member**: `UserContext.getMemberIdOverride()` throws 403 when an admin's `?memberId=X` targets an activated (independent) member other than themselves. The sidebar hides them too (`selectSwitchableMembers`), but the backend is the authoritative guard — never rely on the frontend filter alone.
 - **Yahoo Finance null closes**: Yahoo can return `null` in historical price arrays for non-trading days. Must check `close == null` before unboxing to avoid NPE.
 - **Profile switch cache**: TanStack Query cache is global. Without `invalidateQueries()` on switch, the old member's data persists visually.
-- **Cross-user leak on a shared browser**: query keys are not scoped by user and `activeMemberId` is persisted to localStorage, so login/logout MUST `queryClient.clear()` + `useProfileStore.getState().reset()` (`features/auth/hooks.ts`). Otherwise the next person to log in on the same device briefly sees the previous user's balance/history (and, for an admin re-login, the stale `?memberId` returns another member's real data). Regression that prompted the fix: a member reported seeing "un solde et historique qui n'est pas du tout le sien" on first login.
+- **Cross-user leak on a shared browser**: query keys are not scoped by user and `activeMemberId` is persisted to localStorage, so every auth-boundary crossing MUST `queryClient.clear()` + `useProfileStore.getState().reset()` — centralised in `resetClientState` (`lib/reset-client-state.ts`), wired into `useLogout` (logout) and `useLoginWithRememberMe`/`useVerifyMfa` (login). Otherwise the next person to log in on the same device briefly sees the previous user's balance/history (and, for an admin re-login, the stale `?memberId` returns another member's real data). Regression that prompted the fix: a member reported seeing "un solde et historique qui n'est pas du tout le sien" on first login. A related **identity** bleed — entering one user's credentials but landing on *another* user's account — is the server-side cookie-severing case in [mfa-and-remember-me.md](./mfa-and-remember-me.md#cross-identity-session-bleed-at-login).
 
 ## Tests
 
 - `GoalServiceTest` — goal CRUD scoped by memberId
 - `HistoryServiceTest` — history scoped by memberId, incl. `buildHistory_rejectsAccountsOwnedByAnotherMember` and `buildHistory_rejectsNullMemberId`
 - `api-client.test.ts` (frontend) — `?memberId` is attached only for admins, never for a non-admin with a stale `activeMemberId`
+- `features/mfa/hooks.test.ts` (frontend) — login-side `resetClientState`: wipes the cache + impersonation target on a non-MFA login and on MFA verify, and performs **no** reset on the `mfaRequired` branch
 - `FamilyServiceTest` — username derivation, activation/reset, and **member deletion**:
   `deleteMember_withLogin_deletesUserBeforeMember` (Mockito `InOrder` guard for the
   `TransientObjectException` fix), `deleteMember_managedWithoutLogin_deletesOnlyMember`,
