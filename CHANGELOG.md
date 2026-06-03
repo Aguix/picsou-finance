@@ -5,6 +5,45 @@ All notable changes to Picsou are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] — 2026-06-04
+
+Patch release: renumbers the new `transaction.name` migration so it no longer
+collides with the 1.1.0 budget branch.
+
+### Changed
+
+- **The `transaction.name` migration moves from `V33` to `V36`.** `V33`–`V35`
+  are reserved by the 1.1.0 budgets branch (`budget_foundation`,
+  `budgets_envelopes`, `recurring`), so the migration introduced in 1.0.6
+  collided — a dev database on the budget timeline rejected it on a Flyway
+  checksum mismatch, and a future `main` ↔ `1.1.0` merge would have carried two
+  `V33` files. `V33__transaction_security_name.sql` is renamed to
+  `V36__transaction_security_name.sql` (the next free slot after the budget
+  migrations); the SQL is unchanged. Upgrade directly to 1.0.7 from ≤ 1.0.5 so
+  the column is only ever applied as `V36`.
+
+## [1.0.6] — 2026-06-03
+
+Patch release: manual investment entry accepts an ISIN, and positions gain a
+human-readable name instead of a bare ticker.
+
+### Added
+
+- **Enter a position by ISIN.** The "Ticker or ISIN" field on manual investment
+  entry now accepts a 12-character ISIN. `ManualTransactionService` resolves it
+  to a Yahoo ticker and display name via `OpenFigiIsinConverter` at write time,
+  so an ISIN entry and the equivalent ticker entry merge into a single position
+  and Yahoo pricing keeps working.
+- **Positions carry a first-class name.** A nullable `transaction.name` column
+  holds the human label, and `HoldingComputeService` names each position from the
+  most recent transaction that carries one — guarded so a nameless manual entry
+  never erases a bank-synced name. The raw ticker no longer leaks into the Name
+  column.
+
+### Database migrations
+
+- **V33** *(renumbered to `V36` in 1.0.7)* — nullable `transaction.name` column.
+
 ## [1.0.5] — 2026-06-03
 
 Patch release: closes a session-bleed where, on a shared browser, logging in as a
