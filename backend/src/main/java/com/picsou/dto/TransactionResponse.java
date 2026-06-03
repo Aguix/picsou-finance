@@ -19,6 +19,7 @@ public record TransactionResponse(
     boolean isManual,
     TransactionType txType,
     String ticker,
+    String name,
     BigDecimal quantity,
     BigDecimal pricePerUnit
 ) {
@@ -35,6 +36,7 @@ public record TransactionResponse(
             t.isManual(),
             t.getTxType(),
             t.getTicker(),
+            t.getName(),
             t.getQuantity(),
             t.getPricePerUnit()
         );
