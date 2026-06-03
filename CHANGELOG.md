@@ -5,6 +5,25 @@ All notable changes to Picsou are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] — 2026-06-03
+
+Patch release: fixes two issues hitting non-admin family members — a spurious 403
+on first login and seeing another member's financial data on a shared browser.
+
+### Fixed
+
+- **A non-admin member no longer gets a 403 / `/error/403` redirect on login.** The
+  sidebar called the admin-only `GET /api/family/members` for every user; the global
+  403 interceptor then bounced the whole app to the error page. The call is now gated
+  on `isAdmin`, so non-admins never hit the admin-only endpoint.
+- **A member no longer sees another member's balance and net-worth history.** On a
+  shared browser the persisted impersonation target (`activeMemberId`, in localStorage)
+  and the user-agnostic TanStack Query cache survived logout, so the next person's first
+  login showed the previous user's data. Login and logout now reset the profile store
+  and clear the query cache. As defense-in-depth, the client only sends `?memberId` for
+  admins, and `HistoryService` enforces account ownership unconditionally (a `null`
+  member id is now rejected instead of bypassing the check).
+
 ## [1.0.3] — 2026-06-03
 
 Patch release: clearer Enable Banking setup, an honest admin configuration view,
