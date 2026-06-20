@@ -256,6 +256,7 @@ export interface BoursoAuthInitResponse {
 }
 
 export interface FinaryAccountPreview {
+  finaryId: string
   finaryName: string
   finaryInstitution: string
   finaryCategory: string
@@ -291,6 +292,7 @@ export interface NewAccountDetails {
 }
 
 export interface FinaryAccountMapping {
+  finaryId: string
   finaryName: string
   finaryCategory: string
   action: FinaryMappingAction
@@ -337,7 +339,6 @@ export interface Transaction {
   isManual: boolean
   txType: 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | null
   ticker: string | null
-  name: string | null
   quantity: number | null
   pricePerUnit: number | null
 }
@@ -348,7 +349,6 @@ export interface TransactionRequest {
   amount: number        // signed: positive=deposit, negative=withdrawal
   txType: 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | null
   ticker?: string
-  name?: string
   quantity?: number
   pricePerUnit?: number
   currency?: string
