@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Admin password reset now invalidates the member's existing sessions
+  (CWE-613/640).** `POST /api/auth/activate/{token}` is the shared sink for
+  new-member activation, admin-initiated password reset
+  (`FamilyService.resetPasswordToken`) and admin-recovery completion. It set the
+  new password hash but — unlike self-service `change-password` — never bumped
+  `tokenVersion` or revoked persistent sessions, so after an admin reset a
+  (possibly compromised) member's old access/refresh JWTs and Remember-Me cookies
+  stayed valid. `activate()` now bumps `tokenVersion` and calls
+  `PersistentSessionService.revokeAllForUser`, mirroring `change-password`.
+- **Closed a login timing oracle for pending-activation members (CWE-208).** An
+  invited-but-not-activated member has a blank `password_hash`, and
+  `passwordEncoder.matches(pw, "")` short-circuits without running bcrypt — making
+  that path measurably faster than the unknown-user and wrong-password paths and
+  letting an attacker tell a "pending-activation profile" apart from "no such
+  user". `POST /api/auth/login` now runs the same dummy-hash bcrypt round when the
+  stored hash is blank and fails exactly like a wrong password, so all three
+  failing paths are timing-indistinguishable. Behavior for activated users is
+  unchanged.
+
 ### Fixed
 
 - **Finary loan accounts are now imported (issue #11).** Loan/mortgage accounts

@@ -123,7 +123,20 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
         }
 
-        if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
+        // A managed member that has only been issued an activation link still has a
+        // blank password hash (""). passwordEncoder.matches(pw, "") returns false
+        // *immediately* without running bcrypt, so this path would be measurably
+        // faster than both the unknown-user and the wrong-password paths — a timing
+        // oracle that lets an attacker distinguish "pending-activation profile" from
+        // "no such user" (CWE-208). Run the same dummy-hash bcrypt round and fail
+        // exactly like a wrong password so all three failing paths cost the same.
+        String storedHash = user.getPasswordHash();
+        if (storedHash == null || storedHash.isBlank()) {
+            boolean ignored = passwordEncoder.matches(req.password(), dummyPasswordHash);
+            throw new BadCredentialsException("Invalid credentials");
+        }
+
+        if (!passwordEncoder.matches(req.password(), storedHash)) {
             throw new BadCredentialsException("Invalid credentials");
         }
 
@@ -365,7 +378,18 @@ public class AuthController {
         user.setActivationTokenExpires(null);
         user.setActivated(true);
         user.setAcknowledgedWarning(true);
+        // This endpoint is the shared sink for new-member activation AND
+        // admin-initiated password resets (FamilyService.resetPasswordToken issues
+        // the token; the member then activates here) AND admin-recovery completion.
+        // A reset may be a response to a compromise, so — exactly like the
+        // self-service change-password flow — invalidate every outstanding session:
+        // bump tokenVersion to revoke all access/refresh JWTs, and wipe the user's
+        // Remember-Me persistent sessions. Without this, an attacker's pre-existing
+        // tokens/cookies would survive an admin password reset (CWE-613/640).
+        user.setTokenVersion(user.getTokenVersion() + 1);
         userRepository.save(user);
+
+        persistentSessionService.revokeAllForUser(user.getId());
 
         if (user.getRole() == UserRole.ADMIN) {
             auditService.record("admin.recovery.completed", user.getUsername(), httpReq, null);
