@@ -7,6 +7,7 @@ import com.picsou.exception.SyncException;
 import com.picsou.exception.TotpRequiredException;
 import com.picsou.finary.client.FinaryApiClient;
 import com.picsou.finary.dto.FinaryAccountDto;
+import com.picsou.finary.dto.FinaryLoanDto;
 import com.picsou.finary.dto.FinaryTransactionDto;
 import com.picsou.model.Account;
 import com.picsou.model.FamilyMember;
@@ -43,6 +44,11 @@ public class FinaryApiSyncService {
         "checkings", "savings", "investments", "real_estates", "cryptos",
         "fonds_euro", "commodities", "credits", "other_assets", "startups"
     );
+    /**
+     * Synthetic category for loan/mortgage accounts. Loans are not part of the portfolio
+     * categories above; they come from the dedicated {@code /loans} endpoint (issue #11).
+     */
+    private static final String LOANS_CATEGORY = "loans";
     private static final List<String> TRANSACTION_CATEGORIES = List.of(
         "checkings", "savings", "investments", "credits"
     );
@@ -159,6 +165,18 @@ public class FinaryApiSyncService {
                     log.error("Failed to fetch accounts from category {}: {}", category, e.getMessage());
                     throw new SyncException("Failed to fetch accounts from " + category, e);
                 }
+            }
+
+            // Loans live on a dedicated endpoint, not in the portfolio categories above.
+            try {
+                List<FinaryLoanDto> loans = finaryApiClient.fetchLoans(jwt);
+                log.info("Fetched {} entries from loans endpoint", loans.size());
+                for (FinaryLoanDto loan : loans) {
+                    allAccounts.add(new CategorizedFinaryAccount(LOANS_CATEGORY, toLoanAccountDto(loan)));
+                }
+            } catch (Exception e) {
+                log.error("Failed to fetch loans: {}", e.getMessage());
+                throw new SyncException("Failed to fetch loans", e);
             }
 
             // Fetch all transactions across categories
@@ -452,6 +470,31 @@ public class FinaryApiSyncService {
 
     private String buildAccountKey(String category, String finaryId) {
         return category + "::" + finaryId;
+    }
+
+    /**
+     * Adapt a Finary loan entry to the common {@link FinaryAccountDto} so loans flow through
+     * the existing preview/execute pipeline (mapping, auto-mapping, account creation).
+     *
+     * <p>A loan is a liability, so the outstanding amount is stored as a NEGATIVE balance,
+     * mirroring how LOAN accounts are persisted elsewhere ({@code liveBalanceEur} returns a
+     * negative remaining capital). Only the outstanding balance is carried over; the original
+     * principal, interest rate and amortization details are not exposed by the loans payload,
+     * so no {@code Debt} is created here — the user can add those later for the amortization view.
+     */
+    private FinaryAccountDto toLoanAccountDto(FinaryLoanDto loan) {
+        Double outstanding = loan.outstandingAmount();
+        Double balance = outstanding != null ? -outstanding : null;
+        return new FinaryAccountDto(
+            loan.id(),
+            loan.name(),
+            null,
+            balance,
+            balance,
+            loan.institution(),
+            loan.currency(),
+            false
+        );
     }
 
     /**

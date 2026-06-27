@@ -5,6 +5,19 @@ All notable changes to Picsou are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Finary loan accounts are now imported (issue #11).** Loan/mortgage accounts
+  are exposed by Finary through a dedicated `/loans` endpoint, not the portfolio
+  `credits`/`credit_accounts` categories that the API sync queried — so they
+  never appeared in the import preview and were never synced. The sync now also
+  calls `FinaryApiClient.fetchLoans()` and adapts each entry to the common
+  account shape under a synthetic `loans` category, so loans flow through the
+  normal preview/mapping/execute pipeline and map to `AccountType.LOAN`. The
+  outstanding amount is stored as a negative balance (a loan is a liability).
+
 ## [1.0.7] — 2026-06-04
 
 Patch release: renumbers the new `transaction.name` migration so it no longer
