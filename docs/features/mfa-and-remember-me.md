@@ -394,6 +394,7 @@ All UIs are mobile-responsive (per repo convention).
 | Brute-force TOTP | Rate limit 5/15 min per uid + ±1 tolerance window only |
 | Brute-force recovery codes | bcrypt cost 12 (~250 ms/check) + same rate limit |
 | User reactivates after admin force-disable | Admin disable wipes persistent sessions; user must log in fresh and re-enroll |
+| Username enumeration via login timing (CWE-208, GHSA-ww5m-pxgq-8qq6) | Unknown-user path runs a decoy bcrypt `matches()` so it costs the same as a wrong-password attempt — see [login-timing-attack.md](./login-timing-attack.md) |
 
 ## Gotchas / Pitfalls
 
