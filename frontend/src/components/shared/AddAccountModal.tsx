@@ -261,6 +261,23 @@ function SuccessState({ message }: { message: string }) {
 // Wizard: Banques
 // ---------------------------------------------------------------------------
 
+function InstitutionLogo({ logoUrl }: { logoUrl?: string | null }) {
+  const [failed, setFailed] = useState(false)
+
+  if (!logoUrl || failed) {
+    return <Landmark className="size-4 shrink-0 text-muted-foreground" />
+  }
+
+  return (
+    <img
+      src={logoUrl}
+      alt=""
+      className="size-4 shrink-0 rounded-sm object-contain"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
 function BankWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
   const { t } = useTranslation()
   const [searchQuery, setSearchQuery] = useState('')
@@ -271,10 +288,10 @@ function BankWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
 
   const searchEnabled = searchQuery.trim().length >= 2
 
-  function handleConnect(institutionId: string, institutionName: string) {
+  function handleConnect(institutionId: string, institutionName: string, logoUrl?: string | null) {
     setError(null)
     initiateMutation.mutate(
-      { institutionId, institutionName },
+      { institutionId, institutionName, logoUrl },
       {
         onSuccess: (data) => {
           window.location.href = data.authLink
@@ -319,13 +336,13 @@ function BankWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
             {institutions.map((inst) => (
               <div key={inst.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
                 <div className="flex items-center gap-2">
-                  <Landmark className="size-4 text-muted-foreground" />
+                  <InstitutionLogo logoUrl={inst.logoUrl} />
                   <span className="text-sm font-medium">{inst.name}</span>
                   <span className="text-xs text-muted-foreground">{inst.country}</span>
                 </div>
                 <Button
                   size="sm"
-                  onClick={() => handleConnect(inst.id, inst.name)}
+                  onClick={() => handleConnect(inst.id, inst.name, inst.logoUrl)}
                   disabled={initiateMutation.isPending}
                 >
                   {t('sync.banks.connect')}

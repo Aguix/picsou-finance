@@ -34,6 +34,9 @@ public class Requisition extends AuditableEntity {
     @Column(name = "institution_name", length = 200)
     private String institutionName;
 
+    @Column(name = "logo_url", length = 500)
+    private String logoUrl;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, columnDefinition = "requisition_status")
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.NAMED_ENUM)

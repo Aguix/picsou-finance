@@ -53,8 +53,15 @@ export function useSearchInstitutions(query: string) {
 export function useInitiateBankSync() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ institutionId, institutionName }: { institutionId: string; institutionName: string }) =>
-      bankSyncApi.initiate(institutionId, institutionName),
+    mutationFn: ({
+      institutionId,
+      institutionName,
+      logoUrl,
+    }: {
+      institutionId: string
+      institutionName: string
+      logoUrl?: string | null
+    }) => bankSyncApi.initiate(institutionId, institutionName, logoUrl),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: syncKeys.banks() })
       queryClient.invalidateQueries({ queryKey: ['accounts'] })

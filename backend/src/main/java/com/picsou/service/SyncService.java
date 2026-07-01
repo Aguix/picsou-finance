@@ -45,7 +45,7 @@ public class SyncService {
     }
 
     /** Step 1: Initiate Enable Banking bank connection for a given institution. */
-    public InitiateResponse initiateConnection(String institutionId, String institutionName, Long memberId) {
+    public InitiateResponse initiateConnection(String institutionId, String institutionName, String logoUrl, Long memberId) {
         FamilyMember member = familyMemberRepository.findById(memberId)
             .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));
 
@@ -56,6 +56,7 @@ public class SyncService {
             .requisitionId(result.requisitionId())
             .institutionId(institutionId)
             .institutionName(institutionName)
+            .logoUrl(logoUrl)
             .status(RequisitionStatus.CREATED)
             .authLink(result.authLink())
             .build();
@@ -103,7 +104,7 @@ public class SyncService {
         FamilyMember member = requisition.getMember();
 
         List<AccountResponse> responses = accountDataList.stream()
-            .map(data -> upsertAccount(data, requisition.getInstitutionName(), member))
+            .map(data -> upsertAccount(data, requisition, member))
             .flatMap(Optional::stream)
             .toList();
 
@@ -145,6 +146,7 @@ public class SyncService {
             .orElseThrow(() -> new ResourceNotFoundException("Requisition not found"));
 
         log.info("Retrying sync for {} (session={})", req.getInstitutionName(), req.getRequisitionId());
+        ensureLogoUrl(req);
 
         List<BankConnectorPort.AccountData> accountDataList;
         try {
@@ -158,7 +160,7 @@ public class SyncService {
         FamilyMember member = req.getMember();
 
         List<AccountResponse> responses = accountDataList.stream()
-            .map(data -> upsertAccount(data, req.getInstitutionName(), member))
+            .map(data -> upsertAccount(data, req, member))
             .flatMap(Optional::stream)
             .toList();
 
@@ -197,9 +199,10 @@ public class SyncService {
         List<Requisition> linked = requisitionRepository.findByStatusAndMemberIdOrderByCreatedAtDesc(RequisitionStatus.LINKED, memberId);
         for (Requisition req : linked) {
             try {
+                ensureLogoUrl(req);
                 List<BankConnectorPort.AccountData> accounts = bankConnector.fetchBalances(req.getRequisitionId());
                 FamilyMember member = req.getMember();
-                accounts.forEach(data -> upsertAccount(data, req.getInstitutionName(), member));
+                accounts.forEach(data -> upsertAccount(data, req, member));
                 req.setLastSyncedAt(Instant.now());
                 requisitionRepository.save(req);
                 log.info("Auto-resync OK for {}: {} accounts", req.getInstitutionName(), accounts.size());
@@ -222,7 +225,7 @@ public class SyncService {
 
         List<BankConnectorPort.AccountData> accountDataList = bankConnector.fetchBalances(req.getRequisitionId());
         List<AccountResponse> responses = accountDataList.stream()
-            .map(data -> upsertAccount(data, req.getInstitutionName(), member))
+            .map(data -> upsertAccount(data, req, member))
             .flatMap(Optional::stream)
             .toList();
         req.setLastSyncedAt(Instant.now());
@@ -234,11 +237,29 @@ public class SyncService {
     // --- Private ---
 
     /**
+     * Best-effort backfill for requisitions created before bank logos were captured:
+     * re-searches institutions by name and stores the match's logo, if any. Failures
+     * are swallowed — the requisition simply stays without a logo and is retried next sync.
+     */
+    private void ensureLogoUrl(Requisition req) {
+        if (req.getLogoUrl() != null) return;
+        try {
+            bankConnector.searchInstitutions(req.getInstitutionName(), null).stream()
+                .filter(i -> i.id().equals(req.getInstitutionId()) || i.name().equalsIgnoreCase(req.getInstitutionName()))
+                .findFirst()
+                .map(BankConnectorPort.InstitutionData::logoUrl)
+                .ifPresent(req::setLogoUrl);
+        } catch (Exception ex) {
+            log.warn("Could not backfill logo for requisition {} ({}): {}", req.getId(), req.getInstitutionName(), ex.getMessage());
+        }
+    }
+
+    /**
      * Returns {@link Optional#empty()} when the matching account was soft-deleted
      * by the user — we must not resurrect it on the next sync. The bank may keep
      * returning the same external id forever; that's not consent to bring it back.
      */
-    private Optional<AccountResponse> upsertAccount(BankConnectorPort.AccountData data, String provider, FamilyMember member) {
+    private Optional<AccountResponse> upsertAccount(BankConnectorPort.AccountData data, Requisition requisition, FamilyMember member) {
         Optional<Account> existing = accountRepository
             .findByExternalAccountIdAndMemberId(data.externalId(), member.getId());
 
@@ -254,18 +275,22 @@ public class SyncService {
             account = existing.get();
             account.setCurrentBalance(data.balance());
             account.setLastSyncedAt(Instant.now());
+            if (account.getLogoUrl() == null && requisition.getLogoUrl() != null) {
+                account.setLogoUrl(requisition.getLogoUrl());
+            }
         } else {
             account = Account.builder()
                 .member(member)
                 .name(data.name() != null ? data.name() : "Account")
                 .type(AccountType.CHECKING)
-                .provider(provider)
+                .provider(requisition.getInstitutionName())
                 .currency(data.currency() != null ? data.currency() : "EUR")
                 .currentBalance(data.balance())
                 .lastSyncedAt(Instant.now())
                 .externalAccountId(data.externalId())
                 .isManual(false)
                 .color("#6366f1")
+                .logoUrl(requisition.getLogoUrl())
                 .build();
         }
 
