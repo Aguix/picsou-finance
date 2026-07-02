@@ -93,6 +93,16 @@ public class OpenFigiIsinConverter {
         "NA", "FP", "GY", "GR", "GF", "LN", "IM", "BR"
     );
 
+    /**
+     * Trade Republic internal ISINs for on-platform crypto products (e.g. Bitcoin
+     * held directly, not via an ETC). These are not real market ISINs, so OpenFIGI
+     * never resolves them and {@code name} stays null downstream. See GH issue #22.
+     */
+    private static final Map<String, String> TR_CRYPTO_ISIN_NAMES = Map.of(
+        "XF000BTC0017", "Bitcoin",
+        "XF000ETH0017", "Ethereum"
+    );
+
     /** ISIN country prefix → preferred exchange code for that market. */
     private static final Map<String, String> HOME_EXCHANGE = Map.ofEntries(
         Map.entry("US", "US"),  Map.entry("HK", "HK"),  Map.entry("JP", "JT"),
@@ -126,6 +136,11 @@ public class OpenFigiIsinConverter {
     public TickerResult resolve(String isin) {
         if (isin == null || isin.isBlank()) {
             return new TickerResult(isin, null);
+        }
+
+        String trCryptoName = TR_CRYPTO_ISIN_NAMES.get(isin.trim().toUpperCase());
+        if (trCryptoName != null) {
+            return new TickerResult(isin, trCryptoName);
         }
 
         // Check cache first

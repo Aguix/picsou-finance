@@ -252,8 +252,13 @@ public class TradeRepublicAdapter implements TradeRepublicPort {
                                                     positionsByIsin.put(isin, pos);
                                                     int tid = subIdCounter.incrementAndGet();
                                                     tickerSubToIsin.put(tid, isin);
+                                                    // compactPortfolioByType positions carry no exchangeId
+                                                    // (unlike the legacy compactPortfolio payload), so this
+                                                    // almost always falls through to the default. LSX (Lang &
+                                                    // Schwarz Exchange) is TR's actual home exchange for pricing
+                                                    // — see GH issue #23 (all ticker subs were FORBIDDEN with TRX).
                                                     String exchangeId = pos.path("exchangeId").asText("");
-                                                    String tickerId = isin + (exchangeId.isEmpty() ? ".TRX" : "." + exchangeId);
+                                                    String tickerId = isin + (exchangeId.isEmpty() ? ".LSX" : "." + exchangeId);
                                                     tickerMsgs.add(subWithId(tid, "ticker",
                                                             tickerId, sessionToken));
                                                 }

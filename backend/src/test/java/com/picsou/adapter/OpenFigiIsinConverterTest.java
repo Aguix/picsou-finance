@@ -37,4 +37,16 @@ class OpenFigiIsinConverterTest {
         assertThat(OpenFigiIsinConverter.isIsin("")).isFalse();
         assertThat(OpenFigiIsinConverter.isIsin("   ")).isFalse();
     }
+
+    @Test
+    void resolve_returnsLocalNameForTradeRepublicCryptoIsins() {
+        OpenFigiIsinConverter converter = new OpenFigiIsinConverter();
+
+        OpenFigiIsinConverter.TickerResult btc = converter.resolve("XF000BTC0017");
+        assertThat(btc.ticker()).isEqualTo("XF000BTC0017");
+        assertThat(btc.name()).isEqualTo("Bitcoin");
+
+        OpenFigiIsinConverter.TickerResult eth = converter.resolve("XF000ETH0017");
+        assertThat(eth.name()).isEqualTo("Ethereum");
+    }
 }
