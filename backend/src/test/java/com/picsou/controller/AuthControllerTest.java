@@ -35,6 +35,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -490,5 +491,47 @@ class AuthControllerTest {
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(cookieWriter).setAccessAndRefresh(httpRes, "acc4", "ref4", true);
         verify(cookieWriter, never()).clearAuthCookies(any());
+    }
+
+    @Test
+    void refresh_returns401_andClears_whenRefreshTokenBoundToRevokedSeries() {
+        // "Log out this device": the persistent session was revoked, but the device still
+        // holds a cryptographically-valid, series-bound refresh_token. It must be cut -- and
+        // must NOT fall through to a re-mint from the still-valid access-token principal.
+        AppUser active = user(true);
+        UUID revokedSeries = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        httpReq.setCookies(new Cookie("refresh_token", "rt"));
+        Claims claims = org.mockito.Mockito.mock(Claims.class);
+        when(jwtUtil.validateAndParse("rt")).thenReturn(claims);
+        when(jwtUtil.isRefreshToken(claims)).thenReturn(true);
+        when(claims.getSubject()).thenReturn("alice");
+        when(userRepository.findByUsernameWithMember("alice")).thenReturn(Optional.of(active));
+        when(jwtUtil.getTokenVersion(claims)).thenReturn(3L);
+        when(jwtUtil.getSeriesId(claims)).thenReturn(revokedSeries);
+        when(persistentSessionService.isSeriesActive(revokedSeries)).thenReturn(false);
+
+        ResponseEntity<?> res = controller.refresh(active, httpReq, httpRes);
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        verify(cookieWriter).clearAuthCookies(httpRes);
+        verify(jwtUtil, never()).generateAccessToken(any());
+    }
+
+    @Test
+    void refresh_returns401_whenPersistentCookieSeriesRevoked_evenWithValidAccessPrincipal() {
+        // The device presents a persistent_token whose series was revoked ("log out
+        // everywhere else"). Even a still-valid access-token principal on the same request
+        // must not re-establish the session -- the front guard fires before any minting.
+        AppUser active = user(true);
+        UUID revokedSeries = UUID.fromString("dddddddd-eeee-ffff-0000-111111111111");
+        httpReq.setCookies(new Cookie(AuthCookieWriter.PERSISTENT_COOKIE, "revoked:tok"));
+        when(persistentSessionService.seriesFromCookie("revoked:tok")).thenReturn(Optional.of(revokedSeries));
+        when(persistentSessionService.isSeriesActive(revokedSeries)).thenReturn(false);
+
+        ResponseEntity<?> res = controller.refresh(active, httpReq, httpRes);
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        verify(cookieWriter).clearAuthCookies(httpRes);
+        verify(jwtUtil, never()).generateAccessToken(any());
     }
 }

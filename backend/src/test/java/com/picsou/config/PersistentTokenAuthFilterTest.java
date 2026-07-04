@@ -154,7 +154,9 @@ class PersistentTokenAuthFilterTest {
         when(userRepository.findByIdWithMember(7L)).thenReturn(Optional.of(user));
         when(mfaService.isEnabled(user)).thenReturn(false);
         when(jwtUtil.generateAccessToken(user)).thenReturn("new-access");
-        when(jwtUtil.generateRefreshToken(user)).thenReturn("new-refresh");
+        // Refresh is now bound to the rotated session's series (sid), so it is minted via
+        // the (AppUser, UUID) overload rather than the bare one.
+        when(jwtUtil.generateRefreshToken(eq(user), any())).thenReturn("new-refresh");
 
         filter.doFilter(request, response, chain);
 
@@ -173,7 +175,7 @@ class PersistentTokenAuthFilterTest {
         when(userRepository.findByIdWithMember(7L)).thenReturn(Optional.of(user));
         when(mfaService.isEnabled(user)).thenReturn(true);
         when(jwtUtil.generateAccessToken(user)).thenReturn("a");
-        when(jwtUtil.generateRefreshToken(user)).thenReturn("r");
+        when(jwtUtil.generateRefreshToken(eq(user), any())).thenReturn("r");
 
         filter.doFilter(request, response, chain);
 

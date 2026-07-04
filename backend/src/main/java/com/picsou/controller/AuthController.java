@@ -33,6 +33,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -242,6 +244,17 @@ public class AuthController {
     ) {
         String refreshToken = extractCookie(httpReq, "refresh_token");
 
+        // If the request still carries a persistent_token whose series has been revoked
+        // ("log out this device" / "log out everywhere else") or has passed its 90-day cap,
+        // refuse decisively -- a still-valid access_token or refresh_token on the SAME device
+        // must not silently re-establish a session the user has explicitly killed.
+        UUID presentedSeries = currentSeriesId(httpReq).orElse(null);
+        if (presentedSeries != null && !persistentSessionService.isSeriesActive(presentedSeries)) {
+            clearTokenCookies(httpRes);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Session revoked"));
+        }
+
         if (refreshToken != null) {
             try {
                 var claims = jwtUtil.validateAndParse(refreshToken);
@@ -251,10 +264,21 @@ public class AuthController {
                     // change / recovery), or the account has since been deactivated.
                     Long tv = jwtUtil.getTokenVersion(claims);
                     if (user != null && tv != null && tv == user.getTokenVersion() && user.isActivated()) {
+                        // A refresh_token bound to a "Remember Me" series (sid) is only good
+                        // while that series is live. Revoking the device breaks the chain even
+                        // though the JWT itself hasn't expired. Decisive 401 -- do NOT fall
+                        // through to the access-principal re-mint below, which would re-establish
+                        // it from a still-valid access_token on the same device.
+                        UUID boundSeries = jwtUtil.getSeriesId(claims);
+                        if (boundSeries != null && !persistentSessionService.isSeriesActive(boundSeries)) {
+                            clearTokenCookies(httpRes);
+                            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Session revoked"));
+                        }
                         boolean persistent = isPersistentDevice(httpReq, user);
                         setTokenCookies(httpRes,
                             jwtUtil.generateAccessToken(user),
-                            jwtUtil.generateRefreshToken(user), // rotation
+                            rotatedRefreshToken(user, persistent, seriesToBind(httpReq, boundSeries)),
                             persistent);
                         return ResponseEntity.ok(userPayload(user));
                     }
@@ -276,7 +300,7 @@ public class AuthController {
             boolean persistent = isPersistentDevice(httpReq, persistentPrincipal);
             setTokenCookies(httpRes,
                 jwtUtil.generateAccessToken(persistentPrincipal),
-                jwtUtil.generateRefreshToken(persistentPrincipal),
+                rotatedRefreshToken(persistentPrincipal, persistent, seriesToBind(httpReq, null)),
                 persistent);
             return ResponseEntity.ok(userPayload(persistentPrincipal));
         }
@@ -326,7 +350,7 @@ public class AuthController {
         user.setUsername(newUsername);
         userRepository.save(user);
         String newAccess = jwtUtil.generateAccessToken(user);
-        String newRefresh = jwtUtil.generateRefreshToken(user);
+        String newRefresh = rotatedRefreshToken(user, persistent, seriesToBind(httpReq, null));
         setTokenCookies(httpRes, newAccess, newRefresh, persistent);
         return ResponseEntity.ok(Map.of("username", newUsername));
     }
@@ -428,11 +452,6 @@ public class AuthController {
         HttpServletRequest httpReq,
         HttpServletResponse httpRes
     ) {
-        cookieWriter.setAccessAndRefresh(httpRes,
-            jwtUtil.generateAccessToken(user),
-            jwtUtil.generateRefreshToken(user),
-            issuePersistent);
-
         if (issuePersistent) {
             PersistentSessionService.IssueResult issued = persistentSessionService.issue(
                 user,
@@ -441,12 +460,22 @@ public class AuthController {
                 getClientIp(httpReq)
             );
             PersistentSession session = issued.session();
+            // Bind the refresh token to the freshly-issued series (sid) so revoking this
+            // device later cuts its refresh chain -- see /auth/refresh.
+            cookieWriter.setAccessAndRefresh(httpRes,
+                jwtUtil.generateAccessToken(user),
+                jwtUtil.generateRefreshToken(user, session.getSeriesId()),
+                true);
             long secondsUntilExpiry = Math.max(
                 ChronoUnit.SECONDS.between(Instant.now(), session.getExpiresAt()),
                 0
             );
             cookieWriter.setPersistent(httpRes, issued.cookieValue(), secondsUntilExpiry);
         } else {
+            cookieWriter.setAccessAndRefresh(httpRes,
+                jwtUtil.generateAccessToken(user),
+                jwtUtil.generateRefreshToken(user),
+                false);
             // Not remembering this device. If a "Remember Me" cookie from a DIFFERENT
             // identity is still on this browser (shared/reused machine), drop it so it
             // can't silently re-mint that other user's session via the persistent-token
@@ -481,6 +510,30 @@ public class AuthController {
         String cookie = extractCookie(httpReq, AuthCookieWriter.PERSISTENT_COOKIE);
         if (cookie == null || cookie.isBlank()) return false;
         return persistentSessionService.ownerUserId(cookie).filter(id -> id.equals(user.getId())).isPresent();
+    }
+
+    /**
+     * A rotated refresh token that keeps its "Remember Me" series binding: bound to
+     * {@code series} (sid claim) when this is a persistent device with a known series,
+     * otherwise a plain session-scoped token. Falling back to the unbound overload when
+     * there is no series keeps a non-"Remember Me" rotation identical to before.
+     */
+    private String rotatedRefreshToken(AppUser user, boolean persistent, UUID series) {
+        return persistent && series != null
+            ? jwtUtil.generateRefreshToken(user, series)
+            : jwtUtil.generateRefreshToken(user);
+    }
+
+    /** The series to bind a rotated refresh token to: the token's own binding wins, else the persistent_token cookie's series. */
+    private UUID seriesToBind(HttpServletRequest httpReq, UUID boundSeries) {
+        return boundSeries != null ? boundSeries : currentSeriesId(httpReq).orElse(null);
+    }
+
+    /** The persistent-session series id carried by this request's persistent_token cookie, if any. */
+    private Optional<UUID> currentSeriesId(HttpServletRequest httpReq) {
+        String cookie = extractCookie(httpReq, AuthCookieWriter.PERSISTENT_COOKIE);
+        if (cookie == null || cookie.isBlank()) return Optional.empty();
+        return persistentSessionService.seriesFromCookie(cookie);
     }
 
     private void clearTokenCookies(HttpServletResponse response) {
