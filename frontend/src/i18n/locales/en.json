@@ -36,12 +36,32 @@
     "goals": "Goals",
     "goals.desc": "Track your savings",
     "sync": "Sync",
+    "sync.desc": "Account import & sync",
     "settings": "Settings",
     "settings.desc": "Preferences & account",
     "account": "My account",
     "logout": "Logout",
     "admin": "Administration",
     "admin.desc": "Instance settings"
+  },
+  "crypto": {
+    "surtitle": "Portfolio",
+    "title": "My crypto",
+    "consolidatedTitle": "All platforms & wallets",
+    "globalView": "Global view",
+    "accountTitle": "{{name}} — breakdown by program",
+    "empty": {
+      "title": "No crypto yet",
+      "desc": "Import a CSV export (Crypto.com, Kraken, Binance, Bybit, Bitstack, Ledger…), connect an exchange or a wallet to see your consolidated crypto here.",
+      "action": "Add a crypto source"
+    },
+    "emptyAccount": {
+      "title": "No data for this account",
+      "desc": "This account has no imported crypto positions or transactions yet."
+    }
+  },
+  "cryptoStats": {
+    "title": "Crypto statistics"
   },
   "auth": {
     "login": "Sign in",
@@ -442,6 +462,30 @@
       "deleteConnectionConfirm": "Remove stored Finary credentials? Accounts already imported will be kept.",
       "newAccounts": "New accounts detected",
       "allAccountsMapped": "All accounts already mapped, syncing..."
+    },
+    "crypto": {
+      "title": "Crypto import (CSV)",
+      "intro": "Drop your exchange or wallet CSV export — the format is detected automatically.",
+      "supported": "Supported formats",
+      "choose": "Choose a CSV file",
+      "detected": "Detected in the file",
+      "transactions": "Transactions",
+      "buys": "Buys",
+      "rewards": "Rewards",
+      "coins": "Coins",
+      "period": "Period",
+      "totalRewards": "Total rewards",
+      "unvalued": "{{count}} row(s) carry no euro value in the CSV — they will be valued at import time from price history.",
+      "unknown": "{{count}} row(s) of unknown type will be imported without affecting positions.",
+      "target": "Target account",
+      "createNew": "New account",
+      "oneAccountPerSource": "Tip: one account per exchange/wallet — re-importing replaces the imported transactions of the target account (manual entries are kept).",
+      "accountName": "Account name",
+      "import": "Import",
+      "done": "Import complete",
+      "doneDetail": "{{tx}} transactions · {{holdings}} coins",
+      "viewStats": "View statistics",
+      "importAnother": "Import another file"
     },
     "all": {
       "title": "Sync accounts",

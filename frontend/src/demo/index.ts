@@ -215,6 +215,24 @@ handlers.set(key('GET', '/crypto/exchange/status'), () => mockExchangeStatuses)
 // Crypto wallet
 handlers.set(key('GET', '/crypto/wallet'), () => mockWalletStatuses)
 
+// Consolidated crypto stats (no transaction-backed crypto in demo data)
+handlers.set(key('GET', '/crypto/stats'), () => ({
+  assets: [],
+  totals: { totalInvestedEur: 0, totalRewardsEur: 0, currentValueEur: 0, rewardsByKindEur: {} },
+}))
+
+// Supported crypto CSV import formats
+handlers.set(key('GET', '/crypto/sources'), () => [
+  { id: 'cryptocom_app', label: 'Crypto.com App' },
+  { id: 'cryptocom_exchange', label: 'Crypto.com Exchange' },
+  { id: 'kraken', label: 'Kraken' },
+  { id: 'binance', label: 'Binance' },
+  { id: 'bybit', label: 'Bybit' },
+  { id: 'bitstack', label: 'Bitstack' },
+  { id: 'ledger_live', label: 'Ledger Live' },
+  { id: 'generic', label: 'CSV générique' },
+])
+
 // Sync - initiate
 handlers.set(key('POST', '/sync/initiate'), () => ({
   requisitionId: 'demo-req-' + Date.now(),

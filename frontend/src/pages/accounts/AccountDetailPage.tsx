@@ -10,6 +10,7 @@ import { useHistory } from '@/features/history/hooks'
 import { BalanceHistoryChart } from '@/components/shared/BalanceHistoryChart'
 import { NetWorthChart } from '@/components/shared/NetWorthChart'
 import { HoldingsTable } from '@/components/shared/HoldingsTable'
+import { CryptoStatsSection } from '@/components/shared/CryptoStatsSection'
 import { TransactionsList } from '@/components/shared/TransactionsList'
 import { AddTransactionModal } from '@/components/shared/AddTransactionModal'
 import { EditHoldingModal } from '@/components/shared/EditHoldingModal'
@@ -56,6 +57,7 @@ export function AccountDetailPage() {
   const chartData = (history ?? []).map(s => ({ date: s.date, balance: s.balance }))
   const isLoan = account?.type === 'LOAN'
   const showHoldings = account ? HOLDING_ACCOUNT_TYPES.includes(account.type) : false
+  const isCrypto = account?.type === 'CRYPTO'
   const recentSnapshots = [...(history ?? [])].reverse().slice(0, 10)
 
   // Live value from holdings (with live prices) — not from stale snapshots
@@ -194,6 +196,9 @@ export function AccountDetailPage() {
         )
       )}
 
+      {/* Per-coin crypto statistics (when bought, average buy-in, rewards by program) */}
+      {isCrypto && account && <CryptoStatsSection accountId={account.id} />}
+
       {/* Transactions */}
       {!isLoan && (transactions ? (
         <>
@@ -263,7 +268,7 @@ export function AccountDetailPage() {
             date: editingTx.date,
             description: editingTx.description,
             amount: editingTx.amount,
-            txType: editingTx.txType,
+            txType: editingTx.txType === 'REWARD' ? null : editingTx.txType,
             ticker: editingTx.ticker ?? undefined,
             name: editingTx.name ?? undefined,
             quantity: editingTx.quantity ?? undefined,

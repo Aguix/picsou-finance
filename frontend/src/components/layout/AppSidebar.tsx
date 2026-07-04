@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Wallet,
   Target,
+  RefreshCw,
   Settings,
   LogOut,
   Languages,
@@ -46,9 +47,11 @@ function NavItem({
   description: string
 }) {
   const location = useLocation()
+  // `to` may carry a query (e.g. /sync?tab=crypto-import); match on the path part only.
+  const toPath = to.split('?')[0]
   const isActive = end
-    ? location.pathname === to
-    : location.pathname.startsWith(to)
+    ? location.pathname === toPath
+    : location.pathname.startsWith(toPath)
 
   return (
     <Item
@@ -81,6 +84,7 @@ const NAV_ITEMS = [
   { path: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard', descKey: 'nav.dashboard.desc' },
   { path: '/accounts', icon: Wallet, labelKey: 'nav.accounts', descKey: 'nav.accounts.desc' },
   { path: '/goals', icon: Target, labelKey: 'nav.goals', descKey: 'nav.goals.desc' },
+  { path: '/sync', icon: RefreshCw, labelKey: 'nav.sync', descKey: 'nav.sync.desc' },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings', descKey: 'nav.settings.desc' },
 ] as const
 

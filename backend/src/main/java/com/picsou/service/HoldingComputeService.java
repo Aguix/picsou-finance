@@ -30,7 +30,7 @@ public class HoldingComputeService {
         List<Transaction> transactions = transactionRepository
                 .findByAccountIdAndTxTypeInOrderByDateAsc(
                         account.getId(),
-                        List.of(TransactionType.BUY, TransactionType.SELL));
+                        List.of(TransactionType.BUY, TransactionType.SELL, TransactionType.REWARD));
 
         // Per-ticker accumulators
         Map<String, BigDecimal> netQuantity = new HashMap<>();
@@ -53,9 +53,11 @@ public class HoldingComputeService {
                 continue;
             }
 
-            if (tx.getTxType() == TransactionType.BUY) {
+            if (tx.getTxType() == TransactionType.BUY || tx.getTxType() == TransactionType.REWARD) {
+                // REWARD is a zero-cost acquisition: it adds quantity and enters the VWAP
+                // denominator with a zero numerator, diluting the average buy-in toward 0
+                // (free coins lower the cost basis). For a BUY, a null price is treated as 0.
                 netQuantity.merge(ticker, qty, BigDecimal::add);
-                // null price treated as 0; averageBuyIn will be 0, which is intentional
                 BigDecimal price = tx.getPricePerUnit() != null ? tx.getPricePerUnit() : BigDecimal.ZERO;
                 vwapNumerator.merge(ticker, qty.multiply(price), BigDecimal::add);
                 vwapDenominator.merge(ticker, qty, BigDecimal::add);

@@ -36,12 +36,32 @@
     "goals": "Objectifs",
     "goals.desc": "Suivi de vos épargnes",
     "sync": "Synchronisation",
+    "sync.desc": "Import & synchro des comptes",
     "settings": "Paramètres",
     "settings.desc": "Préférences & compte",
     "account": "Mon compte",
     "logout": "Déconnexion",
     "admin": "Administration",
     "admin.desc": "Réglages de l'instance"
+  },
+  "crypto": {
+    "surtitle": "Portefeuille",
+    "title": "Mes cryptos",
+    "consolidatedTitle": "Toutes plateformes & wallets",
+    "globalView": "Vue globale",
+    "accountTitle": "{{name}} — détail par programme",
+    "empty": {
+      "title": "Aucune crypto",
+      "desc": "Importez un export CSV (Crypto.com, Kraken, Binance, Bybit, Bitstack, Ledger…), connectez un exchange ou un wallet pour voir vos cryptos consolidées ici.",
+      "action": "Ajouter une source crypto"
+    },
+    "emptyAccount": {
+      "title": "Aucune donnée pour ce compte",
+      "desc": "Ce compte n'a pas encore de positions ni de transactions crypto importées."
+    }
+  },
+  "cryptoStats": {
+    "title": "Statistiques crypto"
   },
   "auth": {
     "login": "Connexion",
@@ -442,6 +462,30 @@
       "deleteConnectionConfirm": "Supprimer les identifiants Finary stockés ? Les comptes déjà importés seront conservés.",
       "newAccounts": "Nouveaux comptes détectés",
       "allAccountsMapped": "Tous les comptes déjà mappés, synchronisation..."
+    },
+    "crypto": {
+      "title": "Import crypto (CSV)",
+      "intro": "Déposez l'export CSV de votre exchange ou wallet — le format est détecté automatiquement.",
+      "supported": "Formats supportés",
+      "choose": "Choisir un fichier CSV",
+      "detected": "Détecté dans le fichier",
+      "transactions": "Transactions",
+      "buys": "Achats",
+      "rewards": "Récompenses",
+      "coins": "Cryptos",
+      "period": "Période",
+      "totalRewards": "Total récompenses",
+      "unvalued": "{{count}} ligne(s) sans valeur en euro dans le CSV — elles seront valorisées à l'import via l'historique des prix.",
+      "unknown": "{{count}} ligne(s) de type inconnu seront importées sans impacter les positions.",
+      "target": "Compte de destination",
+      "createNew": "Nouveau compte",
+      "oneAccountPerSource": "Conseil : un compte par exchange/wallet — un ré-import remplace les transactions importées du compte ciblé (les entrées manuelles sont conservées).",
+      "accountName": "Nom du compte",
+      "import": "Importer",
+      "done": "Import terminé",
+      "doneDetail": "{{tx}} transactions · {{holdings}} cryptos",
+      "viewStats": "Voir les statistiques",
+      "importAnother": "Importer un autre fichier"
     },
     "all": {
       "title": "Synchroniser les comptes",

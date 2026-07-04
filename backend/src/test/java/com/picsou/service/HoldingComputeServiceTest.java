@@ -315,6 +315,39 @@ class HoldingComputeServiceTest {
     }
 
     @Test
+    void reward_addsQuantityAndDilutesAverageBuyIn() {
+        Account account = account(1L);
+        // Buy 1 BTC @ 30000, then receive 1 BTC as a zero-cost reward (Earn/staking/etc).
+        // Net qty = 2; VWAP = (1*30000 + 1*0) / (1+1) = 15000 (free coins halve the cost basis).
+        Transaction buy = buyTx("BTC", "1", "30000.00");
+        Transaction reward = Transaction.builder()
+                .account(account)
+                .date(LocalDate.of(2024, 3, 1))
+                .description("Earn")
+                .amount(new BigDecimal("18000"))
+                .txType(TransactionType.REWARD)
+                .ticker("BTC")
+                .quantity(new BigDecimal("1"))
+                .pricePerUnit(BigDecimal.ZERO)
+                .build();
+
+        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), anyList()))
+                .thenReturn(List.of(buy, reward));
+        when(accountHoldingRepository.findByAccount_Id(1L))
+                .thenReturn(List.of());
+
+        holdingComputeService.recomputeHoldings(account);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<AccountHolding>> captor = ArgumentCaptor.forClass(List.class);
+        verify(accountHoldingRepository).saveAll(captor.capture());
+
+        AccountHolding h = captor.getValue().get(0);
+        assertThat(h.getQuantity()).isEqualByComparingTo("2");
+        assertThat(h.getAverageBuyIn()).isEqualByComparingTo("15000.00000000");
+    }
+
+    @Test
     void positionName_usesNameFromNewestTransaction() {
         Account account = account(1L);
         // Two BUYs for the same security, returned in date-ASC order (oldest first).

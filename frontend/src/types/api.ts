@@ -328,6 +328,12 @@ export interface FinaryAutoSyncResponse {
   newAccountCount: number
 }
 
+export type TxType = 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | 'REWARD'
+
+export type RewardKind =
+  | 'EARN' | 'STAKING' | 'SUPERCHARGER' | 'AIRDROP' | 'CASHBACK' | 'REFERRAL'
+  | 'CAMPAIGN' | 'DEFI_YIELD' | 'OTHER'
+
 export interface Transaction {
   id: number
   date: string
@@ -337,11 +343,123 @@ export interface Transaction {
   category: string | null
   nativeCurrency: string
   isManual: boolean
-  txType: 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | null
+  txType: TxType | null
   ticker: string | null
   name: string | null
   quantity: number | null
   pricePerUnit: number | null
+  rewardKind: RewardKind | null
+}
+
+// --- Multi-exchange crypto CSV import ---
+
+/** One supported CSV source format (Crypto.com App/Exchange, Kraken, Binance, ...). */
+export interface CryptoSourceInfo {
+  id: string
+  label: string
+}
+
+export interface CryptoPreviewResponse {
+  fileToken: string
+  source: string
+  sourceLabel: string
+  rowCount: number
+  transactionCount: number
+  buyCount: number
+  sellCount: number
+  rewardCount: number
+  unknownCount: number
+  /** Rows without a fiat value in the CSV — valued from price history at import time. */
+  unvaluedCount: number
+  firstDate: string | null
+  lastDate: string | null
+  currencies: string[]
+  nativeCurrency: string
+  totalInvested: number
+  totalRewards: number
+  rewardsByKind: Partial<Record<RewardKind, number>>
+  existingAccounts: Account[]
+}
+
+export interface CryptoImportRequest {
+  fileToken: string
+  action: 'CREATE_NEW' | 'MAP_EXISTING'
+  targetAccountId?: number
+  accountName?: string
+  color?: string
+}
+
+export interface CryptoImportResult {
+  accountId: number
+  accountName: string
+  source: string
+  transactionsImported: number
+  holdingsCount: number
+  totalRewards: number
+}
+
+export interface CryptoBuyEvent {
+  date: string
+  quantity: number | null
+  pricePerUnit: number | null
+  valueEur: number
+}
+
+export interface CryptoSellEvent {
+  date: string
+  quantity: number | null
+  pricePerUnit: number | null
+  valueEur: number
+}
+
+export interface CryptoRewardEvent {
+  date: string
+  kind: RewardKind
+  quantity: number | null
+  valueEur: number
+}
+
+export interface CryptoCostPoint {
+  date: string
+  averageBuyIn: number
+}
+
+export interface CryptoPricePoint {
+  date: string
+  priceEur: number
+}
+
+export interface CryptoAssetStat {
+  ticker: string
+  name: string | null
+  logoUrl: string | null
+  quantity: number
+  averageBuyIn: number | null
+  currentPrice: number | null
+  currentValueEur: number | null
+  costBasisEur: number | null
+  totalInvestedEur: number
+  totalRewardsEur: number
+  totalRewardsQty: number
+  unrealizedPnlEur: number | null
+  firstBuyDate: string | null
+  lastActivityDate: string | null
+  rewardsByKindEur: Partial<Record<RewardKind, number>>
+  buyEvents: CryptoBuyEvent[]
+  sellEvents: CryptoSellEvent[]
+  rewardEvents: CryptoRewardEvent[]
+  costSeries: CryptoCostPoint[]
+  priceSeries: CryptoPricePoint[]
+}
+
+export interface CryptoStatsResponse {
+  assets: CryptoAssetStat[]
+  totals: {
+    totalInvestedEur: number
+    totalRewardsEur: number
+    currentValueEur: number
+    rewardsByKindEur: Partial<Record<RewardKind, number>>
+  }
 }
 
 export interface TransactionRequest {
