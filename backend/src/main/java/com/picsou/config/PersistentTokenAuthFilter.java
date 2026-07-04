@@ -120,7 +120,8 @@ public class PersistentTokenAuthFilter extends OncePerRequestFilter {
         // Rotated cookie carries the same series_id; remaining lifetime = expiresAt - now.
         cookieWriter.setAccessAndRefresh(response,
             jwtUtil.generateAccessToken(user),
-            jwtUtil.generateRefreshToken(user));
+            jwtUtil.generateRefreshToken(user),
+            true);
         long secondsUntilExpiry = Math.max(
             ChronoUnit.SECONDS.between(java.time.Instant.now(), session.getExpiresAt()),
             0

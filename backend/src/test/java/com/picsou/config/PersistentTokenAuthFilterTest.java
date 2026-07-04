@@ -158,7 +158,7 @@ class PersistentTokenAuthFilterTest {
 
         filter.doFilter(request, response, chain);
 
-        verify(cookieWriter).setAccessAndRefresh(response, "new-access", "new-refresh");
+        verify(cookieWriter).setAccessAndRefresh(response, "new-access", "new-refresh", true);
         verify(cookieWriter).setPersistent(eq(response), eq("rotated-cookie-value"), anyLong());
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication().getPrincipal()).isSameAs(user);
@@ -177,7 +177,7 @@ class PersistentTokenAuthFilterTest {
 
         filter.doFilter(request, response, chain);
 
-        verify(cookieWriter).setAccessAndRefresh(response, "a", "r");
+        verify(cookieWriter).setAccessAndRefresh(response, "a", "r", true);
         verify(cookieWriter).setPersistent(eq(response), eq("rotated-cookie-value"), anyLong());
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
     }
@@ -191,7 +191,7 @@ class PersistentTokenAuthFilterTest {
         filter.doFilter(request, response, chain);
 
         verify(cookieWriter).clearPersistent(response);
-        verify(cookieWriter, never()).setAccessAndRefresh(any(), any(), any());
+        verify(cookieWriter, never()).setAccessAndRefresh(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
         verify(chain).doFilter(request, response);
     }

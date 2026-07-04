@@ -1,7 +1,12 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { authApi } from './api'
 import { useAuthStore } from '@/stores/auth-store'
 import { resetClientState } from '@/lib/reset-client-state'
+import { SESSION_PROBE_GC_TIME } from '@/lib/constants'
+
+export const authKeys = {
+  sessionProbe: ['session-probe'] as const,
+}
 
 // The interactive login path lives in features/mfa/hooks.ts
 // (`useLoginWithRememberMe` / `useVerifyMfa`) because login is MFA-aware. This
@@ -12,9 +17,32 @@ export function useLogout() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => authApi.logout(),
-    onSettled: () => {
+    // onSuccess only (not onSettled): if the server call fails, the session cookies
+    // are still valid server-side, so the client must NOT pretend to be logged out --
+    // RequireAuth's session-probe would otherwise silently resurrect it moments later.
+    onSuccess: () => {
       logout()
       resetClientState(queryClient)
     },
+  })
+}
+
+/**
+ * Probes the cookie-backed session via `POST /auth/refresh`. `isAuthenticated` mirrors
+ * sessionStorage, which is wiped on every tab/browser close -- unrelated to the HttpOnly
+ * access/refresh/persistent_token cookies, which can keep the session alive for up to 90
+ * days (Remember Me). Rather than trust the stale sessionStorage flag and bounce straight
+ * to /login, RequireAuth probes the cookie-backed session once; a valid refresh_token or
+ * persistent_token (re-minted by PersistentTokenAuthFilter) rehydrates the store instead
+ * of forcing a fresh login.
+ */
+export function useSessionProbe(enabled: boolean) {
+  return useQuery({
+    queryKey: authKeys.sessionProbe,
+    queryFn: () => authApi.refresh(),
+    enabled,
+    retry: false,
+    staleTime: Infinity,
+    gcTime: SESSION_PROBE_GC_TIME,
   })
 }

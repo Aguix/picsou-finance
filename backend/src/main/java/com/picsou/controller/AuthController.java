@@ -242,63 +242,53 @@ public class AuthController {
     ) {
         String refreshToken = extractCookie(httpReq, "refresh_token");
 
-        if (refreshToken == null) {
-            // No refresh_token cookie doesn't necessarily mean "logged out": if a
-            // still-valid persistent_token (Remember Me) was presented, PersistentTokenAuthFilter
-            // already re-authenticated this request and minted fresh access/refresh
-            // cookies on the response before this method ran. Honour that instead of
-            // reporting 401, otherwise "Remember Me" silently stops working once the
-            // refresh_token (7 days) outlives the persistent_token's own refresh cadence.
-            if (persistentPrincipal != null) {
-                return ResponseEntity.ok(Map.of(
-                    "username", persistentPrincipal.getUsername(),
-                    "role", persistentPrincipal.getRole().name(),
-                    "memberId", persistentPrincipal.getMember().getId(),
-                    "displayName", persistentPrincipal.getMember().getDisplayName()
-                ));
+        if (refreshToken != null) {
+            try {
+                var claims = jwtUtil.validateAndParse(refreshToken);
+                if (jwtUtil.isRefreshToken(claims)) {
+                    AppUser user = userRepository.findByUsernameWithMember(claims.getSubject()).orElse(null);
+                    // Reject if the user is gone, the token version was bumped (credential
+                    // change / recovery), or the account has since been deactivated.
+                    Long tv = jwtUtil.getTokenVersion(claims);
+                    if (user != null && tv != null && tv == user.getTokenVersion() && user.isActivated()) {
+                        boolean persistent = isPersistentDevice(httpReq, user);
+                        setTokenCookies(httpRes,
+                            jwtUtil.generateAccessToken(user),
+                            jwtUtil.generateRefreshToken(user), // rotation
+                            persistent);
+                        return ResponseEntity.ok(userPayload(user));
+                    }
+                }
+            } catch (Exception ignored) {
+                // Falls through: an invalid/expired refresh_token doesn't necessarily mean
+                // "logged out" -- see the persistentPrincipal branch below.
             }
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "No refresh token"));
         }
 
-        try {
-            var claims = jwtUtil.validateAndParse(refreshToken);
-            if (!jwtUtil.isRefreshToken(claims)) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-            }
-
-            String username = claims.getSubject();
-            AppUser user = userRepository.findByUsernameWithMember(username)
-                .orElseThrow(() -> new BadCredentialsException("User not found"));
-
-            // Reject if the token version was bumped (credential change / recovery)
-            // OR the account has since been deactivated. Treating !isActivated() as
-            // revoked clears the cookies and breaks the refresh→401 loop for any
-            // session that was minted before deactivation — consistent with the
-            // isActivated() gate in JwtAuthenticationFilter / PersistentTokenAuthFilter.
-            Long tv = jwtUtil.getTokenVersion(claims);
-            if (tv == null || tv != user.getTokenVersion() || !user.isActivated()) {
-                clearTokenCookies(httpRes);
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Token revoked"));
-            }
-
-            String newAccess = jwtUtil.generateAccessToken(user);
-            String newRefresh = jwtUtil.generateRefreshToken(user); // rotation
-
-            setTokenCookies(httpRes, newAccess, newRefresh);
-            return ResponseEntity.ok(Map.of(
-                "username", user.getUsername(),
-                "role", user.getRole().name(),
-                "memberId", user.getMember().getId(),
-                "displayName", user.getMember().getDisplayName()
-            ));
-
-        } catch (Exception ex) {
-            clearTokenCookies(httpRes);
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
+        // No usable refresh_token: honour a persistent-token ("Remember Me") restoration
+        // for THIS SAME request. PersistentTokenAuthFilter runs before this controller and,
+        // on a valid persistent_token, both rotates the series and sets the SecurityContext
+        // principal -- so a bare access_token-derived principal (no persistent_token at all)
+        // also lands here, which is why we still (re)mint cookies below rather than trusting
+        // whatever the filter may or may not have already written: the endpoint's contract
+        // is "200 = fresh cookies were issued", never a phantom win with zero Set-Cookie.
+        if (persistentPrincipal != null) {
+            boolean persistent = isPersistentDevice(httpReq, persistentPrincipal);
+            setTokenCookies(httpRes,
+                jwtUtil.generateAccessToken(persistentPrincipal),
+                jwtUtil.generateRefreshToken(persistentPrincipal),
+                persistent);
+            return ResponseEntity.ok(userPayload(persistentPrincipal));
         }
+
+        // Genuinely no valid session of any kind. Note we deliberately do NOT call
+        // clearTokenCookies() in the branches above: PersistentTokenAuthFilter may have
+        // just rotated persistent_token on this very response, and clearing it here
+        // (Max-Age=0, added after the filter's Set-Cookie) would wipe that rotation and
+        // needlessly destroy Remember Me for a request that was otherwise fine.
+        clearTokenCookies(httpRes);
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+            .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "No refresh token"));
     }
 
     @PostMapping("/logout")
@@ -318,6 +308,7 @@ public class AuthController {
     public ResponseEntity<?> changeUsername(
         @AuthenticationPrincipal AppUser user,
         @Valid @RequestBody ChangeUsernameRequest req,
+        HttpServletRequest httpReq,
         HttpServletResponse httpRes
     ) {
         String newUsername = req.newUsername().trim();
@@ -329,11 +320,14 @@ public class AuthController {
             problem.setDetail("Username already taken");
             return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
         }
+        // Preserve whatever persistence state this browser already had -- a Remember-Me
+        // user renaming their account shouldn't be silently downgraded to a session cookie.
+        boolean persistent = isPersistentDevice(httpReq, user);
         user.setUsername(newUsername);
         userRepository.save(user);
         String newAccess = jwtUtil.generateAccessToken(user);
         String newRefresh = jwtUtil.generateRefreshToken(user);
-        setTokenCookies(httpRes, newAccess, newRefresh);
+        setTokenCookies(httpRes, newAccess, newRefresh, persistent);
         return ResponseEntity.ok(Map.of("username", newUsername));
     }
 
@@ -362,9 +356,11 @@ public class AuthController {
         // Re-issue access+refresh for the calling browser so the user does
         // not get logged out by their own action. The new cookies carry the
         // bumped tokenVersion; old cookies on this browser are overwritten.
+        // Always session-scoped (persistent=false): persistent_token was just
+        // revoked/cleared above, so nothing should outlive this browser tab.
         String newAccess = jwtUtil.generateAccessToken(user);
         String newRefresh = jwtUtil.generateRefreshToken(user);
-        setTokenCookies(httpRes, newAccess, newRefresh);
+        setTokenCookies(httpRes, newAccess, newRefresh, false);
         cookieWriter.clearPersistent(httpRes);
 
         return ResponseEntity.ok(Map.of("message", "Password updated successfully"));
@@ -434,7 +430,8 @@ public class AuthController {
     ) {
         cookieWriter.setAccessAndRefresh(httpRes,
             jwtUtil.generateAccessToken(user),
-            jwtUtil.generateRefreshToken(user));
+            jwtUtil.generateRefreshToken(user),
+            issuePersistent);
 
         if (issuePersistent) {
             PersistentSessionService.IssueResult issued = persistentSessionService.issue(
@@ -475,8 +472,15 @@ public class AuthController {
         return body;
     }
 
-    private void setTokenCookies(HttpServletResponse response, String accessToken, String refreshToken) {
-        cookieWriter.setAccessAndRefresh(response, accessToken, refreshToken);
+    private void setTokenCookies(HttpServletResponse response, String accessToken, String refreshToken, boolean persistent) {
+        cookieWriter.setAccessAndRefresh(response, accessToken, refreshToken, persistent);
+    }
+
+    /** Whether {@code httpReq} carries a persistent_token ("Remember Me") cookie owned by {@code user}. */
+    private boolean isPersistentDevice(HttpServletRequest httpReq, AppUser user) {
+        String cookie = extractCookie(httpReq, AuthCookieWriter.PERSISTENT_COOKIE);
+        if (cookie == null || cookie.isBlank()) return false;
+        return persistentSessionService.ownerUserId(cookie).filter(id -> id.equals(user.getId())).isPresent();
     }
 
     private void clearTokenCookies(HttpServletResponse response) {
