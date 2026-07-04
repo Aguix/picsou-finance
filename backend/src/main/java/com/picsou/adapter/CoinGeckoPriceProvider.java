@@ -64,6 +64,11 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
         return TICKER_TO_ID.containsKey(ticker.toUpperCase());
     }
 
+    /** Whether {@code ticker} is a known crypto symbol — used by {@link OpenFigiIsinConverter} to validate symbols parsed out of Trade Republic's internal crypto ISINs. */
+    public static boolean isKnownTicker(String ticker) {
+        return ticker != null && TICKER_TO_ID.containsKey(ticker.toUpperCase());
+    }
+
     @Override
     public Map<String, BigDecimal> getPricesEur(Set<String> tickers) {
         Set<String> supported = tickers.stream()

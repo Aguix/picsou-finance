@@ -39,14 +39,38 @@ class OpenFigiIsinConverterTest {
     }
 
     @Test
-    void resolve_returnsLocalNameForTradeRepublicCryptoIsins() {
+    void resolve_parsesTickerAndNameForTradeRepublicCryptoIsins() {
         OpenFigiIsinConverter converter = new OpenFigiIsinConverter();
 
+        // Ticker is now the parsed symbol (not the fake ISIN), so the holding becomes
+        // price-resolvable via CoinGeckoPriceProvider instead of staying stuck on averageBuyIn.
         OpenFigiIsinConverter.TickerResult btc = converter.resolve("XF000BTC0017");
-        assertThat(btc.ticker()).isEqualTo("XF000BTC0017");
+        assertThat(btc.ticker()).isEqualTo("BTC");
         assertThat(btc.name()).isEqualTo("Bitcoin");
 
         OpenFigiIsinConverter.TickerResult eth = converter.resolve("XF000ETH0017");
+        assertThat(eth.ticker()).isEqualTo("ETH");
         assertThat(eth.name()).isEqualTo("Ethereum");
+    }
+
+    @Test
+    void resolve_parsesAnyKnownCryptoSymbolNotJustBtcAndEth() {
+        OpenFigiIsinConverter converter = new OpenFigiIsinConverter();
+
+        // The symbol is parsed generically from the "XF000<SYMBOL><digits>" pattern and
+        // validated against CoinGeckoPriceProvider's known tickers -- SOL isn't hardcoded
+        // anywhere in OpenFigiIsinConverter, unlike the old 2-entry map (GH issue #22).
+        OpenFigiIsinConverter.TickerResult sol = converter.resolve("XF000SOL0042");
+        assertThat(sol.ticker()).isEqualTo("SOL");
+        assertThat(sol.name()).isEqualTo("SOL");
+    }
+
+    @Test
+    void resolve_normalizesCaseAndWhitespaceConsistently() {
+        OpenFigiIsinConverter converter = new OpenFigiIsinConverter();
+
+        OpenFigiIsinConverter.TickerResult padded = converter.resolve(" xf000btc0017 ");
+        assertThat(padded.ticker()).isEqualTo("BTC");
+        assertThat(padded.name()).isEqualTo("Bitcoin");
     }
 }

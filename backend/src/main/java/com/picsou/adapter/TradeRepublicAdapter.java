@@ -255,10 +255,15 @@ public class TradeRepublicAdapter implements TradeRepublicPort {
                                                     // compactPortfolioByType positions carry no exchangeId
                                                     // (unlike the legacy compactPortfolio payload), so this
                                                     // almost always falls through to the default. LSX (Lang &
-                                                    // Schwarz Exchange) is TR's actual home exchange for pricing
+                                                    // Schwarz Exchange) is TR's home exchange for equities/ETFs
                                                     // — see GH issue #23 (all ticker subs were FORBIDDEN with TRX).
+                                                    // TR-native crypto (isin starting "XF000", e.g. XF000BTC0017)
+                                                    // is priced on TRD0 instead — LSX doesn't list it, so using
+                                                    // LSX here would still leave every crypto position FORBIDDEN
+                                                    // and silently falling back to averageBuyIn.
                                                     String exchangeId = pos.path("exchangeId").asText("");
-                                                    String tickerId = isin + (exchangeId.isEmpty() ? ".LSX" : "." + exchangeId);
+                                                    String defaultExchange = isin.startsWith("XF000") ? "TRD0" : "LSX";
+                                                    String tickerId = isin + "." + (exchangeId.isEmpty() ? defaultExchange : exchangeId);
                                                     tickerMsgs.add(subWithId(tid, "ticker",
                                                             tickerId, sessionToken));
                                                 }

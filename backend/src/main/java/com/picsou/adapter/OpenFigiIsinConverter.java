@@ -95,12 +95,20 @@ public class OpenFigiIsinConverter {
 
     /**
      * Trade Republic internal ISINs for on-platform crypto products (e.g. Bitcoin
-     * held directly, not via an ETC). These are not real market ISINs, so OpenFIGI
-     * never resolves them and {@code name} stays null downstream. See GH issue #22.
+     * held directly, not via an ETC) follow "XF000&lt;SYMBOL&gt;&lt;digits&gt;" — these
+     * are not real market ISINs, so OpenFIGI never resolves them and {@code name}
+     * stays null / {@code ticker} stays the fake ISIN downstream. See GH issue #22.
+     * The symbol is parsed generically (not hardcoded per coin) and validated
+     * against {@link CoinGeckoPriceProvider}'s known tickers so the holding's
+     * ticker becomes price-resolvable, not just its display name.
      */
-    private static final Map<String, String> TR_CRYPTO_ISIN_NAMES = Map.of(
-        "XF000BTC0017", "Bitcoin",
-        "XF000ETH0017", "Ethereum"
+    private static final java.util.regex.Pattern TR_CRYPTO_ISIN_PATTERN =
+        java.util.regex.Pattern.compile("^XF000([A-Z]+)[0-9]+$");
+
+    /** Friendlier display names for TR-native crypto symbols where the raw ticker isn't self-explanatory. */
+    private static final Map<String, String> CRYPTO_DISPLAY_NAMES = Map.of(
+        "BTC", "Bitcoin",
+        "ETH", "Ethereum"
     );
 
     /** ISIN country prefix → preferred exchange code for that market. */
@@ -138,36 +146,46 @@ public class OpenFigiIsinConverter {
             return new TickerResult(isin, null);
         }
 
-        String trCryptoName = TR_CRYPTO_ISIN_NAMES.get(isin.trim().toUpperCase());
-        if (trCryptoName != null) {
-            return new TickerResult(isin, trCryptoName);
+        // Normalized once and used throughout (matching, cache key, fallback ticker) so that
+        // e.g. " xf000btc0017 " and "XF000BTC0017" resolve to and cache under the same entry.
+        String normalized = isin.trim().toUpperCase();
+
+        java.util.regex.Matcher trCrypto = TR_CRYPTO_ISIN_PATTERN.matcher(normalized);
+        if (trCrypto.matches()) {
+            String symbol = trCrypto.group(1);
+            if (CoinGeckoPriceProvider.isKnownTicker(symbol)) {
+                String name = CRYPTO_DISPLAY_NAMES.getOrDefault(symbol, symbol);
+                return new TickerResult(symbol, name);
+            }
+            log.warn("TR-native crypto ISIN {} has unrecognized symbol '{}', falling back to OpenFIGI (will likely miss)",
+                     normalized, symbol);
         }
 
         // Check cache first
-        TickerResult cached = cache.get(isin);
+        TickerResult cached = cache.get(normalized);
         if (cached != null) {
-            log.debug("ISIN {} resolved from cache -> {} ({})", isin, cached.ticker, cached.name);
+            log.debug("ISIN {} resolved from cache -> {} ({})", normalized, cached.ticker, cached.name);
             return cached;
         }
 
         try {
-            TickerResult result = fetchFromOpenFigi(isin);
+            TickerResult result = fetchFromOpenFigi(normalized);
             if (result != null) {
-                cache.put(isin, result);
-                log.info("ISIN {} resolved via OpenFIGI -> {} ({})", isin, result.ticker, result.name);
+                cache.put(normalized, result);
+                log.info("ISIN {} resolved via OpenFIGI -> {} ({})", normalized, result.ticker, result.name);
                 return result;
             } else {
                 // Cache a fallback result so we don't retry
-                TickerResult fallback = new TickerResult(isin, null);
-                cache.put(isin, fallback);
-                log.warn("OpenFIGI returned no ticker for ISIN {}, will use ISIN as-is", isin);
+                TickerResult fallback = new TickerResult(normalized, null);
+                cache.put(normalized, fallback);
+                log.warn("OpenFIGI returned no ticker for ISIN {}, will use ISIN as-is", normalized);
                 return fallback;
             }
         } catch (Exception ex) {
-            TickerResult fallback = new TickerResult(isin, null);
-            cache.put(isin, fallback);
+            TickerResult fallback = new TickerResult(normalized, null);
+            cache.put(normalized, fallback);
             log.warn("Failed to convert ISIN {} via OpenFIGI: {}, will use ISIN as-is",
-                     isin, ex.getMessage());
+                     normalized, ex.getMessage());
             return fallback;
         }
     }
