@@ -477,6 +477,11 @@
       "totalRewards": "Total récompenses",
       "unvalued": "{{count}} ligne(s) sans valeur en euro dans le CSV — elles seront valorisées à l'import via l'historique des prix.",
       "unknown": "{{count}} ligne(s) de type inconnu seront importées sans impacter les positions.",
+      "unresolved": {
+        "title": "Cryptos à identifier",
+        "hint": "Ces symboles n'ont pas pu être associés automatiquement à une crypto (symbole ambigu ou inconnu). Collez le lien de leur page CoinGecko pour les valoriser — sinon elles seront importées sans prix.",
+        "link": "Associer"
+      },
       "target": "Compte de destination",
       "createNew": "Nouveau compte",
       "oneAccountPerSource": "Conseil : un compte par exchange/wallet — un ré-import remplace les transactions importées du compte ciblé (les entrées manuelles sont conservées).",

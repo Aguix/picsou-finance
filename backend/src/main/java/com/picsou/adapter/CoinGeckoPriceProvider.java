@@ -203,6 +203,38 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
     }
 
     /**
+     * Fetch a single coin by its CoinGecko id (via {@code /coins/{id}}), narrowed to
+     * {@link CoinCandidate}. Used to validate an operator-supplied disambiguation link and read the
+     * coin's canonical name. Empty when the id is unknown or the call fails.
+     */
+    public Optional<CoinCandidate> fetchCoinById(String id) {
+        String coinId = id == null ? "" : id.trim().toLowerCase();
+        if (coinId.isEmpty()) return Optional.empty();
+        try {
+            CoinDetail detail = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                    .path("/coins/{id}")
+                    .queryParam("localization", "false")
+                    .queryParam("tickers", "false")
+                    .queryParam("market_data", "false")
+                    .queryParam("community_data", "false")
+                    .queryParam("developer_data", "false")
+                    .queryParam("sparkline", "false")
+                    .build(coinId))
+                .retrieve()
+                .bodyToMono(CoinDetail.class)
+                .timeout(TIMEOUT)
+                .block();
+
+            if (detail == null || detail.id == null) return Optional.empty();
+            return Optional.of(new CoinCandidate(detail.id, detail.name, detail.symbol, detail.marketCapRank));
+        } catch (Exception ex) {
+            log.warn("CoinGecko coin lookup failed for id {}: {}", coinId, ex.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Fetch hourly prices for a crypto ticker from CoinGecko over the last 24H.
      * CoinGecko's market_chart/range returns hourly data for ranges < 90 days.
      */
@@ -321,6 +353,16 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
     static class CoinMarketData {
         public String id;
         public String image;
+    }
+
+    /** CoinGecko {@code /coins/{id}} response, narrowed to identity + rank. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class CoinDetail {
+        public String id;
+        public String name;
+        public String symbol;
+        @JsonProperty("market_cap_rank")
+        public Integer marketCapRank;
     }
 
     /** CoinGecko {@code /search} response, narrowed to the coins list. */

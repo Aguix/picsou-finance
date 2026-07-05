@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { cryptoApi } from './api'
-import type { CryptoImportRequest } from '@/types/api'
+import type { CoinMappingRequest, CryptoImportRequest } from '@/types/api'
 
 export const cryptoKeys = {
   all: ['crypto'] as const,
@@ -21,6 +21,13 @@ export function useCryptoSources() {
 export function usePreviewCryptoCsv() {
   return useMutation({
     mutationFn: (file: File) => cryptoApi.preview(file),
+  })
+}
+
+/** Pin an ambiguous ticker to a coin via its CoinGecko link, so the import can price it. */
+export function useResolveCoin() {
+  return useMutation({
+    mutationFn: (request: CoinMappingRequest) => cryptoApi.resolveCoin(request),
   })
 }
 

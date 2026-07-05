@@ -1,5 +1,7 @@
 package com.picsou.controller;
 
+import com.picsou.crypto.CoinMappingRequest;
+import com.picsou.crypto.CoinMappingResponse;
 import com.picsou.crypto.CryptoImportRequest;
 import com.picsou.crypto.CryptoImportResult;
 import com.picsou.crypto.CryptoImportService;
@@ -7,6 +9,8 @@ import com.picsou.crypto.CryptoPreviewResponse;
 import com.picsou.crypto.CryptoSourceInfo;
 import com.picsou.crypto.CryptoStatsResponse;
 import com.picsou.crypto.CryptoStatsService;
+import com.picsou.model.CoinMapping;
+import com.picsou.service.CoinMappingService;
 import com.picsou.service.UserContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +39,7 @@ public class CryptoController {
 
     private final CryptoImportService importService;
     private final CryptoStatsService statsService;
+    private final CoinMappingService coinMappingService;
     private final UserContext userContext;
 
     /** The supported CSV source formats, for the import UI. */
@@ -51,6 +56,17 @@ public class CryptoController {
     @PostMapping("/import")
     public CryptoImportResult importData(@Valid @RequestBody CryptoImportRequest request) {
         return importService.execute(request, userContext.currentMemberId());
+    }
+
+    /**
+     * Pin a ticker the preview couldn't auto-resolve to the coin behind an operator-supplied
+     * CoinGecko link. The {@code coin_mapping} cache is global (keyed by ticker), not member-scoped,
+     * so this needs no member filter — it just requires an authenticated caller.
+     */
+    @PostMapping("/coin-mappings")
+    public CoinMappingResponse resolveCoin(@Valid @RequestBody CoinMappingRequest request) {
+        CoinMapping m = coinMappingService.setManualMapping(request.ticker(), request.coingeckoUrl());
+        return new CoinMappingResponse(m.getTicker(), m.getCoingeckoId(), m.getCoinName());
     }
 
     /** Per-account stats — the per-exchange view (rewards detailed by program). */

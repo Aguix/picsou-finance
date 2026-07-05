@@ -378,7 +378,21 @@ export interface CryptoPreviewResponse {
   totalInvested: number
   totalRewards: number
   rewardsByKind: Partial<Record<RewardKind, number>>
+  /** Coins CoinGecko couldn't auto-resolve — the UI prompts for their CoinGecko link. */
+  unresolvedTickers: string[]
   existingAccounts: Account[]
+}
+
+/** Operator-supplied disambiguation for a ticker: the coin's CoinGecko page link. */
+export interface CoinMappingRequest {
+  ticker: string
+  coingeckoUrl: string
+}
+
+export interface CoinMappingResponse {
+  ticker: string
+  coingeckoId: string
+  coinName: string | null
 }
 
 export interface CryptoImportRequest {

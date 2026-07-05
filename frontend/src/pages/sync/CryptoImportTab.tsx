@@ -7,8 +7,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
-import { Upload, FileText, ArrowRight, CheckCircle2, Gift, ScanSearch } from 'lucide-react'
-import { usePreviewCryptoCsv, useImportCrypto, useCryptoSources } from '@/features/crypto/hooks'
+import { Upload, FileText, ArrowRight, CheckCircle2, Gift, ScanSearch, HelpCircle } from 'lucide-react'
+import {
+  usePreviewCryptoCsv,
+  useImportCrypto,
+  useCryptoSources,
+  useResolveCoin,
+} from '@/features/crypto/hooks'
 import { extractErrorMessage } from '@/lib/errors'
 import { formatLocalDate } from '@/lib/utils'
 import { REWARD_KIND_LABELS } from '@/features/crypto/labels'
@@ -222,6 +227,11 @@ export function CryptoImportTab() {
             </CardContent>
           </Card>
 
+          {/* Coins CoinGecko couldn't auto-resolve — ask for their CoinGecko link */}
+          {preview.unresolvedTickers.length > 0 && (
+            <UnresolvedCoins tickers={preview.unresolvedTickers} />
+          )}
+
           {/* Target account */}
           <Card>
             <CardHeader>
@@ -293,6 +303,86 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg bg-muted/40 px-3 py-2">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-lg font-semibold">{value}</p>
+    </div>
+  )
+}
+
+/**
+ * Coins the backend couldn't map to a CoinGecko id (ambiguous symbol or unknown). The operator
+ * pastes each coin's CoinGecko page link so it can be priced. Purely optional — an unresolved coin
+ * just imports unpriced — so a resolved coin drops off the list and the import stays available.
+ */
+function UnresolvedCoins({ tickers }: { tickers: string[] }) {
+  const { t } = useTranslation()
+  const [resolved, setResolved] = useState<Set<string>>(new Set())
+  const pending = tickers.filter((tk) => !resolved.has(tk))
+  if (pending.length === 0) return null
+
+  return (
+    <Card className="border-amber-500/40">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <HelpCircle className="size-4 text-amber-500" />
+          {t('sync.crypto.unresolved.title', 'Cryptos à identifier')}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'sync.crypto.unresolved.hint',
+            "Ces symboles n'ont pas pu être associés automatiquement à une crypto (symbole ambigu ou inconnu). Collez le lien de leur page CoinGecko pour les valoriser — sinon elles seront importées sans prix.",
+          )}
+        </p>
+        {pending.map((ticker) => (
+          <CoinResolveRow
+            key={ticker}
+            ticker={ticker}
+            onResolved={(tk) => setResolved((prev) => new Set(prev).add(tk))}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
+function CoinResolveRow({ ticker, onResolved }: { ticker: string; onResolved: (ticker: string) => void }) {
+  const { t } = useTranslation()
+  const [url, setUrl] = useState('')
+  const resolveMutation = useResolveCoin()
+
+  function submit() {
+    const link = url.trim()
+    if (!link) return
+    resolveMutation.mutate({ ticker, coingeckoUrl: link }, { onSuccess: () => onResolved(ticker) })
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary" className="min-w-14 justify-center">{ticker}</Badge>
+        <Input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://www.coingecko.com/en/coins/…"
+          className="min-w-0 flex-1"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={submit}
+          disabled={resolveMutation.isPending || !url.trim()}
+        >
+          {resolveMutation.isPending
+            ? t('common.loading', 'Chargement…')
+            : t('sync.crypto.unresolved.link', 'Associer')}
+        </Button>
+      </div>
+      {resolveMutation.isError && (
+        <p className="text-xs text-red-500">{extractErrorMessage(resolveMutation.error)}</p>
+      )}
     </div>
   )
 }

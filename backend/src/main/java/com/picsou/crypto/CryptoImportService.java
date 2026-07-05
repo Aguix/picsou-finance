@@ -141,6 +141,10 @@ public class CryptoImportService {
         String fileToken = UUID.randomUUID().toString();
         cache.put(fileToken, new Parsed(parser.sourceId(), txs, nativeCurrency, Instant.now()));
 
+        // Resolve tickers now (cached in coin_mapping) so the UI can flag any the resolver couldn't
+        // pin down and ask the operator for their CoinGecko link before the import runs.
+        List<String> unresolvedTickers = resolveTickers(txs);
+
         int buy = (int) txs.stream().filter(t -> t.txType() == TransactionType.BUY).count();
         int sell = (int) txs.stream().filter(t -> t.txType() == TransactionType.SELL).count();
         int rewardCount = (int) txs.stream().filter(t -> t.txType() == TransactionType.REWARD).count();
@@ -173,7 +177,7 @@ public class CryptoImportService {
             fileToken, parser.sourceId(), parser.label(),
             txs.size(), txs.size(), buy, sell, rewardCount, unknown, unvalued,
             first, last, new ArrayList<>(currencies), nativeCurrency,
-            totalInvested, totalRewards, rewardsByKind, existing);
+            totalInvested, totalRewards, rewardsByKind, unresolvedTickers, existing);
     }
 
     @Transactional
@@ -358,16 +362,18 @@ public class CryptoImportService {
     /**
      * Resolve every distinct imported ticker to a CoinGecko id (cached in {@code coin_mapping}) so
      * the downstream price backfill/valuation can find a provider. Best-effort — a failure here
-     * just leaves a coin unpriced, it must not fail the import.
+     * just leaves a coin unpriced, it must not fail the import. Returns the (uppercase, sorted)
+     * tickers that stayed unresolved, for the preview to surface for manual disambiguation.
      */
-    private void resolveTickers(List<ParsedCryptoTx> transactions) {
+    private List<String> resolveTickers(List<ParsedCryptoTx> transactions) {
         Set<String> tickers = transactions.stream()
             .filter(t -> t.txType() != null && t.ticker() != null && !t.ticker().isBlank())
             .map(t -> t.ticker().toUpperCase())
-            .collect(Collectors.toSet());
-        if (!tickers.isEmpty()) {
-            coinMappingService.resolveAll(tickers);
+            .collect(Collectors.toCollection(TreeSet::new));
+        if (tickers.isEmpty()) {
+            return List.of();
         }
+        return new ArrayList<>(coinMappingService.resolveAll(tickers));
     }
 
     /** Best-effort historical price backfill for the imported coins, from their first activity date. */

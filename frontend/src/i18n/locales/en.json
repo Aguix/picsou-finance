@@ -477,6 +477,11 @@
       "totalRewards": "Total rewards",
       "unvalued": "{{count}} row(s) carry no euro value in the CSV — they will be valued at import time from price history.",
       "unknown": "{{count}} row(s) of unknown type will be imported without affecting positions.",
+      "unresolved": {
+        "title": "Coins to identify",
+        "hint": "These symbols couldn't be matched to a coin automatically (ambiguous or unknown symbol). Paste their CoinGecko page link to value them — otherwise they'll be imported without a price.",
+        "link": "Match"
+      },
       "target": "Target account",
       "createNew": "New account",
       "oneAccountPerSource": "Tip: one account per exchange/wallet — re-importing replaces the imported transactions of the target account (manual entries are kept).",

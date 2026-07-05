@@ -10,10 +10,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Resolves and caches ticker → CoinGecko coin-id mappings — the dynamic replacement for the
@@ -45,6 +49,9 @@ public class CoinMappingService {
      */
     private static final int DOMINANCE_FACTOR = 5;
 
+    /** Grabs the coin-id slug from a CoinGecko coin URL, e.g. {@code .../en/coins/loaded-lions}. */
+    private static final Pattern COINGECKO_COIN_URL = Pattern.compile("/coins/([^/?#]+)");
+
     private final CoinGeckoPriceProvider coinGecko;
     private final CoinMappingRepository coinMappingRepository;
 
@@ -73,16 +80,72 @@ public class CoinMappingService {
         return Optional.of(saved);
     }
 
-    /** Best-effort bulk resolution; unresolved tickers are simply left out of the cache. */
+    /**
+     * Best-effort bulk resolution; unresolved tickers are simply left out of the cache. Returns the
+     * (uppercase) tickers that could not be auto-resolved — the operator disambiguates those via
+     * {@link #setManualMapping(String, String)}.
+     */
     @Transactional
-    public void resolveAll(Set<String> tickers) {
+    public Set<String> resolveAll(Set<String> tickers) {
+        Set<String> unresolved = new TreeSet<>();
         for (String ticker : tickers) {
             try {
-                resolve(ticker);
+                if (resolve(ticker).isEmpty()) unresolved.add(ticker.trim().toUpperCase());
             } catch (Exception e) {
                 log.warn("Ticker resolution failed for {}: {}", ticker, e.getMessage());
+                unresolved.add(ticker.trim().toUpperCase());
             }
         }
+        return unresolved;
+    }
+
+    /**
+     * Pin a ticker to the coin behind an operator-supplied CoinGecko link, overriding any prior
+     * mapping. The coin id is read from the URL slug (e.g. {@code .../coins/loaded-lions}) and
+     * validated against CoinGecko before it's persisted as {@code USER} — a link to a non-existent
+     * coin is rejected rather than cached.
+     *
+     * @throws IllegalArgumentException if the link isn't a CoinGecko coin URL or the coin is unknown.
+     */
+    @Transactional
+    public CoinMapping setManualMapping(String ticker, String coingeckoUrl) {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("Ticker is required.");
+        }
+        String upper = ticker.trim().toUpperCase();
+        String coinId = extractCoinId(coingeckoUrl);
+
+        CoinCandidate coin = coinGecko.fetchCoinById(coinId).orElseThrow(() ->
+            new IllegalArgumentException("No CoinGecko coin found for id '" + coinId
+                + "' — check the link points to a coin page."));
+
+        CoinMapping mapping = coinMappingRepository.findByTicker(upper)
+            .orElseGet(() -> CoinMapping.builder().ticker(upper).build());
+        mapping.setCoingeckoId(coin.id());
+        mapping.setCoinName(coin.name());
+        mapping.setResolvedVia("USER");
+        mapping.setUpdatedAt(Instant.now());
+
+        CoinMapping saved = coinMappingRepository.save(mapping);
+        log.info("User-mapped crypto ticker {} → CoinGecko id '{}' ({})", upper, coin.id(), coin.name());
+        return saved;
+    }
+
+    /** Extract the CoinGecko coin-id slug from a coin-page URL, rejecting anything that isn't one. */
+    private String extractCoinId(String coingeckoUrl) {
+        if (coingeckoUrl == null || coingeckoUrl.isBlank()) {
+            throw new IllegalArgumentException("A CoinGecko coin link is required.");
+        }
+        Matcher m = COINGECKO_COIN_URL.matcher(coingeckoUrl.trim());
+        if (!m.find()) {
+            throw new IllegalArgumentException(
+                "Not a CoinGecko coin link — expected a URL like https://www.coingecko.com/en/coins/<id>.");
+        }
+        String id = m.group(1).trim().toLowerCase();
+        if (id.isEmpty()) {
+            throw new IllegalArgumentException("Could not read the coin id from the link.");
+        }
+        return id;
     }
 
     /**

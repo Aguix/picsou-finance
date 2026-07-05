@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -117,15 +118,83 @@ class CoinMappingServiceTest {
     }
 
     @Test
-    void resolveAllContinuesAfterAFailure() {
+    void resolveAllContinuesAfterAFailureAndReportsUnresolved() {
         when(repository.findByTicker("BAD")).thenThrow(new RuntimeException("boom"));
         when(repository.findByTicker("OK")).thenReturn(Optional.empty());
         when(coinGecko.searchBySymbol("OK")).thenReturn(List.of(coin("okcoin", "ok", 3)));
         expectSaveEcho();
 
-        service.resolveAll(new java.util.LinkedHashSet<>(List.of("BAD", "OK")));
+        var unresolved = service.resolveAll(new java.util.LinkedHashSet<>(List.of("BAD", "OK")));
 
+        // OK resolved and was persisted; BAD blew up and is reported for manual disambiguation.
+        assertThat(unresolved).containsExactly("BAD");
         verify(repository).save(any(CoinMapping.class));
         verify(coinGecko).searchBySymbol("OK");
+    }
+
+    @Test
+    void setManualMappingExtractsIdFromLinkAndPersistsAsUser() {
+        when(coinGecko.fetchCoinById("loaded-lions"))
+            .thenReturn(Optional.of(new CoinCandidate("loaded-lions", "Loaded Lions", "lion", 3500)));
+        when(repository.findByTicker("LION")).thenReturn(Optional.empty());
+        expectSaveEcho();
+
+        CoinMapping result = service.setManualMapping("lion",
+            "https://www.coingecko.com/en/coins/loaded-lions");
+
+        assertThat(result.getTicker()).isEqualTo("LION");
+        assertThat(result.getCoingeckoId()).isEqualTo("loaded-lions");
+        assertThat(result.getCoinName()).isEqualTo("Loaded Lions");
+        assertThat(result.getResolvedVia()).isEqualTo("USER");
+    }
+
+    @Test
+    void setManualMappingReadsSlugFromLocalizedUrlWithQuery() {
+        when(coinGecko.fetchCoinById("capybara-nation"))
+            .thenReturn(Optional.of(new CoinCandidate("capybara-nation", "Capybara Nation", "bara", null)));
+        when(repository.findByTicker("BARA")).thenReturn(Optional.empty());
+        expectSaveEcho();
+
+        CoinMapping result = service.setManualMapping("BARA",
+            "https://www.coingecko.com/fr/coins/capybara-nation?utm=share#markets");
+
+        assertThat(result.getCoingeckoId()).isEqualTo("capybara-nation");
+        verify(coinGecko).fetchCoinById("capybara-nation");
+    }
+
+    @Test
+    void setManualMappingOverridesAnExistingAutoMapping() {
+        CoinMapping existing = CoinMapping.builder()
+            .ticker("MATIC").coingeckoId("wrong-clone").coinName("Clone").resolvedVia("AUTO").build();
+        when(coinGecko.fetchCoinById("matic-network"))
+            .thenReturn(Optional.of(new CoinCandidate("matic-network", "Polygon", "matic", 12)));
+        when(repository.findByTicker("MATIC")).thenReturn(Optional.of(existing));
+        expectSaveEcho();
+
+        CoinMapping result = service.setManualMapping("MATIC",
+            "https://www.coingecko.com/en/coins/matic-network");
+
+        assertThat(result.getCoingeckoId()).isEqualTo("matic-network");
+        assertThat(result.getResolvedVia()).isEqualTo("USER");
+    }
+
+    @Test
+    void setManualMappingRejectsALinkThatIsNotACoinUrl() {
+        assertThatThrownBy(() -> service.setManualMapping("BTC", "https://www.coingecko.com/en/categories"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(coinGecko);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void setManualMappingRejectsAnUnknownCoinId() {
+        when(coinGecko.fetchCoinById("does-not-exist")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.setManualMapping("XYZ",
+            "https://www.coingecko.com/en/coins/does-not-exist"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verify(repository, never()).save(any());
     }
 }

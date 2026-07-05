@@ -16,6 +16,9 @@ import java.util.Map;
  * @param sourceLabel  human label of the detected source (e.g. {@code Kraken}).
  * @param unvaluedCount rows that move holdings but carry no fiat valuation in the CSV; they are
  *                      valued from daily price history at import time.
+ * @param unresolvedTickers coins CoinGecko couldn't auto-resolve to a coin id (ambiguous symbol or
+ *                      unknown); the UI asks the operator for their CoinGecko link. They'd import
+ *                      unpriced otherwise — the import itself isn't blocked.
  */
 public record CryptoPreviewResponse(
     String fileToken,
@@ -35,5 +38,6 @@ public record CryptoPreviewResponse(
     BigDecimal totalInvested,
     BigDecimal totalRewards,
     Map<String, BigDecimal> rewardsByKind,
+    List<String> unresolvedTickers,
     List<AccountResponse> existingAccounts
 ) {}

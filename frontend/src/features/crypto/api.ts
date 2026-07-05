@@ -1,5 +1,7 @@
 import { api } from '@/lib/api-client'
 import type {
+  CoinMappingRequest,
+  CoinMappingResponse,
   CryptoImportRequest,
   CryptoImportResult,
   CryptoPreviewResponse,
@@ -26,6 +28,10 @@ export const cryptoApi = {
 
   import: (request: CryptoImportRequest) =>
     api.post<CryptoImportResult>('/crypto/import', request).then(r => r.data),
+
+  /** Pin a ticker the preview couldn't auto-resolve to the coin behind a CoinGecko link. */
+  resolveCoin: (request: CoinMappingRequest) =>
+    api.post<CoinMappingResponse>('/crypto/coin-mappings', request).then(r => r.data),
 
   /** Per-account stats — the per-exchange view (rewards detailed by program). */
   stats: (accountId: number) =>
