@@ -8,6 +8,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -42,7 +43,7 @@ public class OpenFigiIsinConverter {
         if (s == null) {
             return false;
         }
-        String upper = s.trim().toUpperCase();
+        String upper = s.trim().toUpperCase(Locale.ROOT);
         return upper.length() == 12 && ISIN_PATTERN.matcher(upper).matches();
     }
 
@@ -100,16 +101,11 @@ public class OpenFigiIsinConverter {
      * stays null / {@code ticker} stays the fake ISIN downstream. See GH issue #22.
      * The symbol is parsed generically (not hardcoded per coin) and validated
      * against {@link CoinGeckoPriceProvider}'s known tickers so the holding's
-     * ticker becomes price-resolvable, not just its display name.
+     * ticker becomes price-resolvable, not just its display name. The display name
+     * is derived from the same provider registry (no second per-coin map here).
      */
     private static final java.util.regex.Pattern TR_CRYPTO_ISIN_PATTERN =
         java.util.regex.Pattern.compile("^XF000([A-Z]+)[0-9]+$");
-
-    /** Friendlier display names for TR-native crypto symbols where the raw ticker isn't self-explanatory. */
-    private static final Map<String, String> CRYPTO_DISPLAY_NAMES = Map.of(
-        "BTC", "Bitcoin",
-        "ETH", "Ethereum"
-    );
 
     /** ISIN country prefix → preferred exchange code for that market. */
     private static final Map<String, String> HOME_EXCHANGE = Map.ofEntries(
@@ -121,10 +117,12 @@ public class OpenFigiIsinConverter {
     );
 
     private final WebClient webClient;
+    private final CoinGeckoPriceProvider coinGecko;
     // Cache: ISIN → TickerResult. Null value means conversion failed.
     private final Map<String, TickerResult> cache = new ConcurrentHashMap<>();
 
-    public OpenFigiIsinConverter() {
+    public OpenFigiIsinConverter(CoinGeckoPriceProvider coinGecko) {
+        this.coinGecko = coinGecko;
         this.webClient = WebClient.builder()
             .baseUrl("https://api.openfigi.com")
             .defaultHeader("Content-Type", "application/json")
@@ -148,24 +146,29 @@ public class OpenFigiIsinConverter {
 
         // Normalized once and used throughout (matching, cache key, fallback ticker) so that
         // e.g. " xf000btc0017 " and "XF000BTC0017" resolve to and cache under the same entry.
-        String normalized = isin.trim().toUpperCase();
+        String normalized = isin.trim().toUpperCase(Locale.ROOT);
 
-        java.util.regex.Matcher trCrypto = TR_CRYPTO_ISIN_PATTERN.matcher(normalized);
-        if (trCrypto.matches()) {
-            String symbol = trCrypto.group(1);
-            if (CoinGeckoPriceProvider.isKnownTicker(symbol)) {
-                String name = CRYPTO_DISPLAY_NAMES.getOrDefault(symbol, symbol);
-                return new TickerResult(symbol, name);
-            }
-            log.warn("TR-native crypto ISIN {} has unrecognized symbol '{}', falling back to OpenFIGI (will likely miss)",
-                     normalized, symbol);
-        }
-
-        // Check cache first
+        // Cache first — covers OpenFIGI results/fallbacks and the TR-crypto short-circuit
+        // below, so an unrecognized crypto symbol is warned about once (before its OpenFIGI
+        // miss is cached), not on every resolve() of the same holding.
         TickerResult cached = cache.get(normalized);
         if (cached != null) {
             log.debug("ISIN {} resolved from cache -> {} ({})", normalized, cached.ticker, cached.name);
             return cached;
+        }
+
+        // TR-native crypto short-circuit (see TR_CRYPTO_ISIN_PATTERN): parse the symbol and,
+        // if the price provider knows it, resolve straight to that ticker + display name.
+        java.util.regex.Matcher trCrypto = TR_CRYPTO_ISIN_PATTERN.matcher(normalized);
+        if (trCrypto.matches()) {
+            String symbol = trCrypto.group(1);
+            if (coinGecko.supports(symbol)) {
+                TickerResult result = new TickerResult(symbol, coinGecko.displayName(symbol));
+                cache.put(normalized, result);
+                return result;
+            }
+            log.warn("TR-native crypto ISIN {} has unrecognized symbol '{}', falling back to OpenFIGI (will likely miss)",
+                     normalized, symbol);
         }
 
         try {

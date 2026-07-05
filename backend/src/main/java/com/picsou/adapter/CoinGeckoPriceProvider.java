@@ -61,12 +61,24 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
 
     @Override
     public boolean supports(String ticker) {
-        return TICKER_TO_ID.containsKey(ticker.toUpperCase());
+        return ticker != null && TICKER_TO_ID.containsKey(ticker.toUpperCase(Locale.ROOT));
     }
 
-    /** Whether {@code ticker} is a known crypto symbol — used by {@link OpenFigiIsinConverter} to validate symbols parsed out of Trade Republic's internal crypto ISINs. */
-    public static boolean isKnownTicker(String ticker) {
-        return ticker != null && TICKER_TO_ID.containsKey(ticker.toUpperCase());
+    /**
+     * A human-readable display name for a known crypto {@code ticker}, derived from its
+     * CoinGecko coin id (e.g. BTC &rarr; "Bitcoin", MATIC &rarr; "Matic Network"), or
+     * {@code null} if the ticker is unknown. Keeps crypto naming in the single
+     * {@link #TICKER_TO_ID} registry rather than a second per-coin map elsewhere; used by
+     * {@link OpenFigiIsinConverter} to name Trade Republic's on-platform crypto holdings.
+     */
+    public String displayName(String ticker) {
+        if (ticker == null) return null;
+        String coinId = TICKER_TO_ID.get(ticker.toUpperCase(Locale.ROOT));
+        if (coinId == null) return null;
+        return Arrays.stream(coinId.split("-"))
+            .filter(word -> !word.isBlank())
+            .map(word -> Character.toUpperCase(word.charAt(0)) + word.substring(1))
+            .collect(java.util.stream.Collectors.joining(" "));
     }
 
     @Override

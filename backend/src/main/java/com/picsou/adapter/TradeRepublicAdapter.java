@@ -24,6 +24,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -165,7 +166,12 @@ public class TradeRepublicAdapter implements TradeRepublicPort {
         AtomicBoolean authExpired = new AtomicBoolean(false);
         AtomicInteger subIdCounter = new AtomicInteger(0);
         AtomicInteger expectedTickers = new AtomicInteger(-1);
-        AtomicInteger receivedTickers = new AtomicInteger(0);
+        // Distinct ticker subscriptions that have answered (by wsId), not a raw message
+        // count: a successful TR ticker sub streams an initial state plus continuous delta
+        // updates under the same wsId, so counting messages let a fast-ticking position
+        // complete the stream before slower positions had answered, dropping their prices
+        // to the averageBuyIn fallback. See GH issue #23 / PR #25 review.
+        Set<Integer> answeredTickerSubs = ConcurrentHashMap.newKeySet();
         AtomicInteger receivedPortfolios = new AtomicInteger(0);
         int totalPortfolioSubs = secAccNos.size();
 
@@ -290,18 +296,23 @@ public class TradeRepublicAdapter implements TradeRepublicPort {
 
                                 } else if (tickerSubToIsin.containsKey(wsId)) {
                                     String isin = tickerSubToIsin.get(wsId);
-                                    receivedTickers.incrementAndGet();
-                                    try {
-                                        JsonNode tickerRoot = objectMapper.readTree(payload);
-                                        String priceStr = tickerRoot.path("last").path("price").asText(null);
-                                        if (priceStr != null) {
-                                            tickerPrices.put(isin, new BigDecimal(priceStr));
-                                        } else {
-                                            log.warn("TR ticker for {} — no last.price in: {}", isin,
-                                                     payload.length() > 300 ? payload.substring(0, 300) : payload);
+                                    // Only the first message per subscription counts and is read;
+                                    // later delta updates for the same wsId are ignored (see
+                                    // answeredTickerSubs declaration). The initial message carries
+                                    // the full ticker state, which is all a sync snapshot needs.
+                                    if (answeredTickerSubs.add(wsId)) {
+                                        try {
+                                            JsonNode tickerRoot = objectMapper.readTree(payload);
+                                            String priceStr = tickerRoot.path("last").path("price").asText(null);
+                                            if (priceStr != null) {
+                                                tickerPrices.put(isin, new BigDecimal(priceStr));
+                                            } else {
+                                                log.warn("TR ticker for {} — no last.price in: {}", isin,
+                                                         payload.length() > 300 ? payload.substring(0, 300) : payload);
+                                            }
+                                        } catch (Exception ex) {
+                                            log.warn("Failed to parse ticker for {}: {}", isin, payload);
                                         }
-                                    } catch (Exception ex) {
-                                        log.warn("Failed to parse ticker for {}: {}", isin, payload);
                                     }
                                 }
 
@@ -314,7 +325,7 @@ public class TradeRepublicAdapter implements TradeRepublicPort {
                                 int exp = expectedTickers.get();
                                 boolean tickersDone = allPortfoliosIn
                                         && exp >= 0
-                                        && receivedTickers.get() >= exp;
+                                        && answeredTickerSubs.size() >= exp;
                                 return cashDone && tickersDone;
                             })
                             .timeout(Duration.ofSeconds(30))
