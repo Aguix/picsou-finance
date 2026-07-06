@@ -158,6 +158,7 @@ public class PriceService {
     public int backfillHistoricalPrices(Set<String> tickers, LocalDate from) {
         LocalDate to = LocalDate.now();
         int saved = 0;
+        List<String> noData = new ArrayList<>();
 
         for (String ticker : tickers) {
             String upper = ticker.toUpperCase();
@@ -165,11 +166,19 @@ public class PriceService {
 
             Map<LocalDate, BigDecimal> prices;
             if (coinGecko.supports(upper)) {
+                // CoinGecko throttles the free tier hard; the provider absorbs 429s by honouring the
+                // Retry-After the response carries and retrying, so this loop just walks the tickers.
                 prices = coinGecko.getHistoricalPricesEur(upper, from, to);
             } else {
                 prices = yahoo.getHistoricalPricesEur(upper, from, to);
             }
 
+            if (prices.isEmpty()) {
+                noData.add(upper);
+                continue;
+            }
+
+            int added = 0;
             for (var entry : prices.entrySet()) {
                 if (priceSnapshotRepository.findByTickerAndDate(upper, entry.getKey()).isEmpty()) {
                     priceSnapshotRepository.save(PriceSnapshot.builder()
@@ -178,10 +187,21 @@ public class PriceService {
                         .priceEur(entry.getValue())
                         .build());
                     saved++;
+                    added++;
                 }
             }
+            log.debug("Backfill {}: {} prices fetched, {} new snapshots", upper, prices.size(), added);
+        }
 
-            log.info("Backfilled {} prices for {}", prices.size(), upper);
+        // One summary line instead of one per ticker. A non-empty noData list on the free tier
+        // usually means a rate-limit (429) rather than genuinely-missing history — surfaced at WARN
+        // so it's actionable without the per-ticker flood.
+        int attempted = (int) tickers.stream().filter(t -> !"EUR".equalsIgnoreCase(t)).count();
+        if (noData.isEmpty()) {
+            log.info("Historical backfill: {} new snapshots across {} tickers", saved, attempted);
+        } else {
+            log.warn("Historical backfill: {} new snapshots; {}/{} tickers returned no data "
+                + "(rate-limit or unmapped): {}", saved, noData.size(), attempted, noData);
         }
 
         return saved;

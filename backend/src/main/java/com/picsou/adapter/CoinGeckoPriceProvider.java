@@ -12,6 +12,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -37,12 +40,23 @@ import java.util.stream.Collectors;
  * <p>An optional Demo API key ({@code app.coingecko.demo-api-key}) is sent as the
  * {@code x-cg-demo-api-key} header when present; absent, calls fall back to the anonymous free
  * tier with no change in behaviour beyond a stricter rate limit.
+ *
+ * <p>The free tier rate-limits aggressively (a burst 429s within a handful of calls). Rather than
+ * pace requests with a blind fixed delay, every call reacts to the actual {@code 429}: it waits the
+ * {@code Retry-After} the response carries (falling back to {@link #DEFAULT_RETRY_AFTER} if absent)
+ * and retries, up to {@link #MAX_RATE_LIMIT_RETRIES} times. So imports run at full speed until they
+ * actually hit the ceiling, then wait exactly as long as CoinGecko asks — see {@link #rateLimitRetry}.
  */
 @Component
 public class CoinGeckoPriceProvider implements PriceProviderPort {
 
     private static final Logger log = LoggerFactory.getLogger(CoinGeckoPriceProvider.class);
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
+
+    // Rate-limit backoff: how many times to retry a 429, and how long to wait when the response
+    // carries no usable Retry-After (CoinGecko's free-tier window is ~1 minute).
+    private static final int MAX_RATE_LIMIT_RETRIES = 4;
+    private static final Duration DEFAULT_RETRY_AFTER = Duration.ofSeconds(60);
 
     // Coin logo URLs (CoinGecko's own CDN icons) almost never change, so they're cached for the
     // process lifetime instead of the 15-minute TTL PriceService uses for prices.
@@ -62,6 +76,45 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             log.info("CoinGecko Demo API key configured");
         }
         this.webClient = builder.build();
+    }
+
+    /**
+     * Retry policy for a single CoinGecko call: on a {@code 429}, wait the response's
+     * {@code Retry-After} (or {@link #DEFAULT_RETRY_AFTER} when it's missing/unparseable) and retry,
+     * up to {@link #MAX_RATE_LIMIT_RETRIES} times. Any non-429 error propagates immediately. When the
+     * retries are exhausted the original 429 is re-thrown, so the caller's try/catch degrades to an
+     * empty result as before — never fabricating data.
+     */
+    private Retry rateLimitRetry(String context) {
+        return Retry.from(signals -> signals.flatMap(signal -> {
+            Throwable failure = signal.failure();
+            if (!isRateLimited(failure) || signal.totalRetries() >= MAX_RATE_LIMIT_RETRIES) {
+                return Mono.error(failure);
+            }
+            Duration wait = retryAfter(failure).orElse(DEFAULT_RETRY_AFTER);
+            log.warn("CoinGecko rate-limited on {} — waiting {}s before retry {}/{}",
+                context, wait.toSeconds(), signal.totalRetries() + 1, MAX_RATE_LIMIT_RETRIES);
+            return Mono.delay(wait);
+        }));
+    }
+
+    private static boolean isRateLimited(Throwable t) {
+        return t instanceof WebClientResponseException e && e.getStatusCode().value() == 429;
+    }
+
+    /** The {@code Retry-After} header (delta-seconds) from a 429, if present and numeric. */
+    private static Optional<Duration> retryAfter(Throwable t) {
+        if (t instanceof WebClientResponseException e) {
+            String header = e.getHeaders().getFirst("Retry-After");
+            if (header != null && !header.isBlank()) {
+                try {
+                    return Optional.of(Duration.ofSeconds(Long.parseLong(header.trim())));
+                } catch (NumberFormatException ignored) {
+                    // Retry-After can also be an HTTP-date; we don't parse that — fall back to default.
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     /** CoinGecko coin id for an uppercase ticker, from the persistent mapping cache, or null. */
@@ -100,6 +153,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, PriceData>>() {})
                 .timeout(TIMEOUT)
+                .retryWhen(rateLimitRetry("simple/price"))
                 .block();
 
             if (response == null) return Map.of();
@@ -151,6 +205,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<List<CoinMarketData>>() {})
                 .timeout(TIMEOUT)
+                .retryWhen(rateLimitRetry("coins/markets"))
                 .block();
 
             if (response != null) {
@@ -189,6 +244,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                 .retrieve()
                 .bodyToMono(SearchResponse.class)
                 .timeout(TIMEOUT)
+                .retryWhen(rateLimitRetry("search " + symbol))
                 .block();
 
             if (response == null || response.coins == null) return List.of();
@@ -224,6 +280,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                 .retrieve()
                 .bodyToMono(CoinDetail.class)
                 .timeout(TIMEOUT)
+                .retryWhen(rateLimitRetry("coins/" + coinId))
                 .block();
 
             if (detail == null || detail.id == null) return Optional.empty();
@@ -256,6 +313,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .timeout(Duration.ofSeconds(15))
+                .retryWhen(rateLimitRetry("intraday " + ticker))
                 .block();
 
             if (response == null) return Map.of();
@@ -305,6 +363,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .timeout(Duration.ofSeconds(15))
+                .retryWhen(rateLimitRetry("historical " + ticker))
                 .block();
 
             if (response == null) return Map.of();
