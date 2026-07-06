@@ -58,6 +58,12 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
     private static final int MAX_RATE_LIMIT_RETRIES = 4;
     private static final Duration DEFAULT_RETRY_AFTER = Duration.ofSeconds(60);
 
+    // CoinGecko's free/Demo tier only serves market_chart/range for the past ~365 days — an older
+    // `from` 401s (empirically 380d fails, 360d works; confirmed by the docs: "Public API (Demo plan)
+    // is restricted to the past 365 days"). A paid Pro key lifts this; we don't use one, so clamp
+    // historical requests to stay just inside the window rather than failing outright.
+    private static final int MAX_FREE_HISTORY_DAYS = 364;
+
     // Coin logo URLs (CoinGecko's own CDN icons) almost never change, so they're cached for the
     // process lifetime instead of the 15-minute TTL PriceService uses for prices.
     private final Map<String, String> logoCache = new ConcurrentHashMap<>();
@@ -348,6 +354,12 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
     public Map<LocalDate, BigDecimal> getHistoricalPricesEur(String ticker, LocalDate from, LocalDate to) {
         String coinId = coinId(ticker);
         if (coinId == null) return Map.of();
+
+        // The free/Demo tier can't reach data older than ~365 days (an older `from` 401s regardless
+        // of the window size), so clamp rather than fail — we return as much recent history as the
+        // tier allows. Older history would need a paid Pro key.
+        LocalDate floor = LocalDate.now().minusDays(MAX_FREE_HISTORY_DAYS);
+        if (from.isBefore(floor)) from = floor;
 
         try {
             long fromEpoch = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
