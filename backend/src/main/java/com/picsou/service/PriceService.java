@@ -156,14 +156,28 @@ public class PriceService {
      * Skips dates that already have a snapshot.
      */
     public int backfillHistoricalPrices(Set<String> tickers, LocalDate from) {
+        Map<String, LocalDate> byTicker = new HashMap<>();
+        for (String ticker : tickers) {
+            byTicker.put(ticker.toUpperCase(), from);
+        }
+        return backfillHistoricalPrices(byTicker);
+    }
+
+    /**
+     * Backfill each ticker from its own start date (per-coin anchoring), so a coin bought recently
+     * isn't fetched from the whole portfolio's earliest date. Gap-aware and idempotent: only the
+     * missing tail is fetched, and a coin already current is skipped entirely.
+     */
+    public int backfillHistoricalPrices(Map<String, LocalDate> firstDateByTicker) {
         LocalDate to = LocalDate.now();
         int saved = 0;
         List<String> noData = new ArrayList<>();
         List<String> upToDate = new ArrayList<>();
 
-        for (String ticker : tickers) {
-            String upper = ticker.toUpperCase();
+        for (Map.Entry<String, LocalDate> e : firstDateByTicker.entrySet()) {
+            String upper = e.getKey().toUpperCase();
             if ("EUR".equals(upper)) continue;
+            LocalDate from = e.getValue();
 
             // Gap-aware: only fetch what's missing. If the latest stored snapshot already reaches
             // yesterday (today's price is the live path's job), the coin is current → fetch nothing.
@@ -215,7 +229,8 @@ public class PriceService {
         // One summary line instead of one per ticker. A non-empty noData list on the free tier
         // usually means a rate-limit (429) rather than genuinely-missing history — surfaced at WARN
         // so it's actionable without the per-ticker flood.
-        int attempted = (int) tickers.stream().filter(t -> !"EUR".equalsIgnoreCase(t)).count();
+        int attempted = (int) firstDateByTicker.keySet().stream()
+            .filter(t -> !"EUR".equalsIgnoreCase(t)).count();
         int fetched = attempted - upToDate.size();
         if (noData.isEmpty()) {
             log.info("Historical backfill: {} new snapshots ({} tickers fetched, {} already up-to-date)",

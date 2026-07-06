@@ -1,6 +1,7 @@
 package com.picsou.config;
 
 import com.picsou.repository.AccountHoldingRepository;
+import com.picsou.repository.TickerEarliestDate;
 import com.picsou.repository.TransactionRepository;
 import com.picsou.service.PriceService;
 import org.slf4j.Logger;
@@ -10,16 +11,17 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 
 /**
  * Automatically backfills historical prices on startup if holding tickers have no price history.
  * Idempotent — the gap-aware backfill only fetches dates that aren't already stored.
  *
- * <p>The window is anchored to the portfolio's own history — the earliest transaction touching the
- * held tickers — so an account older than a year isn't truncated and a young one doesn't over-fetch.
- * Holdings with no transaction timeline (bank-synced or manually-entered positions) fall back to a
- * 12-month window.
+ * <p>Each ticker is anchored to <em>its own</em> earliest transaction — so a coin bought last month
+ * isn't fetched from a coin bought two years ago — instead of a single global window. Holdings with
+ * no transaction timeline (bank-synced or manually-entered positions) fall back to a 12-month window.
  */
 @Component
 public class PriceBackfillRunner implements ApplicationRunner {
@@ -45,10 +47,20 @@ public class PriceBackfillRunner implements ApplicationRunner {
             return;
         }
 
-        LocalDate earliestTx = transactionRepository.findEarliestDateByTickerIn(tickers);
-        LocalDate from = earliestTx != null ? earliestTx : LocalDate.now().minusMonths(12);
-        int saved = priceService.backfillHistoricalPrices(tickers, from);
-        log.info("Price backfill complete: {} snapshots saved for {} tickers (from {})",
-            saved, tickers.size(), from);
+        // Per-ticker anchor: each coin from its own first transaction; fall back to 12 months for
+        // tickers with no transaction (bank-synced / manual holdings).
+        LocalDate fallback = LocalDate.now().minusMonths(12);
+        Map<String, LocalDate> firstByTicker = new HashMap<>();
+        for (String ticker : tickers) {
+            firstByTicker.put(ticker.toUpperCase(), fallback);
+        }
+        for (TickerEarliestDate d : transactionRepository.findEarliestDatesByTickerIn(tickers)) {
+            if (d.getEarliestDate() != null) {
+                firstByTicker.put(d.getTicker().toUpperCase(), d.getEarliestDate());
+            }
+        }
+
+        int saved = priceService.backfillHistoricalPrices(firstByTicker);
+        log.info("Price backfill complete: {} snapshots saved for {} tickers", saved, tickers.size());
     }
 }

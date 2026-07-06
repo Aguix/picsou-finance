@@ -37,7 +37,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     @Query("SELECT MIN(t.date) FROM Transaction t")
     LocalDate findEarliestDate();
 
-    /** Earliest transaction date among the given tickers, or null when none of them has one. */
-    @Query("SELECT MIN(t.date) FROM Transaction t WHERE t.ticker IN :tickers")
-    LocalDate findEarliestDateByTickerIn(@Param("tickers") Set<String> tickers);
+    /** Earliest transaction date per ticker, for the tickers that have at least one transaction. */
+    @Query("SELECT t.ticker AS ticker, MIN(t.date) AS earliestDate FROM Transaction t "
+        + "WHERE t.ticker IN :tickers GROUP BY t.ticker")
+    List<TickerEarliestDate> findEarliestDatesByTickerIn(@Param("tickers") Set<String> tickers);
 }
