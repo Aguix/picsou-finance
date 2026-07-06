@@ -159,18 +159,36 @@ public class PriceService {
         LocalDate to = LocalDate.now();
         int saved = 0;
         List<String> noData = new ArrayList<>();
+        List<String> upToDate = new ArrayList<>();
 
         for (String ticker : tickers) {
             String upper = ticker.toUpperCase();
             if ("EUR".equals(upper)) continue;
 
+            // Gap-aware: only fetch what's missing. If the latest stored snapshot already reaches
+            // yesterday (today's price is the live path's job), the coin is current → fetch nothing.
+            // Otherwise fetch just the missing tail. This makes a warm restart's PriceBackfillRunner
+            // a no-op instead of re-downloading the whole window and burning the rate limit.
+            LocalDate effectiveFrom = from;
+            Optional<PriceSnapshot> latest = priceSnapshotRepository.findLatestByTickerBeforeOrOnDate(upper, to);
+            if (latest.isPresent()) {
+                LocalDate nextMissing = latest.get().getDate().plusDays(1);
+                if (!nextMissing.isBefore(to)) {   // covered up to (at least) yesterday
+                    upToDate.add(upper);
+                    continue;
+                }
+                if (nextMissing.isAfter(from)) {
+                    effectiveFrom = nextMissing;   // fetch only the gap since the last snapshot
+                }
+            }
+
             Map<LocalDate, BigDecimal> prices;
             if (coinGecko.supports(upper)) {
-                // CoinGecko throttles the free tier hard; the provider absorbs 429s by honouring the
-                // Retry-After the response carries and retrying, so this loop just walks the tickers.
-                prices = coinGecko.getHistoricalPricesEur(upper, from, to);
+                // The provider absorbs the free tier's 429s by honouring Retry-After and retrying,
+                // so this loop just walks the tickers.
+                prices = coinGecko.getHistoricalPricesEur(upper, effectiveFrom, to);
             } else {
-                prices = yahoo.getHistoricalPricesEur(upper, from, to);
+                prices = yahoo.getHistoricalPricesEur(upper, effectiveFrom, to);
             }
 
             if (prices.isEmpty()) {
@@ -190,18 +208,22 @@ public class PriceService {
                     added++;
                 }
             }
-            log.debug("Backfill {}: {} prices fetched, {} new snapshots", upper, prices.size(), added);
+            log.debug("Backfill {}: {} prices fetched from {}, {} new snapshots",
+                upper, prices.size(), effectiveFrom, added);
         }
 
         // One summary line instead of one per ticker. A non-empty noData list on the free tier
         // usually means a rate-limit (429) rather than genuinely-missing history — surfaced at WARN
         // so it's actionable without the per-ticker flood.
         int attempted = (int) tickers.stream().filter(t -> !"EUR".equalsIgnoreCase(t)).count();
+        int fetched = attempted - upToDate.size();
         if (noData.isEmpty()) {
-            log.info("Historical backfill: {} new snapshots across {} tickers", saved, attempted);
+            log.info("Historical backfill: {} new snapshots ({} tickers fetched, {} already up-to-date)",
+                saved, fetched, upToDate.size());
         } else {
-            log.warn("Historical backfill: {} new snapshots; {}/{} tickers returned no data "
-                + "(rate-limit or unmapped): {}", saved, noData.size(), attempted, noData);
+            log.warn("Historical backfill: {} new snapshots ({} fetched, {} up-to-date); "
+                + "{}/{} returned no data (rate-limit or unmapped): {}",
+                saved, fetched, upToDate.size(), noData.size(), attempted, noData);
         }
 
         return saved;
