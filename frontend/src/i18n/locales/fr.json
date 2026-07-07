@@ -353,6 +353,8 @@
   "addAccount": {
     "title": "Ajouter un compte",
     "manual": "Manuel",
+    "crypto": "Cryptomonnaie",
+    "cryptoCsv": "Import CSV",
     "or": "ou",
     "bankConnected": "Complétez la connexion dans le nouvel onglet",
     "exchangeConnected": "Exchange connecté !",
@@ -362,8 +364,10 @@
     "syncingDesc": "Récupération de vos dernières transactions. Cela prend généralement quelques secondes.",
     "desc": {
       "banks": "Connecter vos banques via OAuth",
+      "crypto": "Exchanges et wallets crypto",
       "exchanges": "Binance, Kraken...",
       "wallets": "Bitcoin, Ethereum, Solana...",
+      "cryptoCsv": "Crypto.com",
       "tr": "Trade Republic",
       "finary": "Importer depuis Finary",
       "manual": "Créer un compte manuellement"
@@ -492,6 +496,7 @@
       "totalRewards": "Total récompenses",
       "unvalued": "{{count}} ligne(s) sans valeur en euro dans le CSV — elles seront valorisées à l'import via l'historique des prix.",
       "unknown": "{{count}} ligne(s) de type inconnu seront importées sans impacter les positions.",
+      "unresolvedNote": "{{count}} crypto(s) non identifiée(s) — importées sans prix, à associer ensuite depuis la page Crypto.",
       "unresolved": {
         "title": "Cryptos à identifier",
         "hint": "Ces symboles n'ont pas pu être associés automatiquement à une crypto (symbole ambigu ou inconnu). Collez le lien de leur page CoinGecko pour les valoriser — sinon elles seront importées sans prix.",

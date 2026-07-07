@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AccountForm } from '@/components/shared/AccountForm'
 import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
+import { Badge } from '@/components/ui/badge'
 import { ACCOUNT_COLORS } from '@/lib/constants'
 import { getErrorStatus, getErrorDetail } from '@/lib/errors'
 import { useCreateAccount, useUpdateDebtMetadata } from '@/features/accounts/hooks'
@@ -31,11 +32,14 @@ import {
   useExecuteFinaryApiSync,
   useCheckFinaryTotp,
 } from '@/features/sync/hooks'
+import { usePreviewCryptoCsv, useImportCrypto, useCryptoSources } from '@/features/crypto/hooks'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import {
   Landmark,
   ArrowLeftRight,
   Wallet,
+  Coins,
+  FileText,
   Smartphone,
   FileSpreadsheet,
   PenLine,
@@ -50,7 +54,7 @@ import {
   ShieldCheck,
   RefreshCw,
 } from 'lucide-react'
-import type { ExchangeType, ChainType, AccountRequest, FinaryPreviewResponse, FinaryAccountMapping, FinaryMappingAction, FinaryImportResultResponse, AccountType } from '@/types/api'
+import type { ExchangeType, ChainType, AccountRequest, FinaryPreviewResponse, FinaryAccountMapping, FinaryMappingAction, FinaryImportResultResponse, AccountType, CryptoPreviewResponse, CryptoImportResult } from '@/types/api'
 
 // ---------------------------------------------------------------------------
 // Props & types
@@ -61,7 +65,7 @@ interface AddAccountModalProps {
   onOpenChange: (open: boolean) => void
 }
 
-type WizardStep = 'selector' | 'banks' | 'exchanges' | 'wallets' | 'tr' | 'finary' | 'manual'
+type WizardStep = 'selector' | 'banks' | 'crypto' | 'exchanges' | 'wallets' | 'crypto-import' | 'tr' | 'finary' | 'manual'
 
 /**
  * Masked variant of InputOTPSlot — replaces the typed character with a bullet
@@ -93,14 +97,47 @@ function MaskedOTPSlot({ index }: { index: number }) {
 // Source config
 // ---------------------------------------------------------------------------
 
-const SOURCES: { key: WizardStep; icon: typeof Landmark; labelKey: string; descKey: string }[] = [
+type SourceItem = { key: WizardStep; icon: typeof Landmark; labelKey: string; descKey: string }
+
+// Top-level sources. Crypto exchanges + wallets are grouped under a single
+// 'crypto' tile that opens the CRYPTO_SOURCES sub-selector.
+const SOURCES: SourceItem[] = [
   { key: 'banks', icon: Landmark, labelKey: 'sync.banks.title', descKey: 'addAccount.desc.banks' },
-  { key: 'exchanges', icon: ArrowLeftRight, labelKey: 'sync.exchanges.title', descKey: 'addAccount.desc.exchanges' },
-  { key: 'wallets', icon: Wallet, labelKey: 'sync.wallets.title', descKey: 'addAccount.desc.wallets' },
+  { key: 'crypto', icon: Coins, labelKey: 'addAccount.crypto', descKey: 'addAccount.desc.crypto' },
   { key: 'tr', icon: Smartphone, labelKey: 'sync.tr.title', descKey: 'addAccount.desc.tr' },
   { key: 'finary', icon: FileSpreadsheet, labelKey: 'sync.finary.title', descKey: 'addAccount.desc.finary' },
   { key: 'manual', icon: PenLine, labelKey: 'addAccount.manual', descKey: 'addAccount.desc.manual' },
 ]
+
+// Crypto sub-selector shown after clicking the 'crypto' tile.
+const CRYPTO_SOURCES: SourceItem[] = [
+  { key: 'exchanges', icon: ArrowLeftRight, labelKey: 'sync.exchanges.title', descKey: 'addAccount.desc.exchanges' },
+  { key: 'wallets', icon: Wallet, labelKey: 'sync.wallets.title', descKey: 'addAccount.desc.wallets' },
+  { key: 'crypto-import', icon: FileText, labelKey: 'addAccount.cryptoCsv', descKey: 'addAccount.desc.cryptoCsv' },
+]
+
+function SourceGrid({ sources, onSelect }: { sources: SourceItem[]; onSelect: (key: WizardStep) => void }) {
+  const { t } = useTranslation()
+  return (
+    <div className="grid grid-cols-1 gap-2">
+      {sources.map(({ key, icon: Icon, labelKey, descKey }) => (
+        <Button
+          key={key}
+          variant="outline"
+          className="h-auto justify-start gap-3 px-4 py-3"
+          onClick={() => onSelect(key)}
+        >
+          <Icon className="size-5 text-muted-foreground shrink-0" />
+          <div className="text-left">
+            <p className="text-sm font-medium">{t(labelKey)}</p>
+            <p className="text-xs text-muted-foreground">{t(descKey)}</p>
+          </div>
+          <ArrowRight className="size-4 text-muted-foreground ml-auto shrink-0" />
+        </Button>
+      ))}
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -113,13 +150,13 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
   const [step, setStep] = useState<WizardStep>('selector')
   const [showManualForm, setShowManualForm] = useState(false)
 
-  function handleSourceClick(key: string) {
+  function handleSourceClick(key: WizardStep) {
     if (key === 'manual') {
       onOpenChange(false)
       setShowManualForm(true)
       return
     }
-    setStep(key as WizardStep)
+    setStep(key)
   }
 
   function handleDialogChange(open: boolean) {
@@ -188,35 +225,31 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {step === 'selector' ? t('addAccount.title') : t(`sync.${step === 'tr' ? 'tr' : step}.title`)}
+              {step === 'selector'
+                ? t('addAccount.title')
+                : step === 'crypto'
+                  ? t('addAccount.crypto')
+                  : step === 'crypto-import'
+                    ? t('sync.crypto.title')
+                    : t(`sync.${step}.title`)}
             </DialogTitle>
             <DialogDescription />
           </DialogHeader>
 
           <>
-              {step === 'selector' && (
-                <div className="grid grid-cols-1 gap-2">
-                  {SOURCES.map(({ key, icon: Icon, labelKey, descKey }) => (
-                    <Button
-                      key={key}
-                      variant="outline"
-                      className="h-auto justify-start gap-3 px-4 py-3"
-                      onClick={() => handleSourceClick(key)}
-                    >
-                      <Icon className="size-5 text-muted-foreground shrink-0" />
-                      <div className="text-left">
-                        <p className="text-sm font-medium">{t(labelKey)}</p>
-                        <p className="text-xs text-muted-foreground">{t(descKey)}</p>
-                      </div>
-                      <ArrowRight className="size-4 text-muted-foreground ml-auto shrink-0" />
-                    </Button>
-                  ))}
-                </div>
+              {step === 'selector' && <SourceGrid sources={SOURCES} onSelect={handleSourceClick} />}
+
+              {step === 'crypto' && (
+                <>
+                  <BackButton onClick={() => setStep('selector')} />
+                  <SourceGrid sources={CRYPTO_SOURCES} onSelect={handleSourceClick} />
+                </>
               )}
 
               {step === 'banks' && <BankWizard onDone={handleDone} onBack={() => setStep('selector')} />}
-              {step === 'exchanges' && <ExchangeWizard onDone={handleDone} onBack={() => setStep('selector')} />}
-              {step === 'wallets' && <WalletWizard onDone={handleDone} onBack={() => setStep('selector')} />}
+              {step === 'exchanges' && <ExchangeWizard onDone={handleDone} onBack={() => setStep('crypto')} />}
+              {step === 'wallets' && <WalletWizard onDone={handleDone} onBack={() => setStep('crypto')} />}
+              {step === 'crypto-import' && <CryptoCsvWizard onDone={handleDone} onBack={() => setStep('crypto')} />}
               {step === 'tr' && <TradeRepublicWizard onDone={handleDone} onBack={() => setStep('selector')} />}
               {step === 'finary' && <FinaryWizard onDone={handleDone} onBack={() => setStep('selector')} />}
             </>
@@ -542,6 +575,211 @@ function WalletWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
         </Button>
       </form>
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Wizard: Crypto CSV import (compact)
+//
+// Slim variant of CryptoImportTab tailored to the dialog: drop a CSV → preview
+// summary → pick the target account → import. The CoinGecko resolution UI is
+// intentionally left out; unresolved coins import unpriced and are resolvable
+// later from the crypto page (a short note points there).
+// ---------------------------------------------------------------------------
+
+function CryptoCsvWizard({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
+  const { t } = useTranslation()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const { data: sources } = useCryptoSources()
+  const previewMutation = usePreviewCryptoCsv()
+  const importMutation = useImportCrypto()
+
+  const [preview, setPreview] = useState<CryptoPreviewResponse | null>(null)
+  const [target, setTarget] = useState<'CREATE_NEW' | number>('CREATE_NEW')
+  const [accountName, setAccountName] = useState('')
+  const [result, setResult] = useState<CryptoImportResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState(false)
+
+  function handleFile(file: File) {
+    setError(null)
+    previewMutation.mutate(file, {
+      onSuccess: (data) => {
+        setPreview(data)
+        setAccountName(data.sourceLabel)
+        setTarget('CREATE_NEW')
+      },
+      onError: (err: unknown) => setError(getErrorDetail(err) || (err as { message?: string })?.message || t('common.retry')),
+    })
+  }
+
+  function handleImport() {
+    if (!preview) return
+    setError(null)
+    importMutation.mutate(
+      {
+        fileToken: preview.fileToken,
+        action: target === 'CREATE_NEW' ? 'CREATE_NEW' : 'MAP_EXISTING',
+        targetAccountId: target === 'CREATE_NEW' ? undefined : target,
+        accountName: target === 'CREATE_NEW' ? accountName : undefined,
+      },
+      {
+        onSuccess: (data) => setResult(data),
+        onError: (err: unknown) => setError(getErrorDetail(err) || (err as { message?: string })?.message || t('common.retry')),
+      },
+    )
+  }
+
+  if (result) {
+    return (
+      <>
+        <BackButton onClick={onBack} />
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+          <CheckCircle2 className="size-8 text-green-500" />
+          <p className="text-sm font-medium">{t('sync.crypto.done')}</p>
+          <p className="text-xs text-muted-foreground">
+            {t('sync.crypto.doneDetail', { tx: result.transactionsImported, holdings: result.holdingsCount })}
+          </p>
+          <Button onClick={onDone} className="mt-2">
+            <CheckCircle2 className="size-4" />
+            {t('sync.finary.done')}
+          </Button>
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <BackButton onClick={onBack} />
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive mb-4">
+          <span className="flex-1">{error}</span>
+          <Button variant="ghost" size="sm" onClick={() => setError(null)}>x</Button>
+        </div>
+      )}
+
+      {!preview ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">{t('sync.crypto.intro')}</p>
+
+          {sources && sources.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">{t('sync.crypto.supported')}:</span>
+              {sources.map((s) => (
+                <Badge key={s.id} variant="outline">{s.label}</Badge>
+              ))}
+            </div>
+          )}
+
+          <div
+            className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
+              dragOver ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-muted-foreground/50'
+            }`}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+              const f = e.dataTransfer.files?.[0]
+              if (f) handleFile(f)
+            }}
+          >
+            <Upload className="size-5 text-muted-foreground" />
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={previewMutation.isPending}>
+              {previewMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
+              {t('sync.crypto.choose')}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) handleFile(f)
+                if (fileInputRef.current) fileInputRef.current.value = ''
+              }}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Detected summary */}
+          <div className="rounded-lg border p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">{t('sync.crypto.detected')}</span>
+              <Badge variant="secondary">{preview.sourceLabel}</Badge>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <MiniStat label={t('sync.crypto.transactions')} value={preview.transactionCount} />
+              <MiniStat label={t('sync.crypto.coins')} value={preview.currencies.length} />
+              <MiniStat label={t('sync.crypto.rewards')} value={preview.rewardCount} />
+            </div>
+            {preview.unresolvedTickers.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t('sync.crypto.unresolvedNote', { count: preview.unresolvedTickers.length })}
+              </p>
+            )}
+          </div>
+
+          {/* Target account */}
+          <div className="space-y-2">
+            <Label>{t('sync.crypto.target')}</Label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={target === 'CREATE_NEW' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTarget('CREATE_NEW')}
+              >
+                {t('sync.crypto.createNew')}
+              </Button>
+              {preview.existingAccounts.map((a) => (
+                <Button
+                  key={a.id}
+                  variant={target === a.id ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setTarget(a.id)}
+                >
+                  {a.name}
+                </Button>
+              ))}
+            </div>
+            {target === 'CREATE_NEW' && (
+              <Input
+                value={accountName}
+                onChange={(e) => setAccountName(e.target.value)}
+                placeholder={t('sync.crypto.accountName')}
+              />
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setPreview(null); setError(null) }}>
+              <ArrowLeft className="size-4" />
+              {t('common.back')}
+            </Button>
+            <Button
+              onClick={handleImport}
+              disabled={importMutation.isPending || (target === 'CREATE_NEW' && !accountName.trim())}
+              className="flex-1"
+            >
+              {importMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+              {t('sync.crypto.import')}
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md bg-muted/40 px-2 py-1.5">
+      <p className="text-base font-semibold">{value}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
+    </div>
   )
 }
 

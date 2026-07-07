@@ -353,6 +353,8 @@
   "addAccount": {
     "title": "Add account",
     "manual": "Manual",
+    "crypto": "Cryptocurrency",
+    "cryptoCsv": "CSV import",
     "or": "or",
     "bankConnected": "Complete the connection in the new tab",
     "exchangeConnected": "Exchange connected!",
@@ -362,8 +364,10 @@
     "syncingDesc": "We're pulling in your latest transactions. This usually takes a few seconds.",
     "desc": {
       "banks": "Connect your banks via OAuth",
+      "crypto": "Crypto exchanges and wallets",
       "exchanges": "Binance, Kraken...",
       "wallets": "Bitcoin, Ethereum, Solana...",
+      "cryptoCsv": "Crypto.com",
       "tr": "Trade Republic",
       "finary": "Import from Finary",
       "manual": "Create an account manually"
@@ -492,6 +496,7 @@
       "totalRewards": "Total rewards",
       "unvalued": "{{count}} row(s) carry no euro value in the CSV — they will be valued at import time from price history.",
       "unknown": "{{count}} row(s) of unknown type will be imported without affecting positions.",
+      "unresolvedNote": "{{count}} coin(s) couldn't be identified — imported unpriced; map them later from the Crypto page.",
       "unresolved": {
         "title": "Coins to identify",
         "hint": "These symbols couldn't be matched to a coin automatically (ambiguous or unknown symbol). Paste their CoinGecko page link to value them — otherwise they'll be imported without a price.",
