@@ -389,10 +389,15 @@ export interface CoinMappingRequest {
   coingeckoUrl: string
 }
 
+/** A persisted ticker → CoinGecko coin-id mapping, as listed/edited in the management UI. */
 export interface CoinMappingResponse {
   ticker: string
-  coingeckoId: string
+  /** Null for a WORTHLESS mapping — a delisted ticker with no CoinGecko coin. */
+  coingeckoId: string | null
   coinName: string | null
+  /** AUTO (dominant match), USER (operator link), or WORTHLESS (delisted, valued at zero). */
+  resolvedVia: 'AUTO' | 'USER' | 'WORTHLESS'
+  updatedAt: string
 }
 
 export interface CryptoImportRequest {

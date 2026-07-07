@@ -2,7 +2,9 @@ package com.picsou.service;
 
 import com.picsou.adapter.CoinGeckoPriceProvider;
 import com.picsou.adapter.YahooFinancePriceProvider;
+import com.picsou.model.CoinMapping;
 import com.picsou.model.PriceSnapshot;
+import com.picsou.repository.CoinMappingRepository;
 import com.picsou.repository.PriceSnapshotRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,15 +26,23 @@ public class PriceService {
     private final CoinGeckoPriceProvider coinGecko;
     private final YahooFinancePriceProvider yahoo;
     private final PriceSnapshotRepository priceSnapshotRepository;
+    private final CoinMappingRepository coinMappingRepository;
 
     // Simple in-memory price cache: ticker → (price, cachedAt)
     private final Map<String, CachedPrice> priceCache = new ConcurrentHashMap<>();
 
     public PriceService(CoinGeckoPriceProvider coinGecko, YahooFinancePriceProvider yahoo,
-                        PriceSnapshotRepository priceSnapshotRepository) {
+                        PriceSnapshotRepository priceSnapshotRepository,
+                        CoinMappingRepository coinMappingRepository) {
         this.coinGecko = coinGecko;
         this.yahoo = yahoo;
         this.priceSnapshotRepository = priceSnapshotRepository;
+        this.coinMappingRepository = coinMappingRepository;
+    }
+
+    /** A ticker the operator marked WORTHLESS (delisted): priced at a fixed zero, never fetched. */
+    private boolean isWorthless(String upperTicker) {
+        return coinMappingRepository.findByTicker(upperTicker).map(CoinMapping::isWorthless).orElse(false);
     }
 
     /**
@@ -46,6 +56,9 @@ public class PriceService {
         }
 
         String upper = ticker.toUpperCase();
+
+        // A ticker marked WORTHLESS is valued at a known zero — no cache, no provider call.
+        if (isWorthless(upper)) return BigDecimal.ZERO;
 
         // Check cache
         CachedPrice cached = priceCache.get(upper);
@@ -80,11 +93,17 @@ public class PriceService {
 
         Set<String> cryptoTickers = new HashSet<>();
         Set<String> stockTickers = new HashSet<>();
+        Set<String> worthlessTickers = new HashSet<>();
 
         for (String ticker : tickers) {
             String upper = ticker.toUpperCase();
             if ("EUR".equals(upper)) {
                 result.put(upper, BigDecimal.ONE);
+            } else if (isWorthless(upper)) {
+                // Known-zero: prices the holding at 0 without hitting any provider, and (below)
+                // without writing a phantom 0 snapshot into the price history.
+                worthlessTickers.add(upper);
+                result.put(upper, BigDecimal.ZERO);
             } else if (coinGecko.supports(upper)) {
                 cryptoTickers.add(upper);
             } else {
@@ -112,6 +131,7 @@ public class PriceService {
         LocalDate today = LocalDate.now();
         for (var entry : result.entrySet()) {
             if ("EUR".equals(entry.getKey())) continue;
+            if (worthlessTickers.contains(entry.getKey())) continue; // don't snapshot a fixed zero
             if (entry.getValue() == null) continue;
             Optional<PriceSnapshot> existing = priceSnapshotRepository.findByTickerAndDate(entry.getKey(), today);
             if (existing.isPresent()) {
@@ -177,6 +197,7 @@ public class PriceService {
         for (Map.Entry<String, LocalDate> e : firstDateByTicker.entrySet()) {
             String upper = e.getKey().toUpperCase();
             if ("EUR".equals(upper)) continue;
+            if (isWorthless(upper)) continue;   // fixed-zero: no history to fetch, no provider call
             LocalDate from = e.getValue();
 
             // Gap-aware: only fetch what's missing. If the latest stored snapshot already reaches
@@ -253,6 +274,11 @@ public class PriceService {
     /** Drop the in-memory price cache. Used by PriceFxCleanupRunner. */
     public void clearPriceCache() {
         priceCache.clear();
+    }
+
+    /** Evict one ticker from the in-memory cache — used when its coin mapping changes. */
+    public void evictFromCache(String ticker) {
+        if (ticker != null) priceCache.remove(ticker.toUpperCase());
     }
 
     /**

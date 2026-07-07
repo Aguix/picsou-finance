@@ -58,6 +58,21 @@
     "emptyAccount": {
       "title": "No data for this account",
       "desc": "This account has no imported crypto positions or transactions yet."
+    },
+    "mappings": {
+      "title": "CoinGecko mappings",
+      "desc": "Each imported symbol is mapped to a CoinGecko coin so it can be priced. If a mapping is wrong, paste the link of the right CoinGecko page — the symbol's price history will be re-fetched. A delisted coin can be marked \"worthless\".",
+      "empty": "No mappings yet — they are created during crypto imports.",
+      "viaAuto": "Auto",
+      "viaUser": "Manual",
+      "viaWorthless": "Worthless",
+      "worthlessLabel": "Worthless (delisted)",
+      "markWorthless": "Mark as worthless (delisted)",
+      "restore": "Restore pricing",
+      "edit": "Fix",
+      "apply": "Fix",
+      "delete": "Forget",
+      "confirmDelete": "Confirm?"
     }
   },
   "cryptoStats": {
@@ -480,7 +495,9 @@
       "unresolved": {
         "title": "Coins to identify",
         "hint": "These symbols couldn't be matched to a coin automatically (ambiguous or unknown symbol). Paste their CoinGecko page link to value them — otherwise they'll be imported without a price.",
-        "link": "Match"
+        "link": "Match",
+        "worthless": "Worthless",
+        "worthlessHint": "Delisted coin, no price available — valued at 0"
       },
       "target": "Target account",
       "createNew": "New account",

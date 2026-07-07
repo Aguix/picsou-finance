@@ -7,6 +7,7 @@ export const cryptoKeys = {
   sources: () => [...cryptoKeys.all, 'sources'] as const,
   stats: (accountId: number) => [...cryptoKeys.all, 'stats', accountId] as const,
   consolidated: () => [...cryptoKeys.all, 'stats', 'consolidated'] as const,
+  mappings: () => [...cryptoKeys.all, 'mappings'] as const,
 }
 
 /** The supported CSV source formats — static per backend build, cached aggressively. */
@@ -24,11 +25,52 @@ export function usePreviewCryptoCsv() {
   })
 }
 
-/** Pin an ambiguous ticker to a coin via its CoinGecko link, so the import can price it. */
+/** All known ticker → CoinGecko mappings, for the management UI. */
+export function useCoinMappings(enabled = true) {
+  return useQuery({
+    queryKey: cryptoKeys.mappings(),
+    queryFn: () => cryptoApi.coinMappings(),
+    enabled,
+    staleTime: 60_000,
+  })
+}
+
+/**
+ * Pin an ambiguous ticker to a coin via its CoinGecko link — used to resolve a new ticker at
+ * import time and to correct a wrong mapping. A correction changes the coin's prices, so every
+ * crypto/value query is refetched.
+ */
 export function useResolveCoin() {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (request: CoinMappingRequest) => cryptoApi.resolveCoin(request),
+    onSuccess: () => invalidateAfterMappingChange(queryClient),
   })
+}
+
+/** Mark a delisted ticker as worthless — CoinGecko can't price it, so it's pinned to zero. */
+export function useMarkCoinWorthless() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ticker: string) => cryptoApi.markCoinWorthless(ticker),
+    onSuccess: () => invalidateAfterMappingChange(queryClient),
+  })
+}
+
+/** Forget a mapping made by mistake — the ticker goes back to unresolved (and unpriced). */
+export function useDeleteCoinMapping() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ticker: string) => cryptoApi.deleteCoinMapping(ticker),
+    onSuccess: () => invalidateAfterMappingChange(queryClient),
+  })
+}
+
+/** A mapping change re-prices the coin (history included) — refetch everything value-related. */
+function invalidateAfterMappingChange(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: cryptoKeys.all })
+  queryClient.invalidateQueries({ queryKey: ['accounts'] })
+  queryClient.invalidateQueries({ queryKey: ['dashboard'] })
 }
 
 export function useImportCrypto() {

@@ -2,17 +2,26 @@ package com.picsou.service;
 
 import com.picsou.adapter.CoinGeckoPriceProvider;
 import com.picsou.adapter.CoinGeckoPriceProvider.CoinCandidate;
+import com.picsou.model.AccountHolding;
 import com.picsou.model.CoinMapping;
+import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.CoinMappingRepository;
+import com.picsou.repository.PriceSnapshotRepository;
+import com.picsou.repository.TickerEarliestDate;
+import com.picsou.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -30,8 +39,12 @@ import java.util.regex.Pattern;
  *   <li>if exactly one symbol match, or one that <em>dominates</em> the others by market-cap rank,
  *       persist it as {@code AUTO};</li>
  *   <li>otherwise leave it unresolved — the operator disambiguates by supplying the CoinGecko link
- *       (handled in a later commit); we never guess between comparable coins.</li>
+ *       ({@link #setManualMapping}); we never guess between comparable coins.</li>
  * </ol>
+ *
+ * <p>Mappings can also be listed, corrected, and forgotten after the fact (management UI): a
+ * correction that changes the coin id purges the ticker's price history — fetched under the wrong
+ * coin — and refetches it under the right one.</p>
  *
  * <p>Called at crypto-import time, where the context guarantees the ticker really is a crypto —
  * so a symbol that also exists as a stock ticker can't be mis-resolved by the general price path.
@@ -54,6 +67,16 @@ public class CoinMappingService {
 
     private final CoinGeckoPriceProvider coinGecko;
     private final CoinMappingRepository coinMappingRepository;
+    private final PriceSnapshotRepository priceSnapshotRepository;
+    private final TransactionRepository transactionRepository;
+    private final AccountHoldingRepository accountHoldingRepository;
+    private final PriceService priceService;
+
+    /** All known mappings, for the management UI. */
+    @Transactional(readOnly = true)
+    public List<CoinMapping> listAll() {
+        return coinMappingRepository.findAll(Sort.by("ticker"));
+    }
 
     /** Resolve a single ticker, persisting the mapping if a confident match is found. */
     @Transactional
@@ -121,6 +144,7 @@ public class CoinMappingService {
 
         CoinMapping mapping = coinMappingRepository.findByTicker(upper)
             .orElseGet(() -> CoinMapping.builder().ticker(upper).build());
+        String previousId = mapping.getCoingeckoId();
         mapping.setCoingeckoId(coin.id());
         mapping.setCoinName(coin.name());
         mapping.setResolvedVia("USER");
@@ -128,7 +152,93 @@ public class CoinMappingService {
 
         CoinMapping saved = coinMappingRepository.save(mapping);
         log.info("User-mapped crypto ticker {} → CoinGecko id '{}' ({})", upper, coin.id(), coin.name());
+
+        // Re-pinning to a *different* coin means every price fetched under the old id is wrong:
+        // purge the ticker's history and refetch it under the corrected coin. Re-pinning to the
+        // same coin keeps the history — it was fetched from the right source.
+        if (previousId != null && !previousId.equals(coin.id())) {
+            purgeAndRefetchPrices(upper);
+        }
         return saved;
+    }
+
+    /**
+     * Forget a mapping entirely — used when a ticker was mapped by mistake. The ticker's price
+     * history is purged too (it was fetched under the now-disowned coin id); the ticker goes back
+     * to unresolved and the next import preview re-runs auto-resolution.
+     */
+    @Transactional
+    public void delete(String ticker) {
+        String upper = ticker.trim().toUpperCase();
+        CoinMapping mapping = coinMappingRepository.findByTicker(upper).orElseThrow(() ->
+            new IllegalArgumentException("No coin mapping exists for ticker '" + upper + "'."));
+        coinMappingRepository.delete(mapping);
+        priceSnapshotRepository.deleteByTicker(upper);
+        priceService.evictFromCache(upper);
+        log.info("Deleted coin mapping for {} (was CoinGecko id '{}') and purged its price history",
+            upper, mapping.getCoingeckoId());
+    }
+
+    /**
+     * Mark a ticker as <b>worthless</b> — a delisted coin CoinGecko can neither auto-resolve nor
+     * price via a link. The ticker is pinned to a known-zero value instead of left silently
+     * unpriced: any price fetched while it was still listed is purged, the live cache evicted, and
+     * every holding of the ticker re-valued to zero. Idempotent, and reversible — re-pinning a
+     * CoinGecko link ({@link #setManualMapping}) or forgetting it ({@link #delete}) undoes it.
+     */
+    @Transactional
+    public CoinMapping markWorthless(String ticker) {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("Ticker is required.");
+        }
+        String upper = ticker.trim().toUpperCase();
+
+        CoinMapping mapping = coinMappingRepository.findByTicker(upper)
+            .orElseGet(() -> CoinMapping.builder().ticker(upper).build());
+        mapping.setCoingeckoId(null);
+        mapping.setCoinName(null);
+        mapping.setResolvedVia("WORTHLESS");
+        mapping.setUpdatedAt(Instant.now());
+        CoinMapping saved = coinMappingRepository.save(mapping);
+
+        priceSnapshotRepository.deleteByTicker(upper);
+        priceService.evictFromCache(upper);
+        zeroHoldings(upper);
+        log.info("Marked crypto ticker {} as worthless — purged price history and zeroed its holdings", upper);
+        return saved;
+    }
+
+    /** Force every holding of a ticker to a known-zero current price (assumed worthless). */
+    private void zeroHoldings(String upperTicker) {
+        List<AccountHolding> holdings = accountHoldingRepository.findByTickerIgnoreCase(upperTicker);
+        for (AccountHolding h : holdings) {
+            h.setCurrentPrice(BigDecimal.ZERO);
+        }
+        accountHoldingRepository.saveAll(holdings);
+    }
+
+    /**
+     * Drop everything priced under the old coin id (snapshots + live cache) and backfill the
+     * history under the new one, anchored to the ticker's earliest transaction (12 months when it
+     * has none). Backfill failures are non-fatal — the mapping is already corrected, and the
+     * boot-time runner or a later import fills the gap.
+     */
+    private void purgeAndRefetchPrices(String upperTicker) {
+        int purged = priceSnapshotRepository.deleteByTicker(upperTicker);
+        priceService.evictFromCache(upperTicker);
+        log.info("Coin mapping for {} changed — purged {} price snapshots fetched under the old id",
+            upperTicker, purged);
+        try {
+            LocalDate from = transactionRepository.findEarliestDatesByTickerIn(Set.of(upperTicker)).stream()
+                .map(TickerEarliestDate::getEarliestDate)
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .orElse(LocalDate.now().minusMonths(12));
+            priceService.backfillHistoricalPrices(Map.of(upperTicker, from));
+        } catch (Exception e) {
+            log.warn("Price re-backfill after remapping {} failed (will be retried at next boot): {}",
+                upperTicker, e.getMessage());
+        }
     }
 
     /** Extract the CoinGecko coin-id slug from a coin-page URL, rejecting anything that isn't one. */

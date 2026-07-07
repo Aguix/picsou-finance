@@ -12,6 +12,7 @@ import {
   usePreviewCryptoCsv,
   useImportCrypto,
   useCryptoSources,
+  useMarkCoinWorthless,
   useResolveCoin,
 } from '@/features/crypto/hooks'
 import { extractErrorMessage } from '@/lib/errors'
@@ -349,12 +350,15 @@ function CoinResolveRow({ ticker, onResolved }: { ticker: string; onResolved: (t
   const { t } = useTranslation()
   const [url, setUrl] = useState('')
   const resolveMutation = useResolveCoin()
+  const worthlessMutation = useMarkCoinWorthless()
 
   function submit() {
     const link = url.trim()
     if (!link) return
     resolveMutation.mutate({ ticker, coingeckoUrl: link }, { onSuccess: () => onResolved(ticker) })
   }
+
+  const busy = resolveMutation.isPending || worthlessMutation.isPending
 
   return (
     <div className="space-y-1">
@@ -373,15 +377,30 @@ function CoinResolveRow({ ticker, onResolved }: { ticker: string; onResolved: (t
           size="sm"
           variant="outline"
           onClick={submit}
-          disabled={resolveMutation.isPending || !url.trim()}
+          disabled={busy || !url.trim()}
         >
           {resolveMutation.isPending
             ? t('common.loading', 'Chargement…')
             : t('sync.crypto.unresolved.link', 'Associer')}
         </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground"
+          disabled={busy}
+          onClick={() => worthlessMutation.mutate(ticker, { onSuccess: () => onResolved(ticker) })}
+          title={t('sync.crypto.unresolved.worthlessHint', 'Crypto délistée, sans prix disponible')}
+        >
+          {worthlessMutation.isPending
+            ? t('common.loading', 'Chargement…')
+            : t('sync.crypto.unresolved.worthless', 'Sans valeur')}
+        </Button>
       </div>
       {resolveMutation.isError && (
         <p className="text-xs text-red-500">{extractErrorMessage(resolveMutation.error)}</p>
+      )}
+      {worthlessMutation.isError && (
+        <p className="text-xs text-red-500">{extractErrorMessage(worthlessMutation.error)}</p>
       )}
     </div>
   )

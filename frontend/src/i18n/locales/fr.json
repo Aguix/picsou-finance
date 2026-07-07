@@ -58,6 +58,21 @@
     "emptyAccount": {
       "title": "Aucune donnée pour ce compte",
       "desc": "Ce compte n'a pas encore de positions ni de transactions crypto importées."
+    },
+    "mappings": {
+      "title": "Correspondances CoinGecko",
+      "desc": "Chaque symbole importé est associé à une crypto CoinGecko pour être valorisé. En cas d'erreur, collez le lien de la bonne page CoinGecko — l'historique de prix du symbole sera re-téléchargé. Une crypto délistée peut être marquée « sans valeur ».",
+      "empty": "Aucune correspondance pour le moment — elles sont créées lors des imports crypto.",
+      "viaAuto": "Auto",
+      "viaUser": "Manuel",
+      "viaWorthless": "Sans valeur",
+      "worthlessLabel": "Sans valeur (délistée)",
+      "markWorthless": "Marquer sans valeur (délistée)",
+      "restore": "Rétablir le prix",
+      "edit": "Corriger",
+      "apply": "Corriger",
+      "delete": "Oublier",
+      "confirmDelete": "Confirmer ?"
     }
   },
   "cryptoStats": {
@@ -480,7 +495,9 @@
       "unresolved": {
         "title": "Cryptos à identifier",
         "hint": "Ces symboles n'ont pas pu être associés automatiquement à une crypto (symbole ambigu ou inconnu). Collez le lien de leur page CoinGecko pour les valoriser — sinon elles seront importées sans prix.",
-        "link": "Associer"
+        "link": "Associer",
+        "worthless": "Sans valeur",
+        "worthlessHint": "Crypto délistée, sans prix disponible — valorisée à 0"
       },
       "target": "Compte de destination",
       "createNew": "Nouveau compte",

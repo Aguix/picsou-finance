@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Bitcoin, Globe } from 'lucide-react'
+import { Bitcoin, Globe, Link2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/shared/PageHeader'
@@ -8,6 +9,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { CryptoStatsView } from '@/components/shared/CryptoStatsSection'
 import { useConsolidatedCryptoStats, useCryptoStats } from '@/features/crypto/hooks'
 import { useAccounts } from '@/features/accounts/hooks'
+import { CoinMappingsDialog } from './CoinMappingsDialog'
 import type { Account } from '@/types/api'
 
 /**
@@ -34,6 +36,7 @@ export function CryptoOverviewPage() {
 
   const consolidated = useConsolidatedCryptoStats()
   const perAccount = useCryptoStats(selected?.id ?? NaN, selected != null)
+  const [mappingsOpen, setMappingsOpen] = useState(false)
 
   const { data, isLoading } = selected ? perAccount : consolidated
   const hasData = !!data && Array.isArray(data.assets) && data.assets.length > 0
@@ -47,7 +50,14 @@ export function CryptoOverviewPage() {
       <PageHeader
         surtitle={t('crypto.surtitle', 'Portefeuille')}
         title={t('crypto.title', 'Mes cryptos')}
+        actions={
+          <Button variant="outline" size="sm" onClick={() => setMappingsOpen(true)}>
+            <Link2 />
+            {t('crypto.mappings.title', 'Correspondances CoinGecko')}
+          </Button>
+        }
       />
+      <CoinMappingsDialog open={mappingsOpen} onOpenChange={setMappingsOpen} />
 
       {/* Global ↔ per-exchange selector */}
       {cryptoAccounts.length > 0 && (

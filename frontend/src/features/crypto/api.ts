@@ -29,9 +29,26 @@ export const cryptoApi = {
   import: (request: CryptoImportRequest) =>
     api.post<CryptoImportResult>('/crypto/import', request).then(r => r.data),
 
-  /** Pin a ticker the preview couldn't auto-resolve to the coin behind a CoinGecko link. */
+  /** All known ticker → CoinGecko mappings, for the management UI. */
+  coinMappings: () =>
+    api.get<CoinMappingResponse[]>('/crypto/coin-mappings').then(r => r.data),
+
+  /**
+   * Pin a ticker to the coin behind a CoinGecko link — resolves a ticker the preview couldn't
+   * auto-resolve, or corrects a wrong mapping (the backend then refetches its price history).
+   */
   resolveCoin: (request: CoinMappingRequest) =>
     api.post<CoinMappingResponse>('/crypto/coin-mappings', request).then(r => r.data),
+
+  /** Mark a delisted ticker CoinGecko can't price as worthless — pinned to a value of zero. */
+  markCoinWorthless: (ticker: string) =>
+    api
+      .post<CoinMappingResponse>(`/crypto/coin-mappings/${encodeURIComponent(ticker)}/worthless`)
+      .then(r => r.data),
+
+  /** Forget a mapping made by mistake — the ticker goes back to unresolved. */
+  deleteCoinMapping: (ticker: string) =>
+    api.delete<void>(`/crypto/coin-mappings/${encodeURIComponent(ticker)}`).then(() => undefined),
 
   /** Per-account stats — the per-exchange view (rewards detailed by program). */
   stats: (accountId: number) =>

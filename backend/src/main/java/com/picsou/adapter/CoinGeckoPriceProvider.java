@@ -130,16 +130,27 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             .map(CoinMapping::getCoingeckoId).orElse(null);
     }
 
-    /** Bulk ticker(upper) → coin-id for a set of tickers; only mapped tickers are present. */
+    /**
+     * Bulk ticker(upper) → coin-id for a set of tickers; only tickers with a real coin id are
+     * present. A {@code WORTHLESS} mapping carries no id, so it's skipped here — it must never be
+     * sent to CoinGecko.
+     */
     private Map<String, String> coinIds(Set<String> tickers) {
         Set<String> upper = tickers.stream().map(String::toUpperCase).collect(Collectors.toSet());
         return coinMappingRepository.findByTickerIn(upper).stream()
+            .filter(m -> m.getCoingeckoId() != null)
             .collect(Collectors.toMap(CoinMapping::getTicker, CoinMapping::getCoingeckoId));
     }
 
+    /**
+     * True once the ticker has a mapping <em>with a coin id</em>. A {@code WORTHLESS} mapping (no id)
+     * is deliberately not supported — its price is a fixed zero handled by {@code PriceService},
+     * never a CoinGecko fetch.
+     */
     @Override
     public boolean supports(String ticker) {
-        return coinMappingRepository.findByTicker(ticker.toUpperCase()).isPresent();
+        return coinMappingRepository.findByTicker(ticker.toUpperCase())
+            .map(m -> m.getCoingeckoId() != null).orElse(false);
     }
 
     @Override

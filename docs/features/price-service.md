@@ -1,6 +1,6 @@
 # Feature: Price Service
 
-> Last updated: 2026-07-06
+> Last updated: 2026-07-06 (coin-mapping management: list/correct/forget + history purge)
 
 ## Context
 
@@ -57,7 +57,51 @@ Ambiguous or unknown symbols are never guessed — the operator resolves them ex
 
 Disambiguation is **optional**: an unresolved coin simply imports unpriced (holdings still recorded,
 value 0 until a mapping exists), so the import is never blocked. `coin_mapping` is a **global** cache
-keyed by ticker, not member-scoped — the mapping endpoint only requires an authenticated caller.
+keyed by ticker, not member-scoped — the mapping endpoints only require an authenticated caller.
+
+### Correcting a wrong mapping
+
+An auto-resolution can pick the wrong coin (dominance is a heuristic), and an operator can paste the
+wrong link. The crypto page's **"CoinGecko mappings"** dialog (`CoinMappingsDialog`, opened from
+`CryptoOverviewPage`) lists every mapping (`GET /api/crypto/coin-mappings`) and offers two fixes:
+
+- **Re-pin** — paste the right CoinGecko link (same `POST /api/crypto/coin-mappings` as at import
+  time). When the coin id actually changes, everything priced under the old id is wrong, so the
+  backend **purges the ticker's `price_snapshot` history, evicts it from the live price cache, and
+  re-backfills** from the ticker's earliest transaction (12 months when it has none). A re-pin to
+  the same coin only updates the provenance to `USER` and keeps the history. The re-backfill is
+  best-effort: if CoinGecko is rate-limited it's logged and left to the boot-time runner.
+- **Forget** — `DELETE /api/crypto/coin-mappings/{ticker}` removes the mapping and purges the
+  ticker's price history; the ticker goes back to unresolved and the next import preview re-runs
+  auto-resolution.
+
+The frontend invalidates every crypto/accounts/dashboard query after a mapping change, since the
+coin's prices (history included) may have changed.
+
+### Delisted coins (worthless)
+
+A coin can be fully removed from CoinGecko (no page, `/search` and `/coins/{id}` both 404). It can
+then be neither auto-resolved nor linked (`setManualMapping` rejects it), so it would import
+*silently unpriced* (holding recorded, value implicitly 0). To make that an explicit, assumed
+state rather than a silent gap, a ticker can be **marked worthless**:
+
+- `POST /api/crypto/coin-mappings/{ticker}/worthless` → `CoinMappingService.markWorthless` upserts a
+  `coin_mapping` row with `resolved_via = 'WORTHLESS'` and **no `coingecko_id`** (nullable since
+  `V40`). It purges the ticker's `price_snapshot` history (any price fetched before delisting),
+  evicts the live cache, and re-values every holding of the ticker to zero.
+- **Pricing treats worthless as a fixed zero.** `PriceService.getPriceEur`/`refreshPrices`
+  short-circuit a worthless ticker to `BigDecimal.ZERO` — no provider call, and no phantom 0
+  snapshot is written. `CoinGeckoPriceProvider.supports()` returns **false** for a worthless
+  mapping (no id), and `coinIds()`/`getPricesEur` skip null-id rows so a worthless ticker is never
+  sent to CoinGecko.
+- **Not flagged as unresolved.** A worthless mapping *exists*, so `resolveAll` treats the ticker as
+  resolved — the import preview stops prompting for it.
+- **Reversible.** Re-pinning a CoinGecko link (`POST /coin-mappings`) turns it back into a `USER`
+  mapping (no purge, since a worthless row has no old coin id), and forgetting it (`DELETE`) sends
+  it back to unresolved.
+
+Entry points: the mappings dialog (mark / restore / forget) and the import preview's unresolved-coin
+rows (a **"Worthless"** button beside the CoinGecko-link input).
 
 `CoinGeckoPriceProvider` also exposes `getLogoUrls(tickers)`, used by `CryptoStatsService` to attach
 each coin's real icon (`AssetStat.logoUrl`) to the crypto stats response. It batches every requested
@@ -88,8 +132,10 @@ public methods rather than port methods.
 
 - `service/PriceService.java` -- Price routing, caching, conversion
 - `service/SchedulerService.java` -- Hourly price refresh cron
-- `service/CoinMappingService.java` -- Dynamic ticker → CoinGecko id resolution (search + market-cap) and manual disambiguation (`setManualMapping`)
-- `controller/CryptoController.java` -- `POST /api/crypto/coin-mappings` disambiguation endpoint
+- `service/CoinMappingService.java` -- Dynamic ticker → CoinGecko id resolution (search + market-cap), manual disambiguation (`setManualMapping`), listing, deletion, and `markWorthless` (all with price-history purge + refetch/zeroing)
+- `controller/CryptoController.java` -- `GET`/`POST`/`DELETE /api/crypto/coin-mappings` + `POST /coin-mappings/{ticker}/worthless`
+- `V40__coin_mapping_worthless.sql` -- makes `coingecko_id` nullable for `WORTHLESS` rows
+- `pages/crypto/CoinMappingsDialog.tsx` (frontend) -- mapping management dialog on the crypto page (correct / mark worthless / restore / forget)
 - `model/CoinMapping.java` + `V39__coin_mapping.sql` -- Persistent ticker → coin-id cache
 - `adapter/CoinGeckoPriceProvider.java` -- CoinGecko `/simple/price`, `/search`, `/coins/{id}`, `/coins/markets`; reads `coin_mapping`
 - `adapter/YahooFinancePriceProvider.java` -- Yahoo Finance `/v8/finance/chart/{ticker}`
@@ -164,7 +210,7 @@ Bulk fetch, update cache
 
 ## Tests
 
-- `CoinMappingServiceTest` -- resolution rules: cache hit, single/dominant match, ambiguity left unresolved; manual disambiguation: URL-slug extraction, unknown-coin/invalid-link rejection, `USER` override of an `AUTO` guess
+- `CoinMappingServiceTest` -- resolution rules: cache hit, single/dominant match, ambiguity left unresolved; manual disambiguation: URL-slug extraction, unknown-coin/invalid-link rejection, `USER` override of an `AUTO` guess; correction: remap-to-different-coin purges + refetches price history (remap-to-same keeps it, backfill failure non-fatal), delete purges history and rejects unknown tickers
 - `YahooFinancePriceProviderTest` -- unit tests for response parsing
 
 ## Links

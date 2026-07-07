@@ -221,6 +221,21 @@ handlers.set(key('GET', '/crypto/stats'), () => ({
   totals: { totalInvestedEur: 0, totalRewardsEur: 0, currentValueEur: 0, rewardsByKindEur: {} },
 }))
 
+// Ticker → CoinGecko mappings (management dialog)
+handlers.set(key('GET', '/crypto/coin-mappings'), () => [
+  { ticker: 'BTC', coingeckoId: 'bitcoin', coinName: 'Bitcoin', resolvedVia: 'AUTO', updatedAt: new Date().toISOString() },
+  { ticker: 'ETH', coingeckoId: 'ethereum', coinName: 'Ethereum', resolvedVia: 'AUTO', updatedAt: new Date().toISOString() },
+  { ticker: 'CRO', coingeckoId: 'crypto-com-chain', coinName: 'Cronos', resolvedVia: 'USER', updatedAt: new Date().toISOString() },
+  { ticker: 'METABEAT', coingeckoId: null, coinName: null, resolvedVia: 'WORTHLESS', updatedAt: new Date().toISOString() },
+])
+handlers.set(key('DELETE', '/crypto/coin-mappings/BTC'), () => null)
+handlers.set(key('DELETE', '/crypto/coin-mappings/ETH'), () => null)
+handlers.set(key('DELETE', '/crypto/coin-mappings/CRO'), () => null)
+handlers.set(key('DELETE', '/crypto/coin-mappings/METABEAT'), () => null)
+handlers.set(key('POST', '/crypto/coin-mappings/CRO/worthless'), () => ({
+  ticker: 'CRO', coingeckoId: null, coinName: null, resolvedVia: 'WORTHLESS', updatedAt: new Date().toISOString(),
+}))
+
 // Supported crypto CSV import formats
 handlers.set(key('GET', '/crypto/sources'), () => [
   { id: 'cryptocom_app', label: 'Crypto.com App' },
