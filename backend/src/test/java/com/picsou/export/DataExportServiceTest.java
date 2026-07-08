@@ -66,7 +66,7 @@ class DataExportServiceTest {
             .lastSyncedAt(Instant.parse("2026-01-01T00:00:00Z"))
             .build();
         AccountHolding h = AccountHolding.builder()
-            .id(200L).account(a).ticker("BTC").name("Bitcoin")
+            .id(200L).account(a).asset(FinancialAsset.builder().symbol("BTC").name("Bitcoin").build())
             .quantity(new BigDecimal("0.5")).averageBuyIn(new BigDecimal("30000"))
             .currentPrice(new BigDecimal("65000"))
             .build();

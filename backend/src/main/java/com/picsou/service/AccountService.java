@@ -16,6 +16,7 @@ import com.picsou.model.AccountType;
 import com.picsou.model.BalanceSnapshot;
 import com.picsou.model.Debt;
 import com.picsou.model.FamilyMember;
+import com.picsou.model.FinancialAsset;
 import com.picsou.model.RealEstateMetadata;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.AccountRepository;
@@ -45,6 +46,7 @@ public class AccountService {
     private final DebtRepository debtRepository;
     private final PriceService priceService;
     private final LoanAmortizationService loanAmortizationService;
+    private final FinancialAssetService financialAssetService;
 
     public AccountService(
         AccountRepository accountRepository,
@@ -54,7 +56,8 @@ public class AccountService {
         RealEstateMetadataRepository realEstateMetadataRepository,
         DebtRepository debtRepository,
         PriceService priceService,
-        LoanAmortizationService loanAmortizationService
+        LoanAmortizationService loanAmortizationService,
+        FinancialAssetService financialAssetService
     ) {
         this.accountRepository = accountRepository;
         this.snapshotRepository = snapshotRepository;
@@ -64,6 +67,7 @@ public class AccountService {
         this.debtRepository = debtRepository;
         this.priceService = priceService;
         this.loanAmortizationService = loanAmortizationService;
+        this.financialAssetService = financialAssetService;
     }
 
     public List<AccountResponse> findAll(Long memberId) {
@@ -180,10 +184,11 @@ public class AccountService {
             holding.setLastSyncedAt(Instant.now());
             // Keep averageBuyIn unchanged — it's the cost basis from first sync
         } else {
+            FinancialAsset asset = financialAssetService.getOrCreate(ticker);
+            financialAssetService.fillNameIfAbsent(asset, name);
             holding = AccountHolding.builder()
                 .account(account)
-                .ticker(ticker)
-                .name(name)
+                .asset(asset)
                 .quantity(quantity)
                 .averageBuyIn(currentPriceEur) // baseline: no PnL at first sync
                 .currentPrice(currentPriceEur)
@@ -260,7 +265,7 @@ public class AccountService {
         BigDecimal liveValue = BigDecimal.ZERO;
         for (AccountHolding h : holdings) {
             BigDecimal qty = h.getQuantity();
-            BigDecimal livePrice = h.getTicker() != null ? priceService.getPriceEur(h.getTicker()) : null;
+            BigDecimal livePrice = priceService.getPriceEur(h.getAsset().getSymbol());
             if (livePrice == null) continue;
             liveValue = liveValue.add(qty.multiply(livePrice));
         }
@@ -379,8 +384,9 @@ public class AccountService {
         // currency without conversion — using it as a fallback would silently
         // produce native-as-EUR values. Better to return null and surface
         // "price unknown" than to invent a wrong number.
-        if (holding.getTicker() != null && !holding.getTicker().isBlank()) {
-            currentPriceEur = priceService.getPriceEur(holding.getTicker());
+        String symbol = holding.getAsset().getSymbol();
+        if (symbol != null && !symbol.isBlank()) {
+            currentPriceEur = priceService.getPriceEur(symbol);
             priceUpdatedAt = holding.getLastSyncedAt();
         }
 
@@ -398,8 +404,8 @@ public class AccountService {
             : null;
 
         return new HoldingResponse(
-            holding.getTicker(),
-            holding.getName(),
+            symbol,
+            holding.getAsset().getName(),
             quantity,
             averageBuyIn,
             currentPrice,

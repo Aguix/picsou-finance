@@ -238,10 +238,10 @@ public class HistoryService {
                     BigDecimal qty = h.getQuantity();
                     BigDecimal avgBuy = h.getAverageBuyIn() != null ? h.getAverageBuyIn() : BigDecimal.ZERO;
                     BigDecimal avgBuyEur = priceService.toEur(avgBuy, account.getCurrency(), null);
-                    String ticker = h.getTicker() != null ? h.getTicker().toUpperCase() : null;
+                    String ticker = h.getAsset().getSymbol();
                     holdingDataList.add(new HoldingData(ticker, qty, avgBuyEur));
                     invested = invested.add(qty.multiply(avgBuyEur));
-                    if (ticker != null) allTickers.add(ticker);
+                    allTickers.add(ticker);
                 }
 
                 accountHoldings.put(accId, holdingDataList);
@@ -357,8 +357,7 @@ public class HistoryService {
         BigDecimal valueAtFrom = BigDecimal.ZERO;
         int matchedPrices = 0;
         for (AccountHolding h : allHoldings) {
-            if (h.getTicker() == null) continue;
-            Optional<PriceSnapshot> snap = priceSnapshotRepository.findLatestByTickerBeforeOrOnDate(h.getTicker(), fromDate);
+            Optional<PriceSnapshot> snap = priceSnapshotRepository.findLatestByTickerBeforeOrOnDate(h.getAsset().getSymbol(), fromDate);
             if (snap.isPresent()) {
                 valueAtFrom = valueAtFrom.add(h.getQuantity().multiply(snap.get().getPriceEur()));
                 matchedPrices++;

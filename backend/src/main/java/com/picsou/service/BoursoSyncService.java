@@ -10,6 +10,7 @@ import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
 import com.picsou.model.BoursoSession;
 import com.picsou.model.FamilyMember;
+import com.picsou.model.FinancialAsset;
 import com.picsou.model.Transaction;
 import com.picsou.port.BoursoPort;
 import com.picsou.port.BoursoPort.BoursoAccountData;
@@ -62,6 +63,7 @@ public class BoursoSyncService {
     private final OpenFigiIsinConverter    isinConverter;
     private final CryptoEncryption         encryption;
     private final TransactionTemplate      txTemplate;
+    private final FinancialAssetService    financialAssetService;
 
     public BoursoSyncService(
         BoursoPort boursoPort,
@@ -73,7 +75,8 @@ public class BoursoSyncService {
         AccountService accountService,
         OpenFigiIsinConverter isinConverter,
         CryptoEncryption encryption,
-        TransactionTemplate txTemplate
+        TransactionTemplate txTemplate,
+        FinancialAssetService financialAssetService
     ) {
         this.boursoPort           = boursoPort;
         this.sessionRepository    = sessionRepository;
@@ -85,6 +88,7 @@ public class BoursoSyncService {
         this.isinConverter        = isinConverter;
         this.encryption           = encryption;
         this.txTemplate           = txTemplate;
+        this.financialAssetService = financialAssetService;
     }
 
     // ─── Auth ─────────────────────────────────────────────────────────────────
@@ -265,10 +269,11 @@ public class BoursoSyncService {
 
             for (Map.Entry<String, HoldingDedup.HoldingAgg> entry : deduped.entrySet()) {
                 HoldingDedup.HoldingAgg agg = entry.getValue();
+                FinancialAsset asset = financialAssetService.getOrCreate(entry.getKey());
+                financialAssetService.fillNameIfAbsent(asset, agg.name());
                 holdingRepository.save(AccountHolding.builder()
                     .account(account)
-                    .ticker(entry.getKey())
-                    .name(agg.name())
+                    .asset(asset)
                     .quantity(agg.quantity())
                     .averageBuyIn(agg.averageBuyIn())
                     .currentPrice(agg.currentPrice())

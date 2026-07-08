@@ -15,14 +15,16 @@ public interface AccountHoldingRepository extends JpaRepository<AccountHolding, 
 
     List<AccountHolding> findByAccount_Id(Long accountId);
 
-    Optional<AccountHolding> findByAccountIdAndTicker(Long accountId, String ticker);
+    /** Lookup by account and the asset's (uppercase) symbol. The ticker argument is uppercased. */
+    @Query("SELECT h FROM AccountHolding h WHERE h.account.id = :accountId AND h.asset.symbol = UPPER(:ticker)")
+    Optional<AccountHolding> findByAccountIdAndTicker(@Param("accountId") Long accountId, @Param("ticker") String ticker);
 
     void deleteByAccountId(Long accountId);
 
-    @Query("SELECT DISTINCT h.ticker FROM AccountHolding h WHERE h.ticker IS NOT NULL")
+    @Query("SELECT DISTINCT h.asset.symbol FROM AccountHolding h")
     Set<String> findDistinctTickers();
 
     /** Every holding of a ticker across all accounts (case-insensitive) — used to re-value it. */
-    @Query("SELECT h FROM AccountHolding h WHERE UPPER(h.ticker) = :ticker")
+    @Query("SELECT h FROM AccountHolding h WHERE h.asset.symbol = UPPER(:ticker)")
     List<AccountHolding> findByTickerIgnoreCase(@Param("ticker") String ticker);
 }

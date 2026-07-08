@@ -6,6 +6,7 @@ import com.picsou.exception.ResourceNotFoundException;
 import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
+import com.picsou.model.FinancialAsset;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.AccountRepository;
 import com.picsou.repository.BalanceSnapshotRepository;
@@ -40,6 +41,7 @@ class AccountServiceTest {
     @Mock DebtRepository debtRepository;
     @Mock PriceService priceService;
     @Mock LoanAmortizationService loanAmortizationService;
+    @Mock FinancialAssetService financialAssetService;
     @InjectMocks AccountService accountService;
 
     private Account ownedAccount() {
@@ -51,12 +53,16 @@ class AccountServiceTest {
             .build();
     }
 
+    private static FinancialAsset asset(String symbol) {
+        return FinancialAsset.builder().symbol(symbol).build();
+    }
+
     @Test
     void getHoldings_returnsNullValue_whenPriceServiceHasNoPrice() {
         when(accountRepository.findByIdAndMemberId(1L, 1L)).thenReturn(Optional.of(ownedAccount()));
         AccountHolding holding = AccountHolding.builder()
             .id(10L)
-            .ticker("PHYMF")
+            .asset(asset("PHYMF"))
             .quantity(new BigDecimal("10"))
             .averageBuyIn(new BigDecimal("100"))
             // Stored from a broker sync in unknown currency — must NOT be used as EUR.
@@ -81,7 +87,7 @@ class AccountServiceTest {
         when(accountRepository.findByIdAndMemberId(1L, 1L)).thenReturn(Optional.of(ownedAccount()));
         AccountHolding holding = AccountHolding.builder()
             .id(10L)
-            .ticker("AAPL")
+            .asset(asset("AAPL"))
             .quantity(new BigDecimal("5"))
             .averageBuyIn(new BigDecimal("150"))
             .currentPrice(new BigDecimal("180"))  // native-currency, must be ignored

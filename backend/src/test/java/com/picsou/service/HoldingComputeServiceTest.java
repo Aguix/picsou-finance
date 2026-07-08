@@ -3,10 +3,12 @@ package com.picsou.service;
 import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
+import com.picsou.model.FinancialAsset;
 import com.picsou.model.Transaction;
 import com.picsou.model.TransactionType;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.TransactionRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -27,7 +29,20 @@ class HoldingComputeServiceTest {
 
     @Mock TransactionRepository transactionRepository;
     @Mock AccountHoldingRepository accountHoldingRepository;
+    @Mock FinancialAssetService financialAssetService;
     @InjectMocks HoldingComputeService holdingComputeService;
+
+    @BeforeEach
+    void stubAssetResolution() {
+        // New holdings resolve their symbol to an asset via getOrCreate; return a matching asset.
+        // Lenient: the tests that only reuse/delete existing holdings never hit this path.
+        lenient().when(financialAssetService.getOrCreate(anyString()))
+            .thenAnswer(inv -> asset(inv.getArgument(0)));
+    }
+
+    private static FinancialAsset asset(String symbol) {
+        return FinancialAsset.builder().symbol(symbol).build();
+    }
 
     private Account account(long id) {
         return Account.builder().id(id).name("Test").currency("EUR").build();
@@ -91,7 +106,7 @@ class HoldingComputeServiceTest {
         List<AccountHolding> saved = captor.getValue();
         assertThat(saved).hasSize(1);
         AccountHolding h = saved.get(0);
-        assertThat(h.getTicker()).isEqualTo("AAPL");
+        assertThat(h.getAsset().getSymbol()).isEqualTo("AAPL");
         assertThat(h.getQuantity()).isEqualByComparingTo("10");
         assertThat(h.getAverageBuyIn()).isEqualByComparingTo("150.00000000");
     }
@@ -138,7 +153,7 @@ class HoldingComputeServiceTest {
         verify(accountHoldingRepository).saveAll(captor.capture());
 
         AccountHolding h = captor.getValue().get(0);
-        assertThat(h.getTicker()).isEqualTo("BTC");
+        assertThat(h.getAsset().getSymbol()).isEqualTo("BTC");
         assertThat(h.getQuantity()).isEqualByComparingTo("3");
         // averageBuyIn is based on BUY transactions only (5 @ 30000)
         assertThat(h.getAverageBuyIn()).isEqualByComparingTo("30000.00000000");
@@ -153,7 +168,7 @@ class HoldingComputeServiceTest {
         AccountHolding existing = AccountHolding.builder()
                 .id(99L)
                 .account(account)
-                .ticker("SOL")
+                .asset(asset("SOL"))
                 .quantity(new BigDecimal("10"))
                 .build();
 
@@ -224,8 +239,8 @@ class HoldingComputeServiceTest {
         List<AccountHolding> saved = captor.getValue();
         assertThat(saved).hasSize(2);
 
-        AccountHolding aapl = saved.stream().filter(h -> "AAPL".equals(h.getTicker())).findFirst().orElseThrow();
-        AccountHolding msft = saved.stream().filter(h -> "MSFT".equals(h.getTicker())).findFirst().orElseThrow();
+        AccountHolding aapl = saved.stream().filter(h -> "AAPL".equals(h.getAsset().getSymbol())).findFirst().orElseThrow();
+        AccountHolding msft = saved.stream().filter(h -> "MSFT".equals(h.getAsset().getSymbol())).findFirst().orElseThrow();
 
         assertThat(aapl.getQuantity()).isEqualByComparingTo("10");
         assertThat(aapl.getAverageBuyIn()).isEqualByComparingTo("150.00000000");
@@ -290,7 +305,7 @@ class HoldingComputeServiceTest {
         AccountHolding existing = AccountHolding.builder()
                 .id(42L)
                 .account(account)
-                .ticker("NVDA")
+                .asset(asset("NVDA"))
                 .quantity(new BigDecimal("1"))
                 .averageBuyIn(new BigDecimal("300.00"))
                 .build();
@@ -315,7 +330,7 @@ class HoldingComputeServiceTest {
     }
 
     @Test
-    void positionName_usesNameFromNewestTransaction() {
+    void positionName_passesTheNewestTransactionNameToTheAsset() {
         Account account = account(1L);
         // Two BUYs for the same security, returned in date-ASC order (oldest first).
         // The older transaction carries a stale label; the newer one the canonical name.
@@ -331,26 +346,23 @@ class HoldingComputeServiceTest {
 
         holdingComputeService.recomputeHoldings(account);
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<AccountHolding>> captor = ArgumentCaptor.forClass(List.class);
-        verify(accountHoldingRepository).saveAll(captor.capture());
-
-        AccountHolding h = captor.getValue().get(0);
-        assertThat(h.getName()).isEqualTo("iShares Core MSCI World UCITS ETF");
+        // The name policy (fill vs. preserve) is FinancialAssetService's job — see
+        // FinancialAssetServiceTest. Here we only verify the newest label is what's forwarded.
+        ArgumentCaptor<FinancialAsset> assetCaptor = ArgumentCaptor.forClass(FinancialAsset.class);
+        verify(financialAssetService).fillNameIfAbsent(assetCaptor.capture(), eq("iShares Core MSCI World UCITS ETF"));
+        assertThat(assetCaptor.getValue().getSymbol()).isEqualTo("IWDA.AS");
     }
 
     @Test
-    void positionName_preservesExistingNameWhenTransactionsHaveNone() {
+    void positionName_passesNullWhenNoTransactionCarriesAName() {
         Account account = account(1L);
         // A manual BUY with no "Nom" — the transaction carries no name.
         Transaction buy = buyTx("VWCE.DE", "4", "100.00");
 
-        // The position already has a name set by a previous bank sync (OpenFIGI).
         AccountHolding existing = AccountHolding.builder()
                 .id(7L)
                 .account(account)
-                .ticker("VWCE.DE")
-                .name("Vanguard FTSE All-World UCITS ETF")
+                .asset(asset("VWCE.DE"))
                 .quantity(new BigDecimal("1"))
                 .build();
 
@@ -361,12 +373,8 @@ class HoldingComputeServiceTest {
 
         holdingComputeService.recomputeHoldings(account);
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<AccountHolding>> captor = ArgumentCaptor.forClass(List.class);
-        verify(accountHoldingRepository).saveAll(captor.capture());
-
-        AccountHolding h = captor.getValue().get(0);
-        // The sync-sourced name must survive a nameless manual transaction.
-        assertThat(h.getName()).isEqualTo("Vanguard FTSE All-World UCITS ETF");
+        // No transaction carries a name: null is forwarded, never a made-up label. Whether that
+        // preserves an existing asset name is FinancialAssetService's contract, not this service's.
+        verify(financialAssetService).fillNameIfAbsent(any(FinancialAsset.class), isNull());
     }
 }

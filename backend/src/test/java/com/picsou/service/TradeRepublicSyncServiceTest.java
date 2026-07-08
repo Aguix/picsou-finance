@@ -7,6 +7,7 @@ import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
 import com.picsou.model.FamilyMember;
+import com.picsou.model.FinancialAsset;
 import com.picsou.model.TradeRepublicSession;
 import com.picsou.port.TradeRepublicPort;
 import com.picsou.port.TradeRepublicPort.TrAccountData;
@@ -46,6 +47,7 @@ class TradeRepublicSyncServiceTest {
     @Mock OpenFigiIsinConverter isinConverter;
     @Mock CryptoEncryption encryption;
     @Mock TransactionTemplate txTemplate;
+    @Mock FinancialAssetService financialAssetService;
 
     @InjectMocks TradeRepublicSyncService service;
 
@@ -77,6 +79,8 @@ class TradeRepublicSyncServiceTest {
 
         when(isinConverter.resolve("IE00ISIN_A")).thenReturn(new TickerResult("RKLB", "Rocket Lab"));
         when(isinConverter.resolve("IE00ISIN_B")).thenReturn(new TickerResult("RKLB", "Rocket Lab"));
+        when(financialAssetService.getOrCreate("RKLB"))
+            .thenReturn(FinancialAsset.builder().symbol("RKLB").build());
 
         when(accountRepository.findByExternalAccountIdAndMemberId("tr_cto", memberId))
             .thenReturn(Optional.empty());
@@ -97,7 +101,7 @@ class TradeRepublicSyncServiceTest {
         verify(holdingRepository).save(captor.capture());
 
         AccountHolding saved = captor.getValue();
-        assertThat(saved.getTicker()).isEqualTo("RKLB");
+        assertThat(saved.getAsset().getSymbol()).isEqualTo("RKLB");
         assertThat(saved.getQuantity()).isEqualByComparingTo("5");
         // VWAP: (2*10 + 3*20) / 5 = 16  -- scale-8 representation 16.00000000
         assertThat(saved.getAverageBuyIn()).isEqualByComparingTo("16.00000000");

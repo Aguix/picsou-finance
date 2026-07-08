@@ -2,6 +2,7 @@ package com.picsou.service;
 
 import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
+import com.picsou.model.FinancialAsset;
 import com.picsou.model.Transaction;
 import com.picsou.model.TransactionType;
 import com.picsou.repository.AccountHoldingRepository;
@@ -24,6 +25,7 @@ public class HoldingComputeService {
 
     private final TransactionRepository transactionRepository;
     private final AccountHoldingRepository accountHoldingRepository;
+    private final FinancialAssetService financialAssetService;
 
     @Transactional
     public void recomputeHoldings(Account account) {
@@ -67,7 +69,7 @@ public class HoldingComputeService {
         Map<String, AccountHolding> existingByTicker =
             accountHoldingRepository.findByAccount_Id(account.getId())
                 .stream()
-                .collect(java.util.stream.Collectors.toMap(AccountHolding::getTicker, h -> h));
+                .collect(java.util.stream.Collectors.toMap(h -> h.getAsset().getSymbol(), h -> h));
 
         List<AccountHolding> toSave = new ArrayList<>();
         List<AccountHolding> toDelete = new ArrayList<>();
@@ -88,18 +90,15 @@ public class HoldingComputeService {
                     averageBuyIn = numerator.divide(denominator, 8, RoundingMode.HALF_UP);
                 }
 
+                FinancialAsset asset = financialAssetService.getOrCreate(ticker);
+                financialAssetService.fillNameIfAbsent(asset, latestName.get(ticker));
+
                 AccountHolding holding = existing.orElseGet(() -> AccountHolding.builder()
                         .account(account)
-                        .ticker(ticker)
                         .build());
+                holding.setAsset(asset);
                 holding.setQuantity(qty);
                 holding.setAverageBuyIn(averageBuyIn);
-                // Only overwrite the label when a transaction actually carries a name,
-                // so a nameless manual entry never erases a name set by bank sync.
-                String name = latestName.get(ticker);
-                if (name != null) {
-                    holding.setName(name);
-                }
                 toSave.add(holding);
             }
         }

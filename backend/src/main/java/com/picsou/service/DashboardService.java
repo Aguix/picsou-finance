@@ -163,10 +163,11 @@ public class DashboardService {
     }
 
     private BigDecimal holdingValueEur(AccountHolding holding) {
-        BigDecimal livePrice = holding.getTicker() != null ? priceService.getPriceEur(holding.getTicker()) : null;
+        String symbol = holding.getAsset().getSymbol();
+        BigDecimal livePrice = priceService.getPriceEur(symbol);
         if (livePrice == null) {
             log.warn("No live price for ticker '{}' — holding {} valued at zero until a quote is available",
-                holding.getTicker(), holding.getId());
+                symbol, holding.getId());
             return BigDecimal.ZERO;
         }
         return holding.getQuantity().multiply(livePrice);

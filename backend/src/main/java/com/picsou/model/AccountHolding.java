@@ -23,11 +23,9 @@ public class AccountHolding extends AuditableEntity {
     @JoinColumn(name = "account_id", nullable = false)
     private Account account;
 
-    @Column(nullable = false, length = 30)
-    private String ticker;
-
-    @Column(length = 100)
-    private String name;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "asset_id", nullable = false)
+    private FinancialAsset asset;
 
     @Column(nullable = false, precision = 20, scale = 8)
     private BigDecimal quantity;

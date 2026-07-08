@@ -45,8 +45,8 @@ class HoldingsExporter implements EntityExporter {
             csv.writeRow(List.of(
                 String.valueOf(h.getId()),
                 String.valueOf(h.getAccount().getId()),
-                nullSafe(h.getTicker()),
-                nullSafe(h.getName()),
+                nullSafe(h.getAsset().getSymbol()),
+                nullSafe(h.getAsset().getName()),
                 nullSafe(h.getQuantity() == null ? null : h.getQuantity().toPlainString()),
                 nullSafe(h.getAverageBuyIn() == null ? null : h.getAverageBuyIn().toPlainString()),
                 nullSafe(h.getCurrentPrice() == null ? null : h.getCurrentPrice().toPlainString()),
@@ -64,8 +64,8 @@ class HoldingsExporter implements EntityExporter {
             json.writeStartObject();
             json.writeNumberField("id", h.getId());
             json.writeNumberField("account_id", h.getAccount().getId());
-            json.writeStringField("ticker", h.getTicker());
-            json.writeStringField("name", h.getName());
+            json.writeStringField("ticker", h.getAsset().getSymbol());
+            json.writeStringField("name", h.getAsset().getName());
             writeBigDecimal(json, "quantity", h.getQuantity());
             writeBigDecimal(json, "average_buy_in", h.getAverageBuyIn());
             writeBigDecimal(json, "current_price", h.getCurrentPrice());

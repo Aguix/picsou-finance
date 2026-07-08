@@ -139,6 +139,40 @@ public class FinancialAssetService {
     }
 
     /**
+     * Return the asset for a symbol, minting a bare {@code PENDING}/{@code UNKNOWN} passthrough row
+     * the first time a symbol is seen. This is the runtime counterpart of the V52 backfill: a
+     * holding must always point at an asset, so the write paths (TR/Bourso/wallet sync,
+     * {@link HoldingComputeService}, {@link AccountService#upsertHolding}) resolve their symbol
+     * through here. It never calls an external API — real aggregator resolution (CoinGecko search,
+     * Yahoo identity) happens later via {@link #resolveCrypto} or the management UI; until then the
+     * PENDING row is simply unpriced.
+     */
+    @Transactional
+    public FinancialAsset getOrCreate(String symbol) {
+        String upper = symbol.trim().toUpperCase();
+        return assetRepository.findBySymbol(upper)
+            .orElseGet(() -> assetRepository.save(FinancialAsset.builder()
+                .symbol(upper)
+                .type(AssetType.UNKNOWN)
+                .status(AssetStatus.PENDING)
+                .build()));
+    }
+
+    /**
+     * Opportunistically label an asset that has no name yet (e.g. minted bare by
+     * {@link #getOrCreate} from a wallet sync using the symbol as a placeholder). Never overwrites
+     * an existing name — a shaky broker/wallet label must not clobber a canonical one (CoinGecko,
+     * a prior manual mapping, or another account's earlier, better label for the same symbol).
+     */
+    @Transactional
+    public void fillNameIfAbsent(FinancialAsset asset, String name) {
+        if (name == null || name.isBlank()) return;
+        if (asset.getName() != null && !asset.getName().isBlank()) return;
+        asset.setName(name.trim());
+        assetRepository.save(asset);
+    }
+
+    /**
      * Pin a symbol to the coin behind an operator-supplied CoinGecko link, overriding any prior
      * mapping. The coin id is read from the URL slug (e.g. {@code .../coins/loaded-lions}) and
      * validated against CoinGecko before it's persisted as {@code USER} — a link to a non-existent

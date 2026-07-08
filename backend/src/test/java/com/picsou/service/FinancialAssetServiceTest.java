@@ -343,10 +343,12 @@ class FinancialAssetServiceTest {
     @Test
     void markWorthlessZeroesEveryHoldingOfTheTicker() {
         var holdingA = com.picsou.model.AccountHolding.builder()
-            .ticker("METABEAT").quantity(new java.math.BigDecimal("1000"))
+            .asset(FinancialAsset.builder().symbol("METABEAT").build())
+            .quantity(new java.math.BigDecimal("1000"))
             .currentPrice(new java.math.BigDecimal("0.12")).build();
         var holdingB = com.picsou.model.AccountHolding.builder()
-            .ticker("metabeat").quantity(new java.math.BigDecimal("50")).build();
+            .asset(FinancialAsset.builder().symbol("METABEAT").build())
+            .quantity(new java.math.BigDecimal("50")).build();
         when(repository.findBySymbol("METABEAT")).thenReturn(Optional.empty());
         when(accountHoldingRepository.findByTickerIgnoreCase("METABEAT"))
             .thenReturn(List.of(holdingA, holdingB));
@@ -411,6 +413,63 @@ class FinancialAssetServiceTest {
             "https://www.coingecko.com/en/coins/does-not-exist"))
             .isInstanceOf(IllegalArgumentException.class);
 
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void getOrCreateReturnsExistingAssetWithoutSaving() {
+        FinancialAsset existing = FinancialAsset.builder().symbol("BTC").coingeckoId("bitcoin").build();
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.of(existing));
+
+        FinancialAsset result = service.getOrCreate("btc");
+
+        assertThat(result).isSameAs(existing);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void getOrCreateMintsABarePendingAssetWhenSymbolIsUnseen() {
+        when(repository.findBySymbol("SHIB")).thenReturn(Optional.empty());
+        expectSaveEcho();
+
+        FinancialAsset result = service.getOrCreate("shib");
+
+        assertThat(result.getSymbol()).isEqualTo("SHIB");
+        assertThat(result.getType()).isEqualTo(AssetType.UNKNOWN);
+        assertThat(result.getStatus()).isEqualTo(AssetStatus.PENDING);
+        assertThat(result.getName()).isNull();
+    }
+
+    @Test
+    void fillNameIfAbsentSetsTheNameWhenAssetHasNone() {
+        FinancialAsset asset = FinancialAsset.builder().symbol("IWDA.AS").build();
+        expectSaveEcho();
+
+        service.fillNameIfAbsent(asset, "iShares Core MSCI World UCITS ETF");
+
+        assertThat(asset.getName()).isEqualTo("iShares Core MSCI World UCITS ETF");
+        verify(repository).save(asset);
+    }
+
+    @Test
+    void fillNameIfAbsentNeverOverwritesAnExistingName() {
+        // A canonical name (CoinGecko, a prior sync) must survive a later, possibly worse label.
+        FinancialAsset asset = FinancialAsset.builder().symbol("BTC").name("Bitcoin").build();
+
+        service.fillNameIfAbsent(asset, "some broker's label for BTC");
+
+        assertThat(asset.getName()).isEqualTo("Bitcoin");
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void fillNameIfAbsentIgnoresNullOrBlankNames() {
+        FinancialAsset asset = FinancialAsset.builder().symbol("VWCE.DE").build();
+
+        service.fillNameIfAbsent(asset, null);
+        service.fillNameIfAbsent(asset, "   ");
+
+        assertThat(asset.getName()).isNull();
         verify(repository, never()).save(any());
     }
 }

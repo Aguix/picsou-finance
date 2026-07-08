@@ -4,6 +4,7 @@ import com.picsou.dto.DashboardResponse;
 import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
+import com.picsou.model.FinancialAsset;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.AccountRepository;
 import com.picsou.repository.GoalRepository;
@@ -36,7 +37,7 @@ class DashboardServiceTest {
         Account account = holdingAccount();
         AccountHolding holding = AccountHolding.builder()
             .account(account)
-            .ticker("PHYMF")
+            .asset(asset("PHYMF"))
             .quantity(new BigDecimal("10"))
             .averageBuyIn(new BigDecimal("100"))
             .currentPrice(new BigDecimal("999"))
@@ -59,7 +60,7 @@ class DashboardServiceTest {
         Account account = holdingAccount();
         AccountHolding holding = AccountHolding.builder()
             .account(account)
-            .ticker("AAPL")
+            .asset(asset("AAPL"))
             .quantity(new BigDecimal("10"))
             .averageBuyIn(new BigDecimal("100"))
             .currentPrice(new BigDecimal("999"))
@@ -75,6 +76,10 @@ class DashboardServiceTest {
         assertThat(response.totalNetWorth()).isEqualByComparingTo("2000");
         assertThat(response.distribution()).hasSize(1);
         assertThat(response.distribution().getFirst().balanceEur()).isEqualByComparingTo("2000");
+    }
+
+    private static FinancialAsset asset(String symbol) {
+        return FinancialAsset.builder().symbol(symbol).build();
     }
 
     private Account holdingAccount() {
