@@ -59,7 +59,7 @@ data-model change — but the dashboard now separates four readings: **assets**,
 
 ### Flow
 
-```
+```text
 balance_snapshot ──► buildHistory ──► NetWorthPoint(total=net worth,
         │                                pnl=Σ non-loan (value−invested))
         │                                      │
