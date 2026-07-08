@@ -85,7 +85,7 @@ export function CryptoImportTab() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button onClick={() => navigate(`/crypto?account=${r.accountId}`)}>
+            <Button onClick={() => navigate(`/accounts?filter=CRYPTO&account=${r.accountId}`)}>
               {t('sync.crypto.viewStats', 'Voir les statistiques')}
               <ArrowRight />
             </Button>

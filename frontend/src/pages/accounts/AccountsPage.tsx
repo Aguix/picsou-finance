@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAccounts, useUpdateAccount, useDeleteAccount, useUpdateDebtMetadata } from '@/features/accounts/hooks'
 import { useHistory } from '@/features/history/hooks'
@@ -7,6 +7,7 @@ import { AccountForm } from '@/components/shared/AccountForm'
 import { AddAccountModal } from '@/components/shared/AddAccountModal'
 import { AccountCard } from '@/components/shared/AccountCard'
 import { AccountsStackedChart } from '@/components/shared/AccountsStackedChart'
+import { CryptoPortfolioSection } from './CryptoPortfolioSection'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -78,6 +79,7 @@ type AccountFormData = {
 export function AccountsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const { data: accounts, isLoading } = useAccounts()
   const updateAccount = useUpdateAccount()
@@ -88,7 +90,25 @@ export function AccountsPage() {
   const [showEditForm, setShowEditForm] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [deleteId, setDeleteId] = useState<number | null>(null)
-  const [filter, setFilter] = useState<AssetFilter>('ALL')
+
+  // The active filter lives in the URL (`?filter=`) so the crypto import flow can deep-link to the
+  // Crypto tab (`/accounts?filter=CRYPTO&account=…`). The Crypto tab hosts the crypto portfolio,
+  // which reads `?account=` — dropped when leaving the tab.
+  const filterParam = searchParams.get('filter') as AssetFilter | null
+  const filter: AssetFilter = filterParam && FILTER_KEYS.includes(filterParam) ? filterParam : 'ALL'
+
+  function setFilter(next: AssetFilter) {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev)
+        if (next === 'ALL') params.delete('filter')
+        else params.set('filter', next)
+        if (next !== 'CRYPTO') params.delete('account')
+        return params
+      },
+      { replace: true },
+    )
+  }
 
   // All account IDs for history query (split mode for per-account breakdown)
   const allAccountIds = useMemo(() => (accounts ?? []).map(a => a.id), [accounts])
@@ -292,24 +312,26 @@ export function AccountsPage() {
       />
 
       {accounts && accounts.length > 0 && (
-        <>
-          <div className="flex flex-wrap items-center gap-1">
-            {FILTER_KEYS.map(f => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={cn(
-                  'inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
-                  filter === f
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                )}
-              >
-                {t(`accounts.filters.${f}`)}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-wrap items-center gap-1">
+          {FILTER_KEYS.map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={cn(
+                'inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+                filter === f
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              )}
+            >
+              {t(`accounts.filters.${f}`)}
+            </button>
+          ))}
+        </div>
+      )}
 
+      {accounts && accounts.length > 0 && filter !== 'CRYPTO' && (
+        <>
           {/* Summary card */}
           <Card>
             <CardContent>
@@ -352,7 +374,9 @@ export function AccountsPage() {
         </>
       )}
 
-      {isLoading ? (
+      {filter === 'CRYPTO' ? (
+        <CryptoPortfolioSection />
+      ) : isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-32 w-full rounded-xl" />

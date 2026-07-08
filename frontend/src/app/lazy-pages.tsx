@@ -36,9 +36,6 @@ export const GoalCalendarPage = lazy(() =>
 export const SyncPage = lazy(() =>
   import('@/pages/sync/SyncPage').then((m) => ({ default: m.SyncPage }))
 )
-export const CryptoOverviewPage = lazy(() =>
-  import('@/pages/crypto/CryptoOverviewPage').then((m) => ({ default: m.CryptoOverviewPage }))
-)
 export const SettingsPage = lazy(() =>
   import('@/pages/settings/SettingsPage').then((m) => ({
     default: m.SettingsPage,
