@@ -337,6 +337,48 @@ class GoalServiceTest {
     }
 
     @Test
+    void avgMonthlyContribution_loanPaydown_countsAsPositiveProgress() {
+        // Outstanding debt shrinks 12000 → 9000 over 3 months: the raw snapshot delta
+        // is −1000/month, but paying down a linked loan is positive progress.
+        Account loan = Account.builder()
+            .id(1L).name("Mortgage").type(AccountType.LOAN)
+            .currency("EUR").currentBalance(new BigDecimal("9000"))
+            .color("#ef4444").build();
+
+        Goal goal = Goal.builder()
+            .id(1L).name("Rembourser").targetAmount(new BigDecimal("12000"))
+            .deadline(LocalDate.now().plusMonths(12))
+            .accounts(List.of(loan))
+            .build();
+
+        when(accountService.toResponse(loan)).thenReturn(
+            new com.picsou.dto.AccountResponse(
+                1L, "Mortgage", AccountType.LOAN, null, "EUR",
+                new BigDecimal("9000"), new BigDecimal("9000"),
+                null, true, "#ef4444", null, null, null, null, null
+            )
+        );
+        when(accountService.signedLiveBalanceEur(loan)).thenReturn(new BigDecimal("-9000"));
+        LocalDate threeMonthsAgo = LocalDate.now().minusMonths(3);
+        when(snapshotRepository.findRecentByAccountId(
+            org.mockito.ArgumentMatchers.eq(1L),
+            org.mockito.ArgumentMatchers.any()
+        )).thenReturn(List.of(
+            com.picsou.model.BalanceSnapshot.builder()
+                .balance(new BigDecimal("12000")).date(threeMonthsAgo).build(),
+            com.picsou.model.BalanceSnapshot.builder()
+                .balance(new BigDecimal("9000")).date(LocalDate.now()).build()
+        ));
+        lenient().when(overrideRepository.findByGoalId(1L)).thenReturn(List.of());
+        lenient().when(manualContributionRepository.findByGoalId(1L)).thenReturn(List.of());
+
+        GoalProgressResponse progress = goalService.toProgressResponse(goal);
+
+        // (12000 − 9000) / 3 months, sign flipped for the LOAN account.
+        assertThat(progress.avgMonthlyContribution()).isEqualByComparingTo("1000");
+    }
+
+    @Test
     void isOnTrack_true_whenManualContributionCoversShortfall() {
         // Same setup as the "behind" test but user declares 4000€ manual contribution
         // for each of the 3 past months → effective matches objective → on track.
