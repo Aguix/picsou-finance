@@ -22,8 +22,12 @@ export const dashboardApi = {
     api.get<DashboardData>('/dashboard', { params: range ? { range } : {} }).then(r => r.data),
 
   getIntraday: (accountIds: number[]) =>
-    api.get<IntradayPoint[]>('/history/net-worth/intraday', { params: { accountIds } }).then(r => r.data),
+    api.get<IntradayPoint[]>('/history/net-worth/intraday', {
+      params: { accountIds: accountIds.join(',') },
+    }).then(r => r.data),
 
   getPnl: (accountIds: number[], from?: string) =>
-    api.get<PnlData>('/history/pnl', { params: { accountIds, ...(from ? { from } : {}) } }).then(r => r.data),
+    api.get<PnlData>('/history/pnl', {
+      params: { accountIds: accountIds.join(','), ...(from ? { from } : {}) },
+    }).then(r => r.data),
 }
