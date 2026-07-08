@@ -112,8 +112,10 @@ public class DashboardService {
         };
         List<NetWorthPoint> updatedHistory = historyService.buildHistory(allAccountIds, months, memberId);
 
-        List<DistributionItem> distribution = buildDistribution(accounts, totalNetWorth, holdingsByAccount, false);
-        List<DistributionItem> liabilities = buildDistribution(accounts, totalNetWorth, holdingsByAccount, true);
+        // Percentages are shares of their own side of the balance sheet:
+        // assets divide by totalAssets, liabilities by totalLiabilities (issue #18).
+        List<DistributionItem> distribution = buildDistribution(accounts, totalAssets, holdingsByAccount, false);
+        List<DistributionItem> liabilities = buildDistribution(accounts, totalLiabilities, holdingsByAccount, true);
 
         List<GoalProgressResponse> goals = goalRepository.findAllByMemberIdOrderByCreatedAtAsc(memberId).stream()
             .map(goalService::toProgressResponse)
@@ -122,7 +124,7 @@ public class DashboardService {
         return new DashboardResponse(totalNetWorth, totalLiabilities, updatedHistory, distribution, liabilities, goals);
     }
 
-    private List<DistributionItem> buildDistribution(List<Account> accounts, BigDecimal totalNetWorth,
+    private List<DistributionItem> buildDistribution(List<Account> accounts, BigDecimal divisor,
                                                        Map<Long, List<AccountHolding>> holdingsByAccount,
                                                        boolean liabilitiesOnly) {
         List<DistributionItem> items = new ArrayList<>();
@@ -142,8 +144,8 @@ public class DashboardService {
                 }
             }
 
-            double percentage = totalNetWorth.compareTo(BigDecimal.ZERO) > 0
-                ? balanceEur.divide(totalNetWorth, 6, RoundingMode.HALF_UP)
+            double percentage = divisor.compareTo(BigDecimal.ZERO) > 0
+                ? balanceEur.divide(divisor, 6, RoundingMode.HALF_UP)
                     .multiply(BigDecimal.valueOf(100))
                     .doubleValue()
                 : 0.0;

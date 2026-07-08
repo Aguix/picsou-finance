@@ -100,17 +100,49 @@ class DashboardServiceTest {
     }
 
     @Test
-    void getDashboard_distributionPercentages_divideByNetWorth() {
+    void getDashboard_distributionPercentages_divideByOwnSideTotals() {
         stubLoanAndCashFixture();
 
         DashboardResponse response = dashboardService.getDashboard(42L, "1Y");
 
-        // CHARACTERIZATION: percentages divide by net worth (audit BE-15); plan 005 changes
-        // the divisor — update here. Net worth is -8000 here, and the compareTo > 0 guard
-        // yields 0.0 for every item when net worth ≤ 0 (with positive net worth and debt,
-        // percentages exceed 100 %).
-        assertThat(response.distribution().getFirst().percentage()).isEqualTo(0.0);
-        assertThat(response.liabilities().getFirst().percentage()).isEqualTo(0.0);
+        // CHARACTERIZATION (updated by plan 005): assets divide by totalAssets and
+        // liabilities by totalLiabilities, so percentages stay meaningful even when
+        // net worth is negative (-8000 here) and can never exceed 100 %.
+        assertThat(response.distribution().getFirst().percentage()).isEqualTo(100.0); // 2000 / 2000
+        assertThat(response.liabilities().getFirst().percentage()).isEqualTo(100.0);  // 10000 / 10000
+    }
+
+    @Test
+    void getDashboard_assetPercentages_shareOfTotalAssets_withDebtPresent() {
+        Account cashAcc = cashAccount();               // id 1, CHECKING 2000
+        Account savingsAcc = Account.builder()
+            .id(2L)
+            .name("Livret")
+            .type(AccountType.SAVINGS)
+            .currency("EUR")
+            .currentBalance(new BigDecimal("6000"))
+            .color("#22c55e")
+            .build();
+        Account loanAcc = loanAccount();               // id 10, LOAN 10000
+        when(accountRepository.findAllByMemberIdOrderByCreatedAtAsc(42L))
+            .thenReturn(List.of(cashAcc, savingsAcc, loanAcc));
+        when(holdingRepository.findByAccount_Id(1L)).thenReturn(List.of());
+        when(holdingRepository.findByAccount_Id(2L)).thenReturn(List.of());
+        when(holdingRepository.findByAccount_Id(10L)).thenReturn(List.of());
+        when(priceService.toEur(new BigDecimal("2000"), "EUR", null)).thenReturn(new BigDecimal("2000"));
+        when(priceService.toEur(new BigDecimal("6000"), "EUR", null)).thenReturn(new BigDecimal("6000"));
+        when(priceService.toEur(new BigDecimal("10000"), "EUR", null)).thenReturn(new BigDecimal("10000"));
+        when(historyService.buildHistory(List.of(1L, 2L, 10L), 12, 42L)).thenReturn(List.of());
+        when(goalRepository.findAllByMemberIdOrderByCreatedAtAsc(42L)).thenReturn(List.of());
+
+        DashboardResponse response = dashboardService.getDashboard(42L, "1Y");
+
+        // Assets split 2000 / 6000 of totalAssets 8000 → 25 % / 75 %, regardless of the
+        // 10000 debt; the loan is 100 % of totalLiabilities.
+        assertThat(response.distribution())
+            .extracting(DashboardResponse.DistributionItem::percentage)
+            .containsExactly(25.0, 75.0);
+        assertThat(response.liabilities().getFirst().percentage()).isEqualTo(100.0);
     }
 
     @Test
