@@ -5,6 +5,8 @@ export interface IntradayPoint {
   timestamp: string
   total: number
   invested?: number
+  /** Absent on backend intraday points; synthetic series (holding modal) may set it. */
+  pnl?: number
 }
 
 export interface PnlData {

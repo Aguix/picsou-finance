@@ -230,6 +230,9 @@ export function NetWorthChart({ data, intraday = [], range, onRangeChange, showI
           dateMs: new Date(p.timestamp).getTime(),
           total: p.total as number | null,
           invested: p.invested,
+          // Dashboard intraday points carry no pnl (row omitted); synthetic
+          // intraday series (holding modal) may provide one.
+          pnl: p.pnl,
         }))
       : filterByRange(data, range).map(p => ({
           ...p,
