@@ -1,10 +1,32 @@
 package com.picsou.adapter;
 
+import com.picsou.model.AssetStatus;
+import com.picsou.model.AssetType;
+import com.picsou.model.FinancialAsset;
+import com.picsou.service.FinancialAssetService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class OpenFigiIsinConverterTest {
+
+    @Mock private FinancialAssetService assetService;
+
+    private static Optional<FinancialAsset> asset(String symbol, String name) {
+        return Optional.of(FinancialAsset.builder()
+            .symbol(symbol).name(name).coingeckoId(name.toLowerCase().replace(' ', '-'))
+            .type(AssetType.CRYPTO).status(AssetStatus.AUTO)
+            .build());
+    }
 
     @Test
     void isIsin_recognizesValidIsinCodes() {
@@ -51,10 +73,12 @@ class OpenFigiIsinConverterTest {
 
     @Test
     void resolve_parsesTickerAndNameForTradeRepublicCryptoIsins() {
-        OpenFigiIsinConverter converter = new OpenFigiIsinConverter(new CoinGeckoPriceProvider());
+        when(assetService.resolveCrypto("BTC")).thenReturn(asset("BTC", "Bitcoin"));
+        when(assetService.resolveCrypto("ETH")).thenReturn(asset("ETH", "Ethereum"));
+        OpenFigiIsinConverter converter = new OpenFigiIsinConverter(assetService);
 
-        // Ticker is now the parsed symbol (not the fake ISIN), so the holding becomes
-        // price-resolvable via CoinGeckoPriceProvider instead of staying stuck on averageBuyIn.
+        // Ticker is the parsed symbol (not the fake ISIN), so the holding becomes
+        // price-resolvable via the product registry instead of staying stuck on averageBuyIn.
         OpenFigiIsinConverter.TickerResult btc = converter.resolve("XF000BTC0017");
         assertThat(btc.ticker()).isEqualTo("BTC");
         assertThat(btc.name()).isEqualTo("Bitcoin");
@@ -65,29 +89,36 @@ class OpenFigiIsinConverterTest {
     }
 
     @Test
-    void resolve_parsesAnyKnownCryptoSymbolNotJustBtcAndEth() {
-        OpenFigiIsinConverter converter = new OpenFigiIsinConverter(new CoinGeckoPriceProvider());
+    void resolve_parsesAnyResolvableCryptoSymbolNotJustBtcAndEth() {
+        when(assetService.resolveCrypto("SOL")).thenReturn(asset("SOL", "Solana"));
+        when(assetService.resolveCrypto("MATIC")).thenReturn(asset("MATIC", "Polygon"));
+        OpenFigiIsinConverter converter = new OpenFigiIsinConverter(assetService);
 
-        // The symbol is parsed generically from the "XF000<SYMBOL><digits>" pattern and
-        // validated against CoinGeckoPriceProvider's known tickers -- SOL isn't hardcoded
-        // anywhere in OpenFigiIsinConverter (GH issue #22). The display name is derived
-        // from the provider's coin registry too, so every known coin gets a real name,
-        // including multi-word ids ("matic-network" -> "Matic Network").
+        // The symbol is parsed generically from the "XF000<SYMBOL><digits>" pattern and resolved
+        // through FinancialAssetService — SOL isn't hardcoded anywhere in OpenFigiIsinConverter
+        // (GH issue #22), and a coin never seen before is looked up on CoinGecko and registered on
+        // the fly. The display name comes from the product registry.
         OpenFigiIsinConverter.TickerResult sol = converter.resolve("XF000SOL0042");
         assertThat(sol.ticker()).isEqualTo("SOL");
         assertThat(sol.name()).isEqualTo("Solana");
 
         OpenFigiIsinConverter.TickerResult matic = converter.resolve("XF000MATIC0099");
         assertThat(matic.ticker()).isEqualTo("MATIC");
-        assertThat(matic.name()).isEqualTo("Matic Network");
+        assertThat(matic.name()).isEqualTo("Polygon");
     }
 
     @Test
-    void resolve_normalizesCaseAndWhitespaceConsistently() {
-        OpenFigiIsinConverter converter = new OpenFigiIsinConverter(new CoinGeckoPriceProvider());
+    void resolve_normalizesCaseAndWhitespaceAndCachesTheResult() {
+        when(assetService.resolveCrypto("BTC")).thenReturn(asset("BTC", "Bitcoin"));
+        OpenFigiIsinConverter converter = new OpenFigiIsinConverter(assetService);
 
         OpenFigiIsinConverter.TickerResult padded = converter.resolve(" xf000btc0017 ");
         assertThat(padded.ticker()).isEqualTo("BTC");
         assertThat(padded.name()).isEqualTo("Bitcoin");
+
+        // Same ISIN in canonical form hits the converter cache — no second registry lookup.
+        OpenFigiIsinConverter.TickerResult canonical = converter.resolve("XF000BTC0017");
+        assertThat(canonical.ticker()).isEqualTo("BTC");
+        verify(assetService, times(1)).resolveCrypto("BTC");
     }
 }

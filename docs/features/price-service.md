@@ -1,10 +1,12 @@
 # Feature: Price Service
 
-> Last updated: 2026-05-19
+> Last updated: 2026-07-08
 
 ## Context
 
 Picsou needs EUR prices for crypto assets (BTC, ETH, SOL, etc.) and stocks/ETFs (PEA/Compte-Titres holdings) to display account balances in a unified currency. Prices are fetched from two free providers: CoinGecko for crypto and Yahoo Finance for stocks/ETFs. A 15-minute in-memory cache prevents hammering external APIs. The scheduler refreshes prices hourly for all accounts with tickers.
+
+Since V51, ticker → provider-id resolution is **dynamic**: the `financial_asset` table holds one row per priceable asset (symbol, name, type, status, one nullable ref column per aggregator), replacing the hardcoded ticker registries the providers used to carry. `FinancialAssetService` resolves new crypto symbols against CoinGecko's `/search` at discovery time and persists the mapping; ambiguous symbols stay `PENDING` until the operator links them.
 
 ## How it works
 
@@ -12,10 +14,25 @@ Picsou needs EUR prices for crypto assets (BTC, ETH, SOL, etc.) and stocks/ETFs 
 
 `PriceService.getPriceEur(ticker)` routes each ticker to the appropriate provider:
 
-- **CoinGecko** (`CoinGeckoPriceProvider`): Handles crypto tickers (BTC, ETH, SOL, BNB, ADA, XRP, DOGE, DOT, MATIC, AVAX, LINK, UNI, ATOM, LTC, NEAR, ARB, OP, SHIB, PEPE, SUI). Uses the `/simple/price` endpoint with `vs_currencies=eur`. Supports batch queries (all tickers in one request).
+- **CoinGecko** (`CoinGeckoPriceProvider`): Handles any ticker whose `financial_asset` row has a `coingecko_id`. Uses the `/simple/price` endpoint with `vs_currencies=eur`, batched (all tickers in one request). Also exposes `/search` and `/coins/{id}` lookups for the resolver, plus coin logo URLs. An optional Demo API key (`app.coingecko.demo-api-key`, header `x-cg-demo-api-key`) raises the rate limit (~100 req/min vs a handful anonymous).
 - **Yahoo Finance** (`YahooFinancePriceProvider`): Handles everything CoinGecko does not -- stocks, ETFs, indices. Uses the unofficial `/v8/finance/chart/{ticker}` endpoint. Fetched per-ticker (no batch). Tickers like `IWDA.AS`, `MC.PA` are already EUR-denominated; foreign-currency tickers (USD/JPY/GBp/...) are converted to EUR inside the adapter via Yahoo's own `{CURRENCY}EUR=X` chart endpoint, with a 15-minute FX cache mirroring the price cache TTL. See [ADR 2026-05-19](../decisions/2026-05-19-yahoo-fx-conversion.md).
 
 Both providers implement `PriceProviderPort` with `supports(ticker)` and `getPricesEur(tickers)`.
+
+A ticker marked `WORTHLESS` (delisted coin no aggregator can price) is valued at a fixed zero by `PriceService` — no provider call, no phantom snapshot.
+
+### Ticker resolution (`FinancialAssetService`)
+
+Resolution order for a crypto symbol (`resolveCrypto`, called from crypto-guaranteed contexts only — e.g. Trade Republic's `XF000…` internal ISINs, crypto imports):
+
+1. registered asset with a CoinGecko id (or `WORTHLESS`) → done;
+2. CoinGecko `/search` for coins whose symbol equals the ticker;
+3. exactly one match, or one that dominates the runner-up by market-cap rank (factor 5) → persisted as `AUTO`;
+4. otherwise a `PENDING` row is kept — visible in the management UI, retried on the next resolve — and the operator disambiguates by supplying a CoinGecko coin URL (`setManualMapping`, persisted as `USER`).
+
+Correcting a mapping to a *different* coin purges the ticker's `price_snapshot` history (fetched under the wrong coin id) and refetches it; `markWorthless` pins a delisted coin to zero and re-values its holdings.
+
+V51 seeds the registry: the 20 formerly-hardcoded crypto mappings, plus an identity `yahoo_symbol` for every other ticker already present in accounts/holdings — existing positions keep pricing without any user action.
 
 ### Caching
 
@@ -23,21 +40,27 @@ Both providers implement `PriceProviderPort` with `supports(ticker)` and `getPri
 
 `refreshPrices(Set<String> tickers)` bulk-fetches prices, partitions tickers into crypto and stock sets, calls each provider once, and updates the cache.
 
+Every successful fetch also persists `financial_asset.last_eur_value`/`price_synced_at`, so the latest known price survives a restart (the in-memory cache does not). Nothing reads it back yet — the multi-aggregator fallback chain (step C of the crypto plan) will.
+
 ### Currency conversion
 
 `PriceService.toEur(balance, currency, ticker)` converts an account balance to EUR:
 - If currency is EUR and no ticker is set, returns the balance as-is.
 - Otherwise, uses the ticker (preferred) or currency code to fetch a price, then multiplies.
 
-### Scheduler
+### Scheduler & backfill
 
 `SchedulerService.refreshPrices()` runs every hour (`fixedDelay = 3600000`). It collects all tickers from accounts that have a non-null ticker, then calls `PriceService.refreshPrices()`. This keeps the cache warm for the dashboard.
 
+`PriceBackfillRunner` (boot) backfills each holding ticker's daily history **anchored to its own earliest transaction** (12-month fallback), and the backfill is gap-aware: only the missing tail since the latest stored snapshot is fetched, so a warm restart is a no-op instead of re-downloading whole windows.
+
 ### Key files
 
-- `service/PriceService.java` -- Price routing, caching, conversion
+- `service/PriceService.java` -- Price routing, caching, conversion, gap-aware backfill
+- `service/FinancialAssetService.java` -- Dynamic symbol resolution, manual mapping, worthless pinning
+- `model/FinancialAsset.java` / `repository/FinancialAssetRepository.java` -- The registry (V51)
 - `service/SchedulerService.java` -- Hourly price refresh cron
-- `adapter/CoinGeckoPriceProvider.java` -- CoinGecko `/simple/price` with ticker-to-ID mapping
+- `adapter/CoinGeckoPriceProvider.java` -- CoinGecko HTTP client (prices, search, logos, circuit breaker)
 - `adapter/YahooFinancePriceProvider.java` -- Yahoo Finance `/v8/finance/chart/{ticker}`
 - `port/PriceProviderPort.java` -- Port interface with `supports()` and `getPricesEur()`
 
@@ -49,6 +72,8 @@ Dashboard loads --> needs EUR prices
         v
 PriceService.getPriceEur("BTC")
         |
+        +-- financial_asset row says WORTHLESS --> return 0
+        |
         v
 Check cache: CachedPrice for "BTC"
         |
@@ -57,56 +82,54 @@ Check cache: CachedPrice for "BTC"
         +-- miss or expired
                 |
                 v
-        CoinGeckoPriceProvider.supports("BTC") --> true
+        CoinGeckoPriceProvider.supports("BTC")
+        (financial_asset.coingecko_id set?) --> true
                 |
                 v
         GET api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=eur
                 |
                 v
-        Cache result --> return price
+        Cache result + persist last_eur_value --> return price
 
-Scheduler (every hour):
+New crypto symbol discovered (TR sync XF000…, imports):
         |
         v
-SchedulerService.refreshPrices()
+FinancialAssetService.resolveCrypto("TAO")
         |
         v
-Collect all non-null tickers from accounts
-        |
-        v
-PriceService.refreshPrices(tickers)
-        |
-        v
-Partition: crypto --> CoinGecko | stocks --> Yahoo
-        |
-        v
-Bulk fetch, update cache
+GET /search?query=tao --> single/dominant match? --> persist AUTO
+                      --> ambiguous/miss?        --> keep PENDING row (operator links it later)
 ```
 
 ## Technical choices
 
 | Choice | Why | Rejected alternative |
 |--------|-----|----------------------|
-| CoinGecko free tier | No API key needed, supports batch queries, reliable | CoinMarketCap (requires key) |
+| CoinGecko free tier | No API key needed, supports batch queries, reliable | CoinMarketCap (requires key) — planned as fallback aggregator (step C/E) |
 | Yahoo Finance (unofficial) | Free, covers European tickers (.PA, .AS) | Alpha Vantage (key required, limited) |
+| Dynamic `financial_asset` registry | New coins resolve without a code change; ambiguity is surfaced, never guessed | Hardcoded ticker→id maps in each provider (drifted: CoinGecko had 20 coins, Yahoo's skip-list 10) |
+| One nullable ref column per aggregator | Exactly one external ref per (asset, aggregator); simple queries | Junction table (rejected 2026-07-08 — adding an aggregator needs code anyway) |
+| Market-cap dominance factor (×5) for auto-resolution | A #5 coin vs a #300 clone is safe; #10 vs #14 is not — those wait for the operator | Always top-ranked match (mis-maps popular symbol clones) |
 | 15-minute cache TTL | Balance between freshness and API rate limits | No cache (too many requests) or 1-hour cache (stale prices) |
+| Circuit breaker on 429 (`pausedUntil`, honours `Retry-After`) | One warning per pause window; a dashboard load can't spam a rate-limited API | Retry with backoff (amplifies the burst that caused the 429) |
 | Hourly scheduler refresh | Keeps cache warm; ensures dashboard loads fast | Fetch on every dashboard request (slow) |
-| Provider partition by `supports()` | Clean separation: CoinGecko gets crypto, Yahoo gets everything else | Hardcoded crypto ticker list (duplicated, harder to maintain) |
 
 ## Gotchas / Pitfalls
 
 - **Yahoo Finance is unofficial**: The Yahoo Finance API is undocumented and can break or get rate-limited without notice. FX conversion is now applied inside `YahooFinancePriceProvider` using the `{CURRENCY}EUR=X` chart endpoint; `GBp`/`GBX` is treated as `GBP / 100`. If the FX call fails the ticker is omitted from the result map (no fabricated rate) — downstream consumers must tolerate a missing key.
-- **CoinGecko rate limits**: The free tier has rate limits (~30 requests/minute). The batch endpoint mitigates this, but individual cache misses could accumulate. The 15-minute cache is essential.
-- **Cache is in-memory only**: Prices are lost on restart. The scheduler will repopulate within one hour, but the first few dashboard loads after restart may trigger external API calls.
-- **Provider priority is `supports()`-based**: CoinGecko checks a hardcoded ticker-to-ID map. If a new crypto asset is added (e.g. a new token), it must be added to `TICKER_TO_ID` in `CoinGeckoPriceProvider`.
+- **CoinGecko rate limits**: the anonymous tier 429s within ~5-6 requests (Cloudflare serves `Retry-After: 60`). The circuit breaker pauses *all* CoinGecko calls until the window elapses; a Demo API key (`COINGECKO_DEMO_API_KEY`) raises the limit to ~100 req/min and is the real fix.
+- **CoinGecko free history is age-limited**: `market_chart/range` 401s when `from` is older than ~365 days, so historical requests are clamped to 364 days (`MAX_FREE_HISTORY_DAYS`). Older history would need a paid Pro key.
+- **Unresolved symbols price as before, not better**: a `PENDING` product has no aggregator ref, so pricing falls through to Yahoo with the raw symbol (usually a miss → unpriced holding). That is the pre-V51 behaviour for unknown coins; the fix is linking the coin in the management UI.
+- **`YahooFinancePriceProvider` still carries a small crypto skip-list**: now dead weight (routing happens upstream via the registry); scheduled for cleanup with the `account_holding` rework (step A2).
+- **Cache is in-memory only**: prices are lost on restart (the scheduler repopulates within one hour). `financial_asset.last_eur_value` now persists the last known price, but nothing reads it back yet — that lands with the multi-aggregator fallback (step C).
 - **`toEur()` returns raw balance on failure**: If no price is available for a symbol, `toEur()` logs a warning and returns the unconverted balance. This can lead to incorrect dashboard values if a price provider is down.
 - **Historical/intraday series use today's FX**: `getHistoricalPricesEur` and `getIntradayPricesEur` fetch the FX rate once per call and apply it to every candle in the series. Per-day FX would multiply API calls ~250× for a one-year backfill with marginal accuracy gain — see [ADR 2026-05-19](../decisions/2026-05-19-yahoo-fx-conversion.md) for the trade-off.
 - **Snapshots from before the FX fix were wiped**: `PriceFxCleanupRunner` purges `price_snapshot` once at boot (guarded by the `price.fx_fix_cleanup_done` app_setting flag from `V31`) so `PriceBackfillRunner` rebuilds 12 months of history with FX-corrected prices.
 
 ## Tests
 
-- `PriceServiceTest` -- unit tests for caching, routing, conversion
-- `CoinGeckoPriceProviderTest` -- unit tests for ticker mapping
+- `FinancialAssetServiceTest` -- resolution rules (dominance, PENDING retry), manual mapping, worthless, purge-and-refetch
+- `OpenFigiIsinConverterTest` -- ISIN detection + TR crypto ISINs resolved through the product registry
 - `YahooFinancePriceProviderTest` -- unit tests for response parsing
 
 ## Links

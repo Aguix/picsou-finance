@@ -99,10 +99,11 @@ public class OpenFigiIsinConverter {
      * held directly, not via an ETC) follow "XF000&lt;SYMBOL&gt;&lt;digits&gt;" — these
      * are not real market ISINs, so OpenFIGI never resolves them and {@code name}
      * stays null / {@code ticker} stays the fake ISIN downstream. See GH issue #22.
-     * The symbol is parsed generically (not hardcoded per coin) and validated
-     * against {@link CoinGeckoPriceProvider}'s known tickers so the holding's
-     * ticker becomes price-resolvable, not just its display name. The display name
-     * is derived from the same provider registry (no second per-coin map here).
+     * The symbol is parsed generically (not hardcoded per coin) and resolved through
+     * {@link com.picsou.service.FinancialAssetService} — an unseen coin triggers a
+     * live CoinGecko lookup and is registered on the fly — so the holding's ticker
+     * becomes price-resolvable, not just its display name. The display name comes
+     * from the same asset registry (no second per-coin map here).
      */
     private static final String TR_CRYPTO_ISIN_PREFIX = "XF000";
 
@@ -131,12 +132,12 @@ public class OpenFigiIsinConverter {
     );
 
     private final WebClient webClient;
-    private final CoinGeckoPriceProvider coinGecko;
+    private final com.picsou.service.FinancialAssetService assetService;
     // Cache: ISIN → TickerResult. Null value means conversion failed.
     private final Map<String, TickerResult> cache = new ConcurrentHashMap<>();
 
-    public OpenFigiIsinConverter(CoinGeckoPriceProvider coinGecko) {
-        this.coinGecko = coinGecko;
+    public OpenFigiIsinConverter(com.picsou.service.FinancialAssetService assetService) {
+        this.assetService = assetService;
         this.webClient = WebClient.builder()
             .baseUrl("https://api.openfigi.com")
             .defaultHeader("Content-Type", "application/json")
@@ -171,17 +172,19 @@ public class OpenFigiIsinConverter {
             return cached;
         }
 
-        // TR-native crypto short-circuit (see TR_CRYPTO_ISIN_PATTERN): parse the symbol and,
-        // if the price provider knows it, resolve straight to that ticker + display name.
+        // TR-native crypto short-circuit (see TR_CRYPTO_ISIN_PATTERN): parse the symbol and
+        // resolve it through the asset registry — a coin never seen before is looked up on
+        // CoinGecko and registered on the fly, so new TR coins don't need a code change.
         java.util.regex.Matcher trCrypto = TR_CRYPTO_ISIN_PATTERN.matcher(normalized);
         if (trCrypto.matches()) {
             String symbol = trCrypto.group(1);
-            if (coinGecko.supports(symbol)) {
-                TickerResult result = new TickerResult(symbol, coinGecko.displayName(symbol));
+            java.util.Optional<com.picsou.model.FinancialAsset> asset = assetService.resolveCrypto(symbol);
+            if (asset.isPresent()) {
+                TickerResult result = new TickerResult(symbol, asset.get().getName());
                 cache.put(normalized, result);
                 return result;
             }
-            log.warn("TR-native crypto ISIN {} has unrecognized symbol '{}', falling back to OpenFIGI (will likely miss)",
+            log.warn("TR-native crypto ISIN {} has unresolvable symbol '{}', falling back to OpenFIGI (will likely miss)",
                      normalized, symbol);
         }
 

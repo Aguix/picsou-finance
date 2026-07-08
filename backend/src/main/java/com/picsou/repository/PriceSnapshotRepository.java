@@ -47,4 +47,9 @@ public interface PriceSnapshotRepository extends JpaRepository<PriceSnapshot, Lo
     @Modifying
     @Query("DELETE FROM PriceSnapshot")
     int deleteAllSnapshots();
+
+    /** Purge a ticker's whole history — used when its product mapping is corrected or removed. */
+    @Modifying
+    @Query("DELETE FROM PriceSnapshot ps WHERE ps.ticker = :ticker")
+    int deleteByTicker(@Param("ticker") String ticker);
 }

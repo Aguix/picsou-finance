@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
     List<Transaction> findByAccountIdOrderByDateDesc(Long accountId);
@@ -31,4 +32,9 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     /** Earliest transaction date across all accounts */
     @Query("SELECT MIN(t.date) FROM Transaction t")
     LocalDate findEarliestDate();
+
+    /** Earliest transaction date per ticker, for the tickers that have at least one transaction. */
+    @Query("SELECT t.ticker AS ticker, MIN(t.date) AS earliestDate FROM Transaction t "
+        + "WHERE t.ticker IN :tickers GROUP BY t.ticker")
+    List<TickerEarliestDate> findEarliestDatesByTickerIn(@Param("tickers") Set<String> tickers);
 }

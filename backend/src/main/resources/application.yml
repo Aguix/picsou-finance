@@ -111,6 +111,11 @@ app:
   secure-cookies: ${SECURE_COOKIES:true}
   crypto:
     encryption-key: ${CRYPTO_ENCRYPTION_KEY:}
+  coingecko:
+    # Optional CoinGecko Demo API key (header x-cg-demo-api-key). Blank = anonymous free tier
+    # (lower rate limit). The provider degrades gracefully when unset; ticker→id resolution and
+    # prices still work, just closer to the public rate limit.
+    demo-api-key: ${COINGECKO_DEMO_API_KEY:}
   tr-auth:
     url: ${TR_AUTH_URL:http://tr-auth:8001}
   bourso-auth:

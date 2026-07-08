@@ -2,7 +2,9 @@ package com.picsou.service;
 
 import com.picsou.adapter.CoinGeckoPriceProvider;
 import com.picsou.adapter.YahooFinancePriceProvider;
+import com.picsou.model.FinancialAsset;
 import com.picsou.model.PriceSnapshot;
+import com.picsou.repository.FinancialAssetRepository;
 import com.picsou.repository.PriceSnapshotRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,15 +26,23 @@ public class PriceService {
     private final CoinGeckoPriceProvider coinGecko;
     private final YahooFinancePriceProvider yahoo;
     private final PriceSnapshotRepository priceSnapshotRepository;
+    private final FinancialAssetRepository assetRepository;
 
     // Simple in-memory price cache: ticker → (price, cachedAt)
     private final Map<String, CachedPrice> priceCache = new ConcurrentHashMap<>();
 
     public PriceService(CoinGeckoPriceProvider coinGecko, YahooFinancePriceProvider yahoo,
-                        PriceSnapshotRepository priceSnapshotRepository) {
+                        PriceSnapshotRepository priceSnapshotRepository,
+                        FinancialAssetRepository assetRepository) {
         this.coinGecko = coinGecko;
         this.yahoo = yahoo;
         this.priceSnapshotRepository = priceSnapshotRepository;
+        this.assetRepository = assetRepository;
+    }
+
+    /** A ticker the operator marked WORTHLESS (delisted): priced at a fixed zero, never fetched. */
+    private boolean isWorthless(String upperTicker) {
+        return assetRepository.findBySymbol(upperTicker).map(FinancialAsset::isWorthless).orElse(false);
     }
 
     /**
@@ -46,6 +56,9 @@ public class PriceService {
         }
 
         String upper = ticker.toUpperCase();
+
+        // A ticker marked WORTHLESS is valued at a known zero — no cache, no provider call.
+        if (isWorthless(upper)) return BigDecimal.ZERO;
 
         // Check cache
         CachedPrice cached = priceCache.get(upper);
@@ -66,6 +79,7 @@ public class PriceService {
         BigDecimal price = prices.get(upper);
         if (price != null) {
             priceCache.put(upper, new CachedPrice(price, Instant.now()));
+            assetRepository.updateLastPrice(upper, price, Instant.now());
             return price;
         }
 
@@ -80,11 +94,17 @@ public class PriceService {
 
         Set<String> cryptoTickers = new HashSet<>();
         Set<String> stockTickers = new HashSet<>();
+        Set<String> worthlessTickers = new HashSet<>();
 
         for (String ticker : tickers) {
             String upper = ticker.toUpperCase();
             if ("EUR".equals(upper)) {
                 result.put(upper, BigDecimal.ONE);
+            } else if (isWorthless(upper)) {
+                // Known-zero: prices the holding at 0 without hitting any provider, and (below)
+                // without writing a phantom 0 snapshot into the price history.
+                worthlessTickers.add(upper);
+                result.put(upper, BigDecimal.ZERO);
             } else if (coinGecko.supports(upper)) {
                 cryptoTickers.add(upper);
             } else {
@@ -108,11 +128,13 @@ public class PriceService {
 
         log.debug("Refreshed prices for {} tickers", result.size());
 
-        // Persist daily price snapshots
+        // Persist daily price snapshots + the asset's last known price (restart-surviving cache)
         LocalDate today = LocalDate.now();
         for (var entry : result.entrySet()) {
             if ("EUR".equals(entry.getKey())) continue;
+            if (worthlessTickers.contains(entry.getKey())) continue; // don't snapshot a fixed zero
             if (entry.getValue() == null) continue;
+            assetRepository.updateLastPrice(entry.getKey(), entry.getValue(), Instant.now());
             Optional<PriceSnapshot> existing = priceSnapshotRepository.findByTickerAndDate(entry.getKey(), today);
             if (existing.isPresent()) {
                 existing.get().setPriceEur(entry.getValue());
@@ -152,24 +174,66 @@ public class PriceService {
 
     /**
      * Backfill historical prices for the given tickers from external APIs.
-     * Fetches daily prices for the last 12 months and saves as PriceSnapshots.
+     * Fetches daily prices from the given start date and saves as PriceSnapshots.
      * Skips dates that already have a snapshot.
      */
     public int backfillHistoricalPrices(Set<String> tickers, LocalDate from) {
+        Map<String, LocalDate> byTicker = new HashMap<>();
+        for (String ticker : tickers) {
+            byTicker.put(ticker.toUpperCase(), from);
+        }
+        return backfillHistoricalPrices(byTicker);
+    }
+
+    /**
+     * Backfill each ticker from its own start date (per-coin anchoring), so a coin bought recently
+     * isn't fetched from the whole portfolio's earliest date. Gap-aware and idempotent: only the
+     * missing tail is fetched, and a coin already current is skipped entirely.
+     */
+    public int backfillHistoricalPrices(Map<String, LocalDate> firstDateByTicker) {
         LocalDate to = LocalDate.now();
         int saved = 0;
+        List<String> noData = new ArrayList<>();
+        List<String> upToDate = new ArrayList<>();
 
-        for (String ticker : tickers) {
-            String upper = ticker.toUpperCase();
+        for (Map.Entry<String, LocalDate> e : firstDateByTicker.entrySet()) {
+            String upper = e.getKey().toUpperCase();
             if ("EUR".equals(upper)) continue;
+            if (isWorthless(upper)) continue;   // fixed-zero: no history to fetch, no provider call
+            LocalDate from = e.getValue();
+
+            // Gap-aware: only fetch what's missing. If the latest stored snapshot already reaches
+            // yesterday (today's price is the live path's job), the coin is current → fetch nothing.
+            // Otherwise fetch just the missing tail. This makes a warm restart's PriceBackfillRunner
+            // a no-op instead of re-downloading the whole window and burning the rate limit.
+            LocalDate effectiveFrom = from;
+            Optional<PriceSnapshot> latest = priceSnapshotRepository.findLatestByTickerBeforeOrOnDate(upper, to);
+            if (latest.isPresent()) {
+                LocalDate nextMissing = latest.get().getDate().plusDays(1);
+                if (!nextMissing.isBefore(to)) {   // covered up to (at least) yesterday
+                    upToDate.add(upper);
+                    continue;
+                }
+                if (nextMissing.isAfter(from)) {
+                    effectiveFrom = nextMissing;   // fetch only the gap since the last snapshot
+                }
+            }
 
             Map<LocalDate, BigDecimal> prices;
             if (coinGecko.supports(upper)) {
-                prices = coinGecko.getHistoricalPricesEur(upper, from, to);
+                // The provider absorbs the free tier's 429s with its circuit breaker, so this loop
+                // just walks the tickers.
+                prices = coinGecko.getHistoricalPricesEur(upper, effectiveFrom, to);
             } else {
-                prices = yahoo.getHistoricalPricesEur(upper, from, to);
+                prices = yahoo.getHistoricalPricesEur(upper, effectiveFrom, to);
             }
 
+            if (prices.isEmpty()) {
+                noData.add(upper);
+                continue;
+            }
+
+            int added = 0;
             for (var entry : prices.entrySet()) {
                 if (priceSnapshotRepository.findByTickerAndDate(upper, entry.getKey()).isEmpty()) {
                     priceSnapshotRepository.save(PriceSnapshot.builder()
@@ -178,10 +242,26 @@ public class PriceService {
                         .priceEur(entry.getValue())
                         .build());
                     saved++;
+                    added++;
                 }
             }
+            log.debug("Backfill {}: {} prices fetched from {}, {} new snapshots",
+                upper, prices.size(), effectiveFrom, added);
+        }
 
-            log.info("Backfilled {} prices for {}", prices.size(), upper);
+        // One summary line instead of one per ticker. A non-empty noData list on the free tier
+        // usually means a rate-limit (429) rather than genuinely-missing history — surfaced at WARN
+        // so it's actionable without the per-ticker flood.
+        int attempted = (int) firstDateByTicker.keySet().stream()
+            .filter(t -> !"EUR".equalsIgnoreCase(t)).count();
+        int fetched = attempted - upToDate.size();
+        if (noData.isEmpty()) {
+            log.info("Historical backfill: {} new snapshots ({} tickers fetched, {} already up-to-date)",
+                saved, fetched, upToDate.size());
+        } else {
+            log.warn("Historical backfill: {} new snapshots ({} fetched, {} up-to-date); "
+                + "{}/{} returned no data (rate-limit or unmapped): {}",
+                saved, fetched, upToDate.size(), noData.size(), attempted, noData);
         }
 
         return saved;
@@ -196,6 +276,11 @@ public class PriceService {
     /** Drop the in-memory price cache. Used by PriceFxCleanupRunner. */
     public void clearPriceCache() {
         priceCache.clear();
+    }
+
+    /** Evict one ticker from the in-memory cache — used when its asset mapping changes. */
+    public void evictFromCache(String ticker) {
+        if (ticker != null) priceCache.remove(ticker.toUpperCase());
     }
 
     /**

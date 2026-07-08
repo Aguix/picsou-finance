@@ -1,11 +1,18 @@
 package com.picsou.adapter;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.picsou.model.FinancialAsset;
 import com.picsou.port.PriceProviderPort;
+import com.picsou.repository.FinancialAssetRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -15,10 +22,30 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
- * Fetches crypto prices from CoinGecko public API (no API key required for free tier).
- * Supports tickers like BTC, ETH, SOL, etc.
+ * Fetches crypto prices and logos from the CoinGecko API.
+ *
+ * <p>Ticker → coin-id resolution is fully dynamic: it reads the persistent {@code financial_asset}
+ * registry (see {@link FinancialAssetRepository} / {@link com.picsou.service.FinancialAssetService})
+ * instead of a hardcoded map. A ticker is {@link #supports(String) supported} once its asset has a
+ * CoinGecko id — which {@code FinancialAssetService} resolves from CoinGecko at crypto-discovery
+ * time. This class stays the low-level HTTP client: it also exposes {@link #searchBySymbol(String)}
+ * so the resolver can look candidates up, but never decides or persists a mapping itself.
+ *
+ * <p>An optional Demo API key ({@code app.coingecko.demo-api-key}) is sent as the
+ * {@code x-cg-demo-api-key} header when present; absent, calls fall back to the anonymous free
+ * tier with no change in behaviour beyond a stricter rate limit.
+ *
+ * <p>The free tier rate-limits aggressively (a burst 429s within a handful of calls, and a page
+ * load prices ~17 coins). To avoid hammering CoinGecko — and flooding the logs — a lightweight
+ * <b>circuit breaker</b> reacts to the first {@code 429}: it pauses <em>all</em> calls until the
+ * response's {@code Retry-After} elapses (falling back to {@link #DEFAULT_RETRY_AFTER}). While
+ * paused, every method short-circuits to an empty result with no HTTP call, so a dashboard load
+ * neither blocks nor spams retries — the 15-minute price cache and the hourly scheduler cover the
+ * gap, and a Demo key ({@code app.coingecko.demo-api-key}) raises the limit enough to avoid 429s.
  */
 @Component
 public class CoinGeckoPriceProvider implements PriceProviderPort {
@@ -26,74 +53,114 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
     private static final Logger log = LoggerFactory.getLogger(CoinGeckoPriceProvider.class);
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
-    // Map from ticker (uppercase) → CoinGecko coin ID
-    private static final Map<String, String> TICKER_TO_ID = Map.ofEntries(
-        Map.entry("BTC", "bitcoin"),
-        Map.entry("ETH", "ethereum"),
-        Map.entry("SOL", "solana"),
-        Map.entry("BNB", "binancecoin"),
-        Map.entry("ADA", "cardano"),
-        Map.entry("XRP", "ripple"),
-        Map.entry("DOGE", "dogecoin"),
-        Map.entry("DOT", "polkadot"),
-        Map.entry("MATIC", "matic-network"),
-        Map.entry("AVAX", "avalanche-2"),
-        Map.entry("LINK", "chainlink"),
-        Map.entry("UNI", "uniswap"),
-        Map.entry("ATOM", "cosmos"),
-        Map.entry("LTC", "litecoin"),
-        Map.entry("NEAR", "near"),
-        Map.entry("ARB", "arbitrum"),
-        Map.entry("OP", "optimism"),
-        Map.entry("SHIB", "shiba-inu"),
-        Map.entry("PEPE", "pepe"),
-        Map.entry("SUI", "sui")
-    );
+    // Circuit breaker: how long to pause all calls after a 429 when the response carries no usable
+    // Retry-After (CoinGecko's free-tier window is ~1 minute).
+    private static final Duration DEFAULT_RETRY_AFTER = Duration.ofSeconds(60);
 
+    // Set to a future instant when a 429 is seen; while now < pausedUntil every call short-circuits.
+    private volatile Instant pausedUntil = Instant.EPOCH;
+
+    // CoinGecko's free/Demo tier only serves market_chart/range for the past ~365 days — an older
+    // `from` 401s (empirically 380d fails, 360d works; confirmed by the docs: "Public API (Demo plan)
+    // is restricted to the past 365 days"). A paid Pro key lifts this; we don't use one, so clamp
+    // historical requests to stay just inside the window rather than failing outright.
+    private static final int MAX_FREE_HISTORY_DAYS = 364;
+
+    // Coin logo URLs (CoinGecko's own CDN icons) almost never change, so they're cached for the
+    // process lifetime instead of the 15-minute TTL PriceService uses for prices.
+    private final Map<String, String> logoCache = new ConcurrentHashMap<>();
+
+    private final FinancialAssetRepository assetRepository;
     private final WebClient webClient;
 
-    public CoinGeckoPriceProvider() {
-        this.webClient = WebClient.builder()
+    public CoinGeckoPriceProvider(FinancialAssetRepository assetRepository,
+                                  @Value("${app.coingecko.demo-api-key:}") String demoApiKey) {
+        this.assetRepository = assetRepository;
+        WebClient.Builder builder = WebClient.builder()
             .baseUrl("https://api.coingecko.com/api/v3")
-            .defaultHeader("Accept", "application/json")
-            .build();
+            .defaultHeader("Accept", "application/json");
+        if (demoApiKey != null && !demoApiKey.isBlank()) {
+            builder.defaultHeader("x-cg-demo-api-key", demoApiKey.trim());
+            log.info("CoinGecko Demo API key configured");
+        }
+        this.webClient = builder.build();
     }
 
-    @Override
-    public boolean supports(String ticker) {
-        return ticker != null && TICKER_TO_ID.containsKey(ticker.toUpperCase(Locale.ROOT));
+    /** True while the breaker is open — a recent 429 means we skip CoinGecko entirely for now. */
+    private boolean paused() {
+        return Instant.now().isBefore(pausedUntil);
     }
 
     /**
-     * A human-readable display name for a known crypto {@code ticker}, derived from its
-     * CoinGecko coin id (e.g. BTC &rarr; "Bitcoin", MATIC &rarr; "Matic Network"), or
-     * {@code null} if the ticker is unknown. Keeps crypto naming in the single
-     * {@link #TICKER_TO_ID} registry rather than a second per-coin map elsewhere; used by
-     * {@link OpenFigiIsinConverter} to name Trade Republic's on-platform crypto holdings.
+     * Trip the breaker after a 429: pause all calls until the response's {@code Retry-After} (or
+     * {@link #DEFAULT_RETRY_AFTER}) elapses. Logged once per pause window so a page load that fires
+     * ~17 price calls doesn't produce ~17 warnings.
      */
-    public String displayName(String ticker) {
-        if (ticker == null) return null;
-        String coinId = TICKER_TO_ID.get(ticker.toUpperCase(Locale.ROOT));
-        if (coinId == null) return null;
-        return Arrays.stream(coinId.split("-"))
-            .filter(word -> !word.isBlank())
-            .map(word -> Character.toUpperCase(word.charAt(0)) + word.substring(1))
-            .collect(java.util.stream.Collectors.joining(" "));
+    private void pause(Throwable t) {
+        Duration wait = retryAfter(t).orElse(DEFAULT_RETRY_AFTER);
+        boolean alreadyPaused = paused();
+        pausedUntil = Instant.now().plus(wait);
+        if (!alreadyPaused) {
+            log.warn("CoinGecko rate-limited (429) — pausing all calls for {}s", wait.toSeconds());
+        }
+    }
+
+    private static boolean isRateLimited(Throwable t) {
+        return t instanceof WebClientResponseException e && e.getStatusCode().value() == 429;
+    }
+
+    /** The {@code Retry-After} header (delta-seconds) from a 429, if present and numeric. */
+    private static Optional<Duration> retryAfter(Throwable t) {
+        if (t instanceof WebClientResponseException e) {
+            String header = e.getHeaders().getFirst("Retry-After");
+            if (header != null && !header.isBlank()) {
+                try {
+                    return Optional.of(Duration.ofSeconds(Long.parseLong(header.trim())));
+                } catch (NumberFormatException ignored) {
+                    // Retry-After can also be an HTTP-date; we don't parse that — fall back to default.
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** CoinGecko coin id for an uppercase ticker, from the persistent asset registry, or null. */
+    private String coinId(String ticker) {
+        return assetRepository.findBySymbol(ticker.toUpperCase())
+            .map(FinancialAsset::getCoingeckoId).orElse(null);
+    }
+
+    /**
+     * Bulk ticker(upper) → coin-id for a set of tickers; only tickers with a real coin id are
+     * present. A {@code WORTHLESS} or {@code PENDING} asset carries no id, so it's skipped here —
+     * it must never be sent to CoinGecko.
+     */
+    private Map<String, String> coinIds(Set<String> tickers) {
+        Set<String> upper = tickers.stream().map(String::toUpperCase).collect(Collectors.toSet());
+        return assetRepository.findBySymbolIn(upper).stream()
+            .filter(a -> a.getCoingeckoId() != null)
+            .collect(Collectors.toMap(FinancialAsset::getSymbol, FinancialAsset::getCoingeckoId));
+    }
+
+    /**
+     * True once the ticker has an asset <em>with a coin id</em>. A {@code WORTHLESS} asset (no id)
+     * is deliberately not supported — its price is a fixed zero handled by {@code PriceService},
+     * never a CoinGecko fetch.
+     */
+    @Override
+    public boolean supports(String ticker) {
+        return assetRepository.findBySymbol(ticker.toUpperCase())
+            .map(a -> a.getCoingeckoId() != null).orElse(false);
     }
 
     @Override
     public Map<String, BigDecimal> getPricesEur(Set<String> tickers) {
-        Set<String> supported = tickers.stream()
-            .filter(this::supports)
-            .collect(java.util.stream.Collectors.toSet());
+        Map<String, String> tickerToId = coinIds(tickers);
+        if (tickerToId.isEmpty()) return Map.of();
 
-        if (supported.isEmpty()) return Map.of();
-
-        String ids = supported.stream()
-            .map(t -> TICKER_TO_ID.get(t.toUpperCase()))
-            .filter(Objects::nonNull)
-            .reduce((a, b) -> a + "," + b)
-            .orElse("");
+        String ids = String.join(",", new LinkedHashSet<>(tickerToId.values()));
+        if (ids.isBlank()) return Map.of();
+        if (paused()) return Map.of();
 
         try {
             Map<String, PriceData> response = webClient.get()
@@ -103,24 +170,146 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                     .queryParam("vs_currencies", "eur")
                     .build())
                 .retrieve()
-                .bodyToMono(new org.springframework.core.ParameterizedTypeReference<Map<String, PriceData>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, PriceData>>() {})
                 .timeout(TIMEOUT)
                 .block();
 
             if (response == null) return Map.of();
 
             Map<String, BigDecimal> result = new HashMap<>();
-            for (String ticker : supported) {
-                String coinId = TICKER_TO_ID.get(ticker.toUpperCase());
-                if (coinId != null && response.containsKey(coinId)) {
-                    BigDecimal price = response.get(coinId).eur();
-                    if (price != null) result.put(ticker.toUpperCase(), price);
+            for (Map.Entry<String, String> e : tickerToId.entrySet()) {
+                PriceData data = response.get(e.getValue());
+                if (data != null && data.eur() != null) {
+                    result.put(e.getKey(), data.eur());
                 }
             }
             return result;
         } catch (Exception ex) {
+            if (isRateLimited(ex)) pause(ex);
             log.warn("CoinGecko price fetch failed: {}", ex.getMessage());
             return Map.of();
+        }
+    }
+
+    /**
+     * Fetch coin logo URLs (CoinGecko's CDN-hosted icons) for the given tickers, batched into a
+     * single {@code /coins/markets} request per call for whatever isn't already cached.
+     */
+    public Map<String, String> getLogoUrls(Set<String> tickers) {
+        Map<String, String> tickerToId = coinIds(tickers);
+        if (tickerToId.isEmpty()) return Map.of();
+
+        Map<String, String> result = new HashMap<>();
+        Map<String, String> missingIdByTicker = new HashMap<>();
+        for (Map.Entry<String, String> e : tickerToId.entrySet()) {
+            String cached = logoCache.get(e.getKey());
+            if (cached != null) {
+                result.put(e.getKey(), cached);
+            } else {
+                missingIdByTicker.put(e.getKey(), e.getValue());
+            }
+        }
+        if (missingIdByTicker.isEmpty()) return result;
+
+        String ids = String.join(",", new LinkedHashSet<>(missingIdByTicker.values()));
+        if (ids.isBlank()) return result;
+        if (paused()) return result;
+
+        try {
+            List<CoinMarketData> response = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                    .path("/coins/markets")
+                    .queryParam("vs_currency", "eur")
+                    .queryParam("ids", ids)
+                    .build())
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<CoinMarketData>>() {})
+                .timeout(TIMEOUT)
+                .block();
+
+            if (response != null) {
+                Map<String, String> idToImage = new HashMap<>();
+                for (CoinMarketData c : response) {
+                    if (c.id != null && c.image != null) idToImage.put(c.id, c.image);
+                }
+                for (Map.Entry<String, String> e : missingIdByTicker.entrySet()) {
+                    String image = idToImage.get(e.getValue());
+                    if (image != null) {
+                        logoCache.put(e.getKey(), image);
+                        result.put(e.getKey(), image);
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            if (isRateLimited(ex)) pause(ex);
+            log.warn("CoinGecko logo fetch failed: {}", ex.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * Look up candidate coins whose CoinGecko symbol matches {@code ticker}, via {@code /search}.
+     * Returns them with their market-cap rank so {@link com.picsou.service.FinancialAssetService}
+     * can pick a dominant match. Empty on miss or error — the resolver treats that as "unresolved".
+     */
+    public List<CoinCandidate> searchBySymbol(String ticker) {
+        String symbol = ticker.trim().toLowerCase();
+        if (symbol.isEmpty()) return List.of();
+        if (paused()) return List.of();
+        try {
+            SearchResponse response = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                    .path("/search")
+                    .queryParam("query", symbol)
+                    .build())
+                .retrieve()
+                .bodyToMono(SearchResponse.class)
+                .timeout(TIMEOUT)
+                .block();
+
+            if (response == null || response.coins == null) return List.of();
+            return response.coins.stream()
+                .filter(c -> c.id != null && c.symbol != null && c.symbol.equalsIgnoreCase(symbol))
+                .map(c -> new CoinCandidate(c.id, c.name, c.symbol, c.marketCapRank))
+                .toList();
+        } catch (Exception ex) {
+            if (isRateLimited(ex)) pause(ex);
+            log.warn("CoinGecko symbol search failed for {}: {}", ticker, ex.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Fetch a single coin by its CoinGecko id (via {@code /coins/{id}}), narrowed to
+     * {@link CoinCandidate}. Used to validate an operator-supplied disambiguation link and read the
+     * coin's canonical name. Empty when the id is unknown or the call fails.
+     */
+    public Optional<CoinCandidate> fetchCoinById(String id) {
+        String coinId = id == null ? "" : id.trim().toLowerCase();
+        if (coinId.isEmpty()) return Optional.empty();
+        if (paused()) return Optional.empty();
+        try {
+            CoinDetail detail = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                    .path("/coins/{id}")
+                    .queryParam("localization", "false")
+                    .queryParam("tickers", "false")
+                    .queryParam("market_data", "false")
+                    .queryParam("community_data", "false")
+                    .queryParam("developer_data", "false")
+                    .queryParam("sparkline", "false")
+                    .build(coinId))
+                .retrieve()
+                .bodyToMono(CoinDetail.class)
+                .timeout(TIMEOUT)
+                .block();
+
+            if (detail == null || detail.id == null) return Optional.empty();
+            return Optional.of(new CoinCandidate(detail.id, detail.name, detail.symbol, detail.marketCapRank));
+        } catch (Exception ex) {
+            if (isRateLimited(ex)) pause(ex);
+            log.warn("CoinGecko coin lookup failed for id {}: {}", coinId, ex.getMessage());
+            return Optional.empty();
         }
     }
 
@@ -129,8 +318,9 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
      * CoinGecko's market_chart/range returns hourly data for ranges < 90 days.
      */
     public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(String ticker, LocalDateTime from, LocalDateTime to) {
-        String coinId = TICKER_TO_ID.get(ticker.toUpperCase());
+        String coinId = coinId(ticker);
         if (coinId == null) return Map.of();
+        if (paused()) return Map.of();
 
         try {
             long fromEpoch = from.atZone(ZoneOffset.UTC).toEpochSecond();
@@ -144,7 +334,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                     .queryParam("to", toEpoch)
                     .build(coinId))
                 .retrieve()
-                .bodyToMono(new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .timeout(Duration.ofSeconds(15))
                 .block();
 
@@ -168,6 +358,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             log.debug("Fetched {} intraday prices for {} ({}) from CoinGecko", prices.size(), ticker, coinId);
             return prices;
         } catch (Exception ex) {
+            if (isRateLimited(ex)) pause(ex);
             log.warn("CoinGecko intraday price fetch failed for {}: {}", ticker, ex.getMessage());
             return Map.of();
         }
@@ -178,8 +369,15 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
      * Returns a map of date -> priceEur.
      */
     public Map<LocalDate, BigDecimal> getHistoricalPricesEur(String ticker, LocalDate from, LocalDate to) {
-        String coinId = TICKER_TO_ID.get(ticker.toUpperCase());
+        String coinId = coinId(ticker);
         if (coinId == null) return Map.of();
+
+        // The free/Demo tier can't reach data older than ~365 days (an older `from` 401s regardless
+        // of the window size), so clamp rather than fail — we return as much recent history as the
+        // tier allows. Older history would need a paid Pro key.
+        LocalDate floor = LocalDate.now().minusDays(MAX_FREE_HISTORY_DAYS);
+        if (from.isBefore(floor)) from = floor;
+        if (paused()) return Map.of();
 
         try {
             long fromEpoch = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
@@ -193,7 +391,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                     .queryParam("to", toEpoch)
                     .build(coinId))
                 .retrieve()
-                .bodyToMono(new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .timeout(Duration.ofSeconds(15))
                 .block();
 
@@ -217,10 +415,14 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             log.debug("Fetched {} historical prices for {} ({}) from CoinGecko", prices.size(), ticker, coinId);
             return prices;
         } catch (Exception ex) {
+            if (isRateLimited(ex)) pause(ex);
             log.warn("CoinGecko historical price fetch failed for {}: {}", ticker, ex.getMessage());
             return Map.of();
         }
     }
+
+    /** A coin returned by CoinGecko's {@code /search}, narrowed to what the resolver needs. */
+    public record CoinCandidate(String id, String name, String symbol, Integer marketCapRank) {}
 
     static class PriceData {
         private BigDecimal eur;
@@ -233,5 +435,38 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
         }
 
         public BigDecimal eur() { return eur; }
+    }
+
+    /** One entry of CoinGecko's {@code /coins/markets} response; only id/image are of interest. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class CoinMarketData {
+        public String id;
+        public String image;
+    }
+
+    /** CoinGecko {@code /coins/{id}} response, narrowed to identity + rank. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class CoinDetail {
+        public String id;
+        public String name;
+        public String symbol;
+        @JsonProperty("market_cap_rank")
+        public Integer marketCapRank;
+    }
+
+    /** CoinGecko {@code /search} response, narrowed to the coins list. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class SearchResponse {
+        public List<SearchCoin> coins;
+    }
+
+    /** One coin in a {@code /search} response. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class SearchCoin {
+        public String id;
+        public String name;
+        public String symbol;
+        @JsonProperty("market_cap_rank")
+        public Integer marketCapRank;
     }
 }
