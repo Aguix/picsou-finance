@@ -122,6 +122,40 @@ class ManualTransactionServiceTest {
     }
 
     @Test
+    void updateTransaction_syncedAccount_doesNotRewriteBalanceOrSnapshots() {
+        Account account = syncedCheckingAccount();
+        Transaction tx = Transaction.builder()
+            .id(7L)
+            .account(account)
+            .date(LocalDate.of(2024, 5, 21))
+            .description("Manual annotation on synced account")
+            .amount(new BigDecimal("-10"))
+            .isManual(true)
+            .nativeCurrency("EUR")
+            .build();
+        TransactionRequest req = new TransactionRequest(
+            LocalDate.of(2024, 5, 22),
+            "Corrected annotation",
+            new BigDecimal("-15"),
+            TransactionType.WITHDRAWAL,
+            null, null, null, null, "EUR"
+        );
+
+        when(accountRepository.findByIdAndMemberId(3L, 10L)).thenReturn(Optional.of(account));
+        when(transactionRepository.findByIdAndAccountId(7L, 3L)).thenReturn(Optional.of(tx));
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        TransactionResponse result = manualTransactionService.updateTransaction(3L, 7L, 10L, req);
+
+        assertThat(result.amount()).isEqualByComparingTo("-15");
+        // Provider-owned balance and snapshot history stay untouched, same as add/delete.
+        assertThat(account.getCurrentBalance()).isEqualByComparingTo("2500");
+        verify(transactionRepository, never()).sumAmountByAccountId(any());
+        verify(accountRepository, never()).save(any());
+        verify(finaryPersistenceHelper, never()).reconstructSnapshotsFromDb(any());
+    }
+
+    @Test
     void deleteTransaction_syncedAccount_doesNotReconstruct() {
         Account account = syncedCheckingAccount();
         Transaction tx = Transaction.builder()
