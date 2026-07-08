@@ -36,11 +36,6 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private static final Duration FX_CACHE_TTL = Duration.ofMinutes(15);
 
-    // Tickers that are handled by CoinGecko — we skip those
-    private static final Set<String> CRYPTO_TICKERS = Set.of(
-        "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "DOT", "MATIC", "AVAX"
-    );
-
     private final WebClient webClient;
     private final Map<String, CachedFx> fxCache = new ConcurrentHashMap<>();
 
@@ -64,10 +59,9 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
         }
         String upper = ticker.toUpperCase();
 
-        // Don't support crypto tickers
-        if (CRYPTO_TICKERS.contains(upper)) {
-            return false;
-        }
+        // Crypto is no longer skipped via a hardcoded list: routing is decided upstream by
+        // PriceService, which sends a ticker here only when it has no CoinGecko id in the
+        // financial_asset registry (i.e. it is not a resolved crypto). See V52 / the rework.
 
         // Don't support plain ISIN codes (12-character alphanumeric starting with 2-letter country code)
         // ISIN format: AA########X (2 letters, 9 digits, 1 check digit)
