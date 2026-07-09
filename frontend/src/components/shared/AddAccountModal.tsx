@@ -37,6 +37,7 @@ import {
   Landmark,
   ArrowLeftRight,
   Wallet,
+  Coins,
   Smartphone,
   FileSpreadsheet,
   PenLine,
@@ -62,7 +63,7 @@ interface AddAccountModalProps {
   onOpenChange: (open: boolean) => void
 }
 
-type WizardStep = 'selector' | 'banks' | 'exchanges' | 'wallets' | 'tr' | 'finary' | 'manual'
+type WizardStep = 'selector' | 'banks' | 'crypto' | 'exchanges' | 'wallets' | 'tr' | 'finary' | 'manual'
 
 /**
  * Masked variant of InputOTPSlot — replaces the typed character with a bullet
@@ -94,14 +95,46 @@ function MaskedOTPSlot({ index }: { index: number }) {
 // Source config
 // ---------------------------------------------------------------------------
 
-const SOURCES: { key: WizardStep; icon: typeof Landmark; labelKey: string; descKey: string }[] = [
+type SourceItem = { key: WizardStep; icon: typeof Landmark; labelKey: string; descKey: string }
+
+// Top-level sources. Crypto exchanges + wallets are grouped under a single
+// 'crypto' tile that opens the CRYPTO_SOURCES sub-selector.
+const SOURCES: SourceItem[] = [
   { key: 'banks', icon: Landmark, labelKey: 'sync.banks.title', descKey: 'addAccount.desc.banks' },
-  { key: 'exchanges', icon: ArrowLeftRight, labelKey: 'sync.exchanges.title', descKey: 'addAccount.desc.exchanges' },
-  { key: 'wallets', icon: Wallet, labelKey: 'sync.wallets.title', descKey: 'addAccount.desc.wallets' },
+  { key: 'crypto', icon: Coins, labelKey: 'addAccount.crypto', descKey: 'addAccount.desc.crypto' },
   { key: 'tr', icon: Smartphone, labelKey: 'sync.tr.title', descKey: 'addAccount.desc.tr' },
   { key: 'finary', icon: FileSpreadsheet, labelKey: 'sync.finary.title', descKey: 'addAccount.desc.finary' },
   { key: 'manual', icon: PenLine, labelKey: 'addAccount.manual', descKey: 'addAccount.desc.manual' },
 ]
+
+// Crypto sub-selector shown after clicking the 'crypto' tile.
+const CRYPTO_SOURCES: SourceItem[] = [
+  { key: 'exchanges', icon: ArrowLeftRight, labelKey: 'sync.exchanges.title', descKey: 'addAccount.desc.exchanges' },
+  { key: 'wallets', icon: Wallet, labelKey: 'sync.wallets.title', descKey: 'addAccount.desc.wallets' },
+]
+
+function SourceGrid({ sources, onSelect }: { sources: SourceItem[]; onSelect: (key: WizardStep) => void }) {
+  const { t } = useTranslation()
+  return (
+    <div className="grid grid-cols-1 gap-2">
+      {sources.map(({ key, icon: Icon, labelKey, descKey }) => (
+        <Button
+          key={key}
+          variant="outline"
+          className="h-auto justify-start gap-3 px-4 py-3"
+          onClick={() => onSelect(key)}
+        >
+          <Icon className="size-5 text-muted-foreground shrink-0" />
+          <div className="text-left">
+            <p className="text-sm font-medium">{t(labelKey)}</p>
+            <p className="text-xs text-muted-foreground">{t(descKey)}</p>
+          </div>
+          <ArrowRight className="size-4 text-muted-foreground ml-auto shrink-0" />
+        </Button>
+      ))}
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -114,13 +147,13 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
   const [step, setStep] = useState<WizardStep>('selector')
   const [showManualForm, setShowManualForm] = useState(false)
 
-  function handleSourceClick(key: string) {
+  function handleSourceClick(key: WizardStep) {
     if (key === 'manual') {
       onOpenChange(false)
       setShowManualForm(true)
       return
     }
-    setStep(key as WizardStep)
+    setStep(key)
   }
 
   function handleDialogChange(open: boolean) {
@@ -189,35 +222,28 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {step === 'selector' ? t('addAccount.title') : t(`sync.${step === 'tr' ? 'tr' : step}.title`)}
+              {step === 'selector'
+                ? t('addAccount.title')
+                : step === 'crypto'
+                  ? t('addAccount.crypto')
+                  : t(`sync.${step}.title`)}
             </DialogTitle>
             <DialogDescription />
           </DialogHeader>
 
           <>
-              {step === 'selector' && (
-                <div className="grid grid-cols-1 gap-2">
-                  {SOURCES.map(({ key, icon: Icon, labelKey, descKey }) => (
-                    <Button
-                      key={key}
-                      variant="outline"
-                      className="h-auto justify-start gap-3 px-4 py-3"
-                      onClick={() => handleSourceClick(key)}
-                    >
-                      <Icon className="size-5 text-muted-foreground shrink-0" />
-                      <div className="text-left">
-                        <p className="text-sm font-medium">{t(labelKey)}</p>
-                        <p className="text-xs text-muted-foreground">{t(descKey)}</p>
-                      </div>
-                      <ArrowRight className="size-4 text-muted-foreground ml-auto shrink-0" />
-                    </Button>
-                  ))}
-                </div>
+              {step === 'selector' && <SourceGrid sources={SOURCES} onSelect={handleSourceClick} />}
+
+              {step === 'crypto' && (
+                <>
+                  <BackButton onClick={() => setStep('selector')} />
+                  <SourceGrid sources={CRYPTO_SOURCES} onSelect={handleSourceClick} />
+                </>
               )}
 
               {step === 'banks' && <BankWizard onDone={handleDone} onBack={() => setStep('selector')} />}
-              {step === 'exchanges' && <ExchangeWizard onDone={handleDone} onBack={() => setStep('selector')} />}
-              {step === 'wallets' && <WalletWizard onDone={handleDone} onBack={() => setStep('selector')} />}
+              {step === 'exchanges' && <ExchangeWizard onDone={handleDone} onBack={() => setStep('crypto')} />}
+              {step === 'wallets' && <WalletWizard onDone={handleDone} onBack={() => setStep('crypto')} />}
               {step === 'tr' && <TradeRepublicWizard onDone={handleDone} onBack={() => setStep('selector')} />}
               {step === 'finary' && <FinaryWizard onDone={handleDone} onBack={() => setStep('selector')} />}
             </>

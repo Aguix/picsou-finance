@@ -363,6 +363,7 @@
   "addAccount": {
     "title": "Add account",
     "manual": "Manual",
+    "crypto": "Cryptocurrency",
     "or": "or",
     "bankConnected": "Complete the connection in the new tab",
     "exchangeConnected": "Exchange connected!",
@@ -372,6 +373,7 @@
     "syncingDesc": "We're pulling in your latest transactions. This usually takes a few seconds.",
     "desc": {
       "banks": "Connect your banks via OAuth",
+      "crypto": "Exchanges, wallets...",
       "exchanges": "Binance, Kraken...",
       "wallets": "Bitcoin, Ethereum, Solana...",
       "tr": "Trade Republic",
