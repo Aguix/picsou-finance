@@ -167,6 +167,20 @@ bun run build      # TypeScript check + Vite build
 bunx vitest run    # Unit tests
 ```
 
+#### 🔒 HTTPS in Development (Hybrid Mode)
+
+To comply with the strict security requirements of certain banking integrations, the Vite development server is configured to run over **HTTPS**. The project utilizes a hybrid approach to make setup seamless for all environments:
+
+* **Premium Mode (Recommended for your host machine):** Install `mkcert` on your system, then generate your local certificates at the root of the `frontend/` directory:
+  ```bash
+  mkdir -p .local/certs
+  mkcert -cert-file .local/certs/picsou-local-cert.pem -key-file .local/certs/picsou-local-key.pem localhost 127.0.0.1 ::1
+  ```
+  *Benefit: You will get a natively trusted green padlock in your browser with zero security warnings.*
+
+* **Fallback Mode (Zero-Config / Docker):** If the `.pem` files are not detected inside `.local/certs/`, the `@vitejs/plugin-basic-ssl` plugin will automatically take over.
+  *Note: The project will still boot successfully in HTTPS, but you will need to bypass your browser's security warning on
+
 ## Contributing
 
 Contributions are welcome — bug fixes, features, translations, or documentation.

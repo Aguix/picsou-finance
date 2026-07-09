@@ -1,21 +1,24 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 import path from 'path'
 import fs from 'node:fs'
 
 const localCertPath = path.resolve(__dirname, '.local/certs/picsou-local-cert.pem')
 const localKeyPath = path.resolve(__dirname, '.local/certs/picsou-local-key.pem')
-const localHttps =
-  fs.existsSync(localCertPath) && fs.existsSync(localKeyPath)
-    ? {
-        cert: fs.readFileSync(localCertPath),
-        key: fs.readFileSync(localKeyPath),
-      }
-    : undefined
+// Hybrid HTTPS: Uses mkcert (.pem files) for a trusted local SSL certificate (green padlock).
+// If missing (e.g., in Docker or for other devs), falls back to the basicSsl plugin.
+const hasLocalCerts = fs.existsSync(localCertPath) && fs.existsSync(localKeyPath)
+const localHttps = hasLocalCerts
+  ? {
+      cert: fs.readFileSync(localCertPath),
+      key: fs.readFileSync(localKeyPath),
+    }
+  : undefined
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), ...(!hasLocalCerts ? [basicSsl()] : [])],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
