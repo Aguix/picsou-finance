@@ -67,4 +67,9 @@ public class Transaction {
 
     @Column(name = "price_per_unit", precision = 20, scale = 8)
     private BigDecimal pricePerUnit;
+
+    /** Set only when {@link #txType} is {@link TransactionType#REWARD} — the program that paid it out. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reward_kind", length = 20)
+    private RewardKind rewardKind;
 }

@@ -1,5 +1,6 @@
 package com.picsou.dto;
 
+import com.picsou.model.RewardKind;
 import com.picsou.model.Transaction;
 import com.picsou.model.TransactionType;
 
@@ -21,7 +22,8 @@ public record TransactionResponse(
     String ticker,
     String name,
     BigDecimal quantity,
-    BigDecimal pricePerUnit
+    BigDecimal pricePerUnit,
+    RewardKind rewardKind
 ) {
     public static TransactionResponse from(Transaction t) {
         return new TransactionResponse(
@@ -38,7 +40,8 @@ public record TransactionResponse(
             t.getTicker(),
             t.getName(),
             t.getQuantity(),
-            t.getPricePerUnit()
+            t.getPricePerUnit(),
+            t.getRewardKind()
         );
     }
 }

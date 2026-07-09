@@ -364,6 +364,7 @@
     "title": "Ajouter un compte",
     "manual": "Manuel",
     "crypto": "Cryptomonnaie",
+    "cryptoCsv": "Import CSV",
     "or": "ou",
     "bankConnected": "Complétez la connexion dans le nouvel onglet",
     "exchangeConnected": "Exchange connecté !",
@@ -376,6 +377,7 @@
       "crypto": "Exchanges, wallets...",
       "exchanges": "Binance, Kraken...",
       "wallets": "Bitcoin, Ethereum, Solana...",
+      "cryptoCsv": "Crypto.com",
       "tr": "Trade Republic",
       "finary": "Importer depuis Finary",
       "manual": "Créer un compte manuellement"
@@ -453,6 +455,23 @@
       "removeConfirm": "Supprimer ce wallet ?",
       "noWallets": "Aucun wallet suivi",
       "lastSync": "Dernière sync"
+    },
+    "crypto": {
+      "title": "Import crypto (CSV)",
+      "intro": "Déposez l'export CSV de votre exchange ou wallet — le format est détecté automatiquement.",
+      "supported": "Formats supportés",
+      "choose": "Choisir un fichier CSV",
+      "detected": "Détecté dans le fichier",
+      "transactions": "Transactions",
+      "rewards": "Récompenses",
+      "coins": "Cryptos",
+      "unresolvedNote": "{{count}} crypto(s) non identifiée(s) — importées sans prix, à associer ensuite depuis la page Crypto.",
+      "target": "Compte de destination",
+      "createNew": "Nouveau compte",
+      "accountName": "Nom du compte",
+      "import": "Importer",
+      "done": "Import terminé",
+      "doneDetail": "{{tx}} transactions · {{holdings}} cryptos"
     },
     "finary": {
       "title": "Finary",

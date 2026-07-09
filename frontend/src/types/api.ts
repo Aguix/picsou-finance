@@ -329,6 +329,10 @@ export interface FinaryAutoSyncResponse {
   newAccountCount: number
 }
 
+export type RewardKind =
+  | 'EARN' | 'STAKING' | 'SUPERCHARGER' | 'AIRDROP' | 'CASHBACK'
+  | 'REFERRAL' | 'CAMPAIGN' | 'DEFI_YIELD' | 'OTHER'
+
 export interface Transaction {
   id: number
   date: string
@@ -338,21 +342,66 @@ export interface Transaction {
   category: string | null
   nativeCurrency: string
   isManual: boolean
-  txType: 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | null
+  txType: 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | 'REWARD' | null
   ticker: string | null
   name: string | null
   quantity: number | null
   pricePerUnit: number | null
+  rewardKind: RewardKind | null
 }
 
 export interface TransactionRequest {
   date: string          // ISO date "YYYY-MM-DD"
   description: string
   amount: number        // signed: positive=deposit, negative=withdrawal
-  txType: 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | null
+  txType: 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE' | 'REWARD' | null
   ticker?: string
   name?: string
   quantity?: number
   pricePerUnit?: number
   currency?: string
+}
+
+export interface CryptoSourceInfo {
+  id: string
+  label: string
+}
+
+export interface CryptoPreviewResponse {
+  fileToken: string
+  source: string
+  sourceLabel: string
+  rowCount: number
+  transactionCount: number
+  buyCount: number
+  sellCount: number
+  rewardCount: number
+  unknownCount: number
+  unvaluedCount: number
+  firstDate: string | null
+  lastDate: string | null
+  currencies: string[]
+  nativeCurrency: string
+  totalInvested: number
+  totalRewards: number
+  rewardsByKind: Record<string, number>
+  unresolvedTickers: string[]
+  existingAccounts: Account[]
+}
+
+export interface CryptoImportRequest {
+  fileToken: string
+  action: 'CREATE_NEW' | 'MAP_EXISTING'
+  targetAccountId?: number
+  accountName?: string
+  color?: string
+}
+
+export interface CryptoImportResult {
+  accountId: number
+  accountName: string
+  source: string
+  transactionsImported: number
+  holdingsCount: number
+  totalRewards: number
 }

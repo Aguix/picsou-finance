@@ -364,6 +364,7 @@
     "title": "Add account",
     "manual": "Manual",
     "crypto": "Cryptocurrency",
+    "cryptoCsv": "CSV import",
     "or": "or",
     "bankConnected": "Complete the connection in the new tab",
     "exchangeConnected": "Exchange connected!",
@@ -376,6 +377,7 @@
       "crypto": "Exchanges, wallets...",
       "exchanges": "Binance, Kraken...",
       "wallets": "Bitcoin, Ethereum, Solana...",
+      "cryptoCsv": "Crypto.com",
       "tr": "Trade Republic",
       "finary": "Import from Finary",
       "manual": "Create an account manually"
@@ -453,6 +455,23 @@
       "removeConfirm": "Remove this wallet?",
       "noWallets": "No wallets tracked",
       "lastSync": "Last sync"
+    },
+    "crypto": {
+      "title": "Crypto import (CSV)",
+      "intro": "Drop your exchange or wallet CSV export — the format is detected automatically.",
+      "supported": "Supported formats",
+      "choose": "Choose a CSV file",
+      "detected": "Detected in the file",
+      "transactions": "Transactions",
+      "rewards": "Rewards",
+      "coins": "Coins",
+      "unresolvedNote": "{{count}} coin(s) couldn't be identified — imported unpriced; map them later from the Crypto page.",
+      "target": "Target account",
+      "createNew": "New account",
+      "accountName": "Account name",
+      "import": "Import",
+      "done": "Import complete",
+      "doneDetail": "{{tx}} transactions · {{holdings}} coins"
     },
     "finary": {
       "title": "Finary",
