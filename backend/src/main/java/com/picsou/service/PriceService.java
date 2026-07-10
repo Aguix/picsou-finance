@@ -9,6 +9,7 @@ import com.picsou.repository.PriceSnapshotRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -79,7 +80,12 @@ public class PriceService {
         BigDecimal price = prices.get(upper);
         if (price != null) {
             priceCache.put(upper, new CachedPrice(price, Instant.now()));
-            assetRepository.updateLastPrice(upper, price, Instant.now());
+            // Opportunistic persistence only: callers like DashboardService run in a read-only
+            // transaction the repository @Transactional would join, and Postgres rejects the
+            // UPDATE there. The write path (refreshPrices / scheduler) persists it anyway.
+            if (!TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+                assetRepository.updateLastPrice(upper, price, Instant.now());
+            }
             return price;
         }
 
