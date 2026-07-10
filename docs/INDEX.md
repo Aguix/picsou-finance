@@ -38,6 +38,7 @@
 | 2026-05-31 | [ETF composition from issuer holdings files (no auth)](./decisions/2026-05-31-etf-composition-issuer-holdings.md) | ⚠️ Superseded |
 | 2026-06-01 | [ETF composition via Boursorama (single source)](./decisions/2026-06-01-etf-composition-via-boursorama.md) | Active |
 | 2026-06-05 | [Access-key auth + embedded MCP server](./decisions/2026-06-05-access-key-auth-and-embedded-mcp.md) | Active |
+| 2026-07-10 | [Dedicated, app-global tables for price-aggregator API credentials](./decisions/2026-07-10-aggregator-credentials-schema.md) | Active |
 
 ## Feature notes
 
@@ -56,7 +57,7 @@
 | Crypto tracking | 2026-04-08 | [crypto-tracking.md](./features/crypto-tracking.md) |
 | Savings goals | 2026-06-02 | [goals.md](./features/goals.md) |
 | Goals — Grid view (donuts) | 2026-06-02 | [goal-calendar-donut.md](./features/goal-calendar-donut.md) |
-| Price service | 2026-05-19 | [price-service.md](./features/price-service.md) |
+| Price service | 2026-07-10 | [price-service.md](./features/price-service.md) |
 | Live prices (holdings) | 2026-05-19 | [live-prices-holdings.md](./features/live-prices-holdings.md) |
 | Security Insight (asset type + ETF composition) | 2026-06-02 | [security-insight.md](./features/security-insight.md) |
 | Finary import + auto-sync | 2026-04-21 | [finary-import.md](./features/finary-import.md) |

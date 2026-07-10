@@ -21,6 +21,12 @@ Both providers implement `PriceProviderPort`: `aggregatorKey()`, `capabilities()
 
 A ticker marked `WORTHLESS` (delisted coin no aggregator can price) is valued at a fixed zero by `PriceService` — no provider call, no phantom snapshot.
 
+### Aggregator credentials (`aggregator` / `aggregator_session`)
+
+Each aggregator has a persistent identity (`aggregator` row, keyed by `aggregatorKey()`) and zero or more credential sessions (`aggregator_session`), so API keys live in the DB rather than in a single env var — several keys per aggregator let rate limits be spread, and `enabled` pauses an aggregator or a single key without deleting it. Keys are **app-global** (no `member_id` — a price key is instance-wide) and **encrypted at rest** (AES-GCM via `CryptoEncryption`, never serialized). `AggregatorService` owns encrypt-on-write / decrypt-on-read and hands decrypted credentials (with the session id) to the adapters. See [ADR 2026-07-10](../decisions/2026-07-10-aggregator-credentials-schema.md).
+
+> As of this step the tables + service exist but are not yet consumed at runtime: the CoinGecko adapter still reads its optional key from `app.coingecko.demo-api-key`. Rewiring the adapters to pick a session per request (with per-session rate-limit back-off) and retiring the env var is the next step; that is also when Yahoo's routing fallback starts consulting `isAvailable()`.
+
 ### Ticker resolution (`FinancialAssetService`)
 
 Resolution order for a crypto symbol (`resolveCrypto`, called from crypto-guaranteed contexts only — e.g. Trade Republic's `XF000…` internal ISINs, crypto imports):
@@ -60,6 +66,8 @@ Every successful fetch also persists `financial_asset.last_eur_value`/`price_syn
 - `service/PriceRouter.java` -- Capability-based routing over the ordered `PriceProviderPort` beans
 - `service/FinancialAssetService.java` -- Dynamic symbol resolution, manual mapping, worthless pinning
 - `model/FinancialAsset.java` / `repository/FinancialAssetRepository.java` -- The registry (V51)
+- `model/Aggregator.java` / `model/AggregatorSession.java` -- Aggregator identity + encrypted API credentials (V54)
+- `service/AggregatorService.java` -- Credential CRUD, encrypt-on-write / decrypt-on-read
 - `service/SchedulerService.java` -- Hourly price refresh cron
 - `adapter/price/CoinGeckoPriceProvider.java` -- CoinGecko HTTP client (prices, search, logos, circuit breaker)
 - `adapter/price/YahooFinancePriceProvider.java` -- Yahoo Finance `/v8/finance/chart/{ticker}`
@@ -136,5 +144,6 @@ GET /search?query=tao --> single/dominant match? --> persist AUTO
 ## Links
 
 - Related ADR: [Ports and adapters](../decisions/2026-01-01-ports-and-adapters.md)
+- Related ADR: [Aggregator credentials schema](../decisions/2026-07-10-aggregator-credentials-schema.md)
 - Related feature: [Crypto tracking](./crypto-tracking.md)
 - Related feature: [Trade Republic](./trade-republic.md)
