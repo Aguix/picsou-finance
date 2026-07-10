@@ -89,7 +89,7 @@ class AggregatorServiceTest {
         when(encryption.decrypt("enc-key")).thenReturn("raw-key");
         when(encryption.decrypt("enc-secret")).thenReturn("raw-secret");
 
-        List<AggregatorService.SessionCredentials> creds = service().enabledCredentials("coingecko");
+        List<AggregatorService.SessionCredentials> creds = service().enabledCredentials("coingecko").orElseThrow();
 
         assertThat(creds).hasSize(1);
         assertThat(creds.get(0).sessionId()).isEqualTo(7L);
@@ -98,7 +98,18 @@ class AggregatorServiceTest {
     }
 
     @Test
-    void enabledCredentials_emptyWhenAggregatorDisabled_withoutTouchingSessions() {
+    void enabledCredentials_presentButEmpty_whenEnabledAggregatorHasNoKeys() {
+        // Enabled aggregator, no sessions → present Optional with an empty list (adapter runs anonymous),
+        // NOT an empty Optional (which would mean "disabled — make no call at all").
+        when(aggregatorRepository.findByAggregatorKey("coingecko")).thenReturn(Optional.of(aggregator(true)));
+        when(sessionRepository.findByAggregator_AggregatorKeyAndEnabledTrueOrderByIdAsc("coingecko"))
+            .thenReturn(List.of());
+
+        assertThat(service().enabledCredentials("coingecko")).contains(List.of());
+    }
+
+    @Test
+    void enabledCredentials_emptyOptionalWhenAggregatorDisabled_withoutTouchingSessions() {
         when(aggregatorRepository.findByAggregatorKey("coingecko")).thenReturn(Optional.of(aggregator(false)));
 
         assertThat(service().enabledCredentials("coingecko")).isEmpty();
@@ -106,7 +117,7 @@ class AggregatorServiceTest {
     }
 
     @Test
-    void enabledCredentials_emptyWhenAggregatorUnknown() {
+    void enabledCredentials_emptyOptionalWhenAggregatorUnknown() {
         when(aggregatorRepository.findByAggregatorKey("ghost")).thenReturn(Optional.empty());
 
         assertThat(service().enabledCredentials("ghost")).isEmpty();

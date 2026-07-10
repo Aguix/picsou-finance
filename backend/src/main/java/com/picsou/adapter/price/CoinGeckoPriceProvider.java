@@ -6,11 +6,14 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.picsou.model.FinancialAsset;
 import com.picsou.port.PriceProviderPort;
 import com.picsou.repository.FinancialAssetRepository;
+import com.picsou.service.AggregatorService;
+import com.picsou.service.AggregatorService.SessionCredentials;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -36,17 +39,23 @@ import java.util.stream.Collectors;
  * time. This class stays the low-level HTTP client: it also exposes {@link #searchBySymbol(String)}
  * so the resolver can look candidates up, but never decides or persists a mapping itself.
  *
- * <p>An optional Demo API key ({@code app.coingecko.demo-api-key}) is sent as the
- * {@code x-cg-demo-api-key} header when present; absent, calls fall back to the anonymous free
- * tier with no change in behaviour beyond a stricter rate limit.
+ * <p>API credentials live in the {@code aggregator_session} table, not in config: at call time the
+ * provider asks {@link AggregatorService#enabledCredentials(String) enabledCredentials("coingecko")}
+ * for the enabled Demo keys and picks the <em>least-recently-used</em> one whose per-session breaker
+ * is closed, sending it as the {@code x-cg-demo-api-key} header for that request — so calls rotate
+ * across keys instead of hammering one. With no key configured it falls back to an anonymous session
+ * (no header) — the free tier with a stricter rate limit; disabling the aggregator from the admin
+ * panel stops all calls (not even anonymous). Adding/rotating keys is done from the admin panel; the
+ * old {@code COINGECKO_DEMO_API_KEY} env var is retired.
  *
  * <p>The free tier rate-limits aggressively (a burst 429s within a handful of calls, and a page
  * load prices ~17 coins). To avoid hammering CoinGecko — and flooding the logs — a lightweight
- * <b>circuit breaker</b> reacts to the first {@code 429}: it pauses <em>all</em> calls until the
- * response's {@code Retry-After} elapses (falling back to {@link #DEFAULT_RETRY_AFTER}). While
- * paused, every method short-circuits to an empty result with no HTTP call, so a dashboard load
- * neither blocks nor spams retries — the 15-minute price cache and the hourly scheduler cover the
- * gap, and a Demo key ({@code app.coingecko.demo-api-key}) raises the limit enough to avoid 429s.
+ * <b>per-session circuit breaker</b> reacts to a {@code 429}: it pauses only the <em>session</em>
+ * (key) that hit the limit until the response's {@code Retry-After} elapses (falling back to
+ * {@link #DEFAULT_RETRY_AFTER}), so the next request rolls over to another enabled key instead of
+ * failing. While every candidate session is paused, each method short-circuits to an empty result
+ * with no HTTP call, so a dashboard load neither blocks nor spams retries — the 15-minute price
+ * cache and the hourly scheduler cover the gap, and configuring more Demo keys spreads the limit.
  */
 @Component
 @Order(10)   // primary crypto aggregator — tried before Yahoo when both can price a ticker
@@ -54,13 +63,26 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
 
     private static final Logger log = LoggerFactory.getLogger(CoinGeckoPriceProvider.class);
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
+    private static final String AGGREGATOR_KEY = "coingecko";
 
-    // Circuit breaker: how long to pause all calls after a 429 when the response carries no usable
+    // Circuit breaker: how long to pause a session after a 429 when the response carries no usable
     // Retry-After (CoinGecko's free-tier window is ~1 minute).
     private static final Duration DEFAULT_RETRY_AFTER = Duration.ofSeconds(60);
 
-    // Set to a future instant when a 429 is seen; while now < pausedUntil every call short-circuits.
-    private volatile Instant pausedUntil = Instant.EPOCH;
+    // The anonymous session (no key) is picked when no key is configured. It has no DB id, so it's
+    // tracked in the breaker under this sentinel; a real session id is never negative.
+    private static final long ANONYMOUS_SESSION = -1L;
+    private static final SessionCredentials ANONYMOUS = new SessionCredentials(null, null, null);
+
+    // Per-session breaker: sessionId (or ANONYMOUS_SESSION) -> instant until which that key is paused
+    // after a 429. A session absent from the map, or past its instant, is usable.
+    private final Map<Long, Instant> breakerUntil = new ConcurrentHashMap<>();
+
+    // Per-session last-used instant, for least-recently-used rotation across usable keys — spreads
+    // load so several keys stay below their limit instead of one absorbing every call until it 429s.
+    // In-memory (not the DB last_sync_at): this is on the price read path, so no write per call; a
+    // restart just resets everyone to "never used", which spreads the first calls anyway.
+    private final Map<Long, Instant> lastUsedAt = new ConcurrentHashMap<>();
 
     // CoinGecko's free/Demo tier only serves market_chart/range for the past ~365 days — an older
     // `from` 401s (empirically 380d fails, 360d works; confirmed by the docs: "Public API (Demo plan)
@@ -73,37 +95,87 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
     private final Map<String, String> logoCache = new ConcurrentHashMap<>();
 
     private final FinancialAssetRepository assetRepository;
+    private final AggregatorService aggregatorService;
     private final WebClient webClient;
 
+    @Autowired
     public CoinGeckoPriceProvider(FinancialAssetRepository assetRepository,
-                                  @Value("${app.coingecko.demo-api-key:}") String demoApiKey) {
-        this.assetRepository = assetRepository;
-        WebClient.Builder builder = WebClient.builder()
+                                  AggregatorService aggregatorService) {
+        this(assetRepository, aggregatorService, WebClient.builder()
             .baseUrl("https://api.coingecko.com/api/v3")
-            .defaultHeader("Accept", "application/json");
-        if (demoApiKey != null && !demoApiKey.isBlank()) {
-            builder.defaultHeader("x-cg-demo-api-key", demoApiKey.trim());
-            log.info("CoinGecko Demo API key configured");
-        }
-        this.webClient = builder.build();
+            .defaultHeader("Accept", "application/json")
+            .build());
     }
 
-    /** True while the breaker is open — a recent 429 means we skip CoinGecko entirely for now. */
-    private boolean paused() {
-        return Instant.now().isBefore(pausedUntil);
+    // Package-private constructor for tests — inject a WebClient backed by an ExchangeFunction.
+    CoinGeckoPriceProvider(FinancialAssetRepository assetRepository,
+                           AggregatorService aggregatorService,
+                           WebClient webClient) {
+        this.assetRepository = assetRepository;
+        this.aggregatorService = aggregatorService;
+        this.webClient = webClient;
+    }
+
+    /** Breaker slot for a session (anonymous credentials have no id, so map to the sentinel). */
+    private static long slot(SessionCredentials session) {
+        return session.sessionId() == null ? ANONYMOUS_SESSION : session.sessionId();
+    }
+
+    /** True while this session's breaker is open — a recent 429 on that key. */
+    private boolean paused(SessionCredentials session) {
+        Instant until = breakerUntil.get(slot(session));
+        return until != null && Instant.now().isBefore(until);
     }
 
     /**
-     * Trip the breaker after a 429: pause all calls until the response's {@code Retry-After} (or
-     * {@link #DEFAULT_RETRY_AFTER}) elapses. Logged once per pause window so a page load that fires
-     * ~17 price calls doesn't produce ~17 warnings.
+     * The sessions this provider may use right now: the enabled Demo keys, or a single anonymous
+     * session when the aggregator is enabled but has no key (the free tier still works, just
+     * rate-limits harder). Empty when the aggregator is <em>disabled</em> (or unknown) — then the
+     * provider makes no call at all, not even anonymous.
      */
-    private void pause(Throwable t) {
+    private List<SessionCredentials> candidates() {
+        return aggregatorService.enabledCredentials(AGGREGATOR_KEY)
+            .map(sessions -> sessions.isEmpty() ? List.of(ANONYMOUS) : sessions)
+            .orElseGet(List::of);
+    }
+
+    /**
+     * Pick a usable session: among those whose breaker is closed, the least-recently-used one (ties
+     * broken by session id), so calls rotate across keys instead of hammering one until it 429s. The
+     * chosen session is stamped used immediately — a request that later 429s still consumed its
+     * quota. Empty when every candidate is paused (or the aggregator is off).
+     */
+    private Optional<SessionCredentials> pickSession() {
+        Optional<SessionCredentials> chosen = candidates().stream()
+            .filter(s -> !paused(s))
+            .min(Comparator.<SessionCredentials, Instant>comparing(
+                    s -> lastUsedAt.getOrDefault(slot(s), Instant.EPOCH))
+                .thenComparingLong(CoinGeckoPriceProvider::slot));
+        chosen.ifPresent(s -> lastUsedAt.put(slot(s), Instant.now()));
+        return chosen;
+    }
+
+    /** Apply the session's Demo key as the {@code x-cg-demo-api-key} header (anonymous adds nothing). */
+    private static void applyKey(HttpHeaders headers, SessionCredentials session) {
+        String key = session.apiKey();
+        if (key != null && !key.isBlank()) {
+            headers.set("x-cg-demo-api-key", key);
+        }
+    }
+
+    /**
+     * Trip the breaker for one session after a 429: pause only that key until the response's
+     * {@code Retry-After} (or {@link #DEFAULT_RETRY_AFTER}) elapses, so the next request rolls over
+     * to another enabled key. Logged once per pause window so a page load that fires ~17 price calls
+     * doesn't produce ~17 warnings.
+     */
+    private void pause(SessionCredentials session, Throwable t) {
         Duration wait = retryAfter(t).orElse(DEFAULT_RETRY_AFTER);
-        boolean alreadyPaused = paused();
-        pausedUntil = Instant.now().plus(wait);
+        boolean alreadyPaused = paused(session);
+        breakerUntil.put(slot(session), Instant.now().plus(wait));
         if (!alreadyPaused) {
-            log.warn("CoinGecko rate-limited (429) — pausing all calls for {}s", wait.toSeconds());
+            String label = session.sessionId() == null ? "anonymous" : "key #" + session.sessionId();
+            log.warn("CoinGecko rate-limited (429) — pausing {} for {}s", label, wait.toSeconds());
         }
     }
 
@@ -146,7 +218,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
 
     @Override
     public String aggregatorKey() {
-        return "coingecko";
+        return AGGREGATOR_KEY;
     }
 
     @Override
@@ -165,15 +237,24 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             .map(a -> a.getCoingeckoId() != null).orElse(false);
     }
 
-    /** False while the circuit breaker is open (a recent 429) — the router should skip CoinGecko then. */
+    /** True while at least one enabled key is usable; false only when every candidate session is paused. */
     @Override
     public boolean isAvailable() {
-        return !paused();
+        return pickSession().isPresent();
     }
 
+    /** Soonest instant a paused key frees up, when every candidate is currently paused; else empty. */
     @Override
     public Optional<Instant> pausedUntil() {
-        return paused() ? Optional.of(pausedUntil) : Optional.empty();
+        Optional<Instant> soonest = Optional.empty();
+        for (SessionCredentials session : candidates()) {
+            Instant until = breakerUntil.get(slot(session));
+            if (until == null || !Instant.now().isBefore(until)) {
+                return Optional.empty();   // this key is usable now — the provider isn't paused
+            }
+            soonest = soonest.filter(cur -> cur.isBefore(until)).or(() -> Optional.of(until));
+        }
+        return soonest;
     }
 
     @Override
@@ -183,7 +264,8 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
 
         String ids = String.join(",", new LinkedHashSet<>(tickerToId.values()));
         if (ids.isBlank()) return Map.of();
-        if (paused()) return Map.of();
+        SessionCredentials session = pickSession().orElse(null);
+        if (session == null) return Map.of();
 
         try {
             Map<String, PriceData> response = webClient.get()
@@ -192,6 +274,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                     .queryParam("ids", ids)
                     .queryParam("vs_currencies", "eur")
                     .build())
+                .headers(h -> applyKey(h, session))
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, PriceData>>() {})
                 .timeout(TIMEOUT)
@@ -208,7 +291,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             }
             return result;
         } catch (Exception ex) {
-            if (isRateLimited(ex)) pause(ex);
+            if (isRateLimited(ex)) pause(session, ex);
             log.warn("CoinGecko price fetch failed: {}", ex.getMessage());
             return Map.of();
         }
@@ -236,7 +319,8 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
 
         String ids = String.join(",", new LinkedHashSet<>(missingIdByTicker.values()));
         if (ids.isBlank()) return result;
-        if (paused()) return result;
+        SessionCredentials session = pickSession().orElse(null);
+        if (session == null) return result;
 
         try {
             List<CoinMarketData> response = webClient.get()
@@ -245,6 +329,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                     .queryParam("vs_currency", "eur")
                     .queryParam("ids", ids)
                     .build())
+                .headers(h -> applyKey(h, session))
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<List<CoinMarketData>>() {})
                 .timeout(TIMEOUT)
@@ -264,7 +349,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                 }
             }
         } catch (Exception ex) {
-            if (isRateLimited(ex)) pause(ex);
+            if (isRateLimited(ex)) pause(session, ex);
             log.warn("CoinGecko logo fetch failed: {}", ex.getMessage());
         }
         return result;
@@ -278,13 +363,15 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
     public List<CoinCandidate> searchBySymbol(String ticker) {
         String symbol = ticker.trim().toLowerCase();
         if (symbol.isEmpty()) return List.of();
-        if (paused()) return List.of();
+        SessionCredentials session = pickSession().orElse(null);
+        if (session == null) return List.of();
         try {
             SearchResponse response = webClient.get()
                 .uri(uriBuilder -> uriBuilder
                     .path("/search")
                     .queryParam("query", symbol)
                     .build())
+                .headers(h -> applyKey(h, session))
                 .retrieve()
                 .bodyToMono(SearchResponse.class)
                 .timeout(TIMEOUT)
@@ -296,7 +383,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                 .map(c -> new CoinCandidate(c.id, c.name, c.symbol, c.marketCapRank))
                 .toList();
         } catch (Exception ex) {
-            if (isRateLimited(ex)) pause(ex);
+            if (isRateLimited(ex)) pause(session, ex);
             log.warn("CoinGecko symbol search failed for {}: {}", ticker, ex.getMessage());
             return List.of();
         }
@@ -310,7 +397,8 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
     public Optional<CoinCandidate> fetchCoinById(String id) {
         String coinId = id == null ? "" : id.trim().toLowerCase();
         if (coinId.isEmpty()) return Optional.empty();
-        if (paused()) return Optional.empty();
+        SessionCredentials session = pickSession().orElse(null);
+        if (session == null) return Optional.empty();
         try {
             CoinDetail detail = webClient.get()
                 .uri(uriBuilder -> uriBuilder
@@ -322,6 +410,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                     .queryParam("developer_data", "false")
                     .queryParam("sparkline", "false")
                     .build(coinId))
+                .headers(h -> applyKey(h, session))
                 .retrieve()
                 .bodyToMono(CoinDetail.class)
                 .timeout(TIMEOUT)
@@ -330,7 +419,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             if (detail == null || detail.id == null) return Optional.empty();
             return Optional.of(new CoinCandidate(detail.id, detail.name, detail.symbol, detail.marketCapRank));
         } catch (Exception ex) {
-            if (isRateLimited(ex)) pause(ex);
+            if (isRateLimited(ex)) pause(session, ex);
             log.warn("CoinGecko coin lookup failed for id {}: {}", coinId, ex.getMessage());
             return Optional.empty();
         }
@@ -344,7 +433,8 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
     public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(String ticker, LocalDateTime from, LocalDateTime to) {
         String coinId = coinId(ticker);
         if (coinId == null) return Map.of();
-        if (paused()) return Map.of();
+        SessionCredentials session = pickSession().orElse(null);
+        if (session == null) return Map.of();
 
         try {
             long fromEpoch = from.atZone(ZoneOffset.UTC).toEpochSecond();
@@ -357,6 +447,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                     .queryParam("from", fromEpoch)
                     .queryParam("to", toEpoch)
                     .build(coinId))
+                .headers(h -> applyKey(h, session))
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .timeout(Duration.ofSeconds(15))
@@ -382,7 +473,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             log.debug("Fetched {} intraday prices for {} ({}) from CoinGecko", prices.size(), ticker, coinId);
             return prices;
         } catch (Exception ex) {
-            if (isRateLimited(ex)) pause(ex);
+            if (isRateLimited(ex)) pause(session, ex);
             log.warn("CoinGecko intraday price fetch failed for {}: {}", ticker, ex.getMessage());
             return Map.of();
         }
@@ -402,7 +493,8 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
         // tier allows. Older history would need a paid Pro key.
         LocalDate floor = LocalDate.now().minusDays(MAX_FREE_HISTORY_DAYS);
         if (from.isBefore(floor)) from = floor;
-        if (paused()) return Map.of();
+        SessionCredentials session = pickSession().orElse(null);
+        if (session == null) return Map.of();
 
         try {
             long fromEpoch = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond();
@@ -415,6 +507,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                     .queryParam("from", fromEpoch)
                     .queryParam("to", toEpoch)
                     .build(coinId))
+                .headers(h -> applyKey(h, session))
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .timeout(Duration.ofSeconds(15))
@@ -440,7 +533,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             log.debug("Fetched {} historical prices for {} ({}) from CoinGecko", prices.size(), ticker, coinId);
             return prices;
         } catch (Exception ex) {
-            if (isRateLimited(ex)) pause(ex);
+            if (isRateLimited(ex)) pause(session, ex);
             log.warn("CoinGecko historical price fetch failed for {}: {}", ticker, ex.getMessage());
             return Map.of();
         }

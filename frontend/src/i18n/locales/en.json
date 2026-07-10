@@ -747,6 +747,19 @@
       "finary": "Finary",
       "crypto": "Crypto"
     },
+    "aggregators": {
+      "title": "Price aggregators",
+      "description": "API keys used to fetch crypto and stock prices. Keys are encrypted at rest — add several to spread a provider's rate limit.",
+      "noKeys": "No API key — anonymous free tier",
+      "keyCount_one": "{{count}} API key",
+      "keyCount_other": "{{count}} API keys",
+      "unlabeledKey": "Key #{{id}}",
+      "toggleKey": "Enable key",
+      "deleteKey": "Delete key",
+      "labelPlaceholder": "Label (optional)",
+      "keyPlaceholder": "API key",
+      "addKey": "Add"
+    },
     "members": {
       "title": "Members",
       "description": "Manage family member accounts",

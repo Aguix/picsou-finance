@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Manages the price {@link Aggregator}s and their API credentials ({@link AggregatorSession}).
@@ -92,19 +93,24 @@ public class AggregatorService {
     }
 
     /**
-     * Decrypted credentials for every enabled session of an enabled aggregator, oldest first — the
-     * accessor an adapter uses to pick a key at call time. Empty if the aggregator is unknown or
-     * disabled. The {@code sessionId} lets the caller track rate-limit back-off per session.
+     * Decrypted credentials for the price adapter, or {@link Optional#empty()} when the aggregator is
+     * unknown or <em>disabled</em> — the adapter must then make no call at all (not even an anonymous
+     * one). When present, the list holds every enabled session oldest-first; an <em>empty</em> list
+     * means the aggregator is enabled but has no key, so the adapter may use its anonymous tier. The
+     * empty-Optional vs empty-list distinction is what lets "disable the aggregator" actually stop it
+     * rather than silently drop to anonymous. The {@code sessionId} lets the caller track rate-limit
+     * back-off (and least-recently-used rotation) per session.
      */
     @Transactional(readOnly = true)
-    public List<SessionCredentials> enabledCredentials(String aggregatorKey) {
+    public Optional<List<SessionCredentials>> enabledCredentials(String aggregatorKey) {
         Aggregator aggregator = aggregatorRepository.findByAggregatorKey(aggregatorKey).orElse(null);
         if (aggregator == null || !aggregator.isEnabled()) {
-            return List.of();
+            return Optional.empty();
         }
-        return sessionRepository.findByAggregator_AggregatorKeyAndEnabledTrueOrderByIdAsc(aggregatorKey).stream()
-            .map(s -> new SessionCredentials(s.getId(), decryptOrNull(s.getApiKey()), decryptOrNull(s.getApiSecret())))
-            .toList();
+        return Optional.of(
+            sessionRepository.findByAggregator_AggregatorKeyAndEnabledTrueOrderByIdAsc(aggregatorKey).stream()
+                .map(s -> new SessionCredentials(s.getId(), decryptOrNull(s.getApiKey()), decryptOrNull(s.getApiSecret())))
+                .toList());
     }
 
     private String encryptOrNull(String raw) {

@@ -747,6 +747,19 @@
       "finary": "Finary",
       "crypto": "Crypto"
     },
+    "aggregators": {
+      "title": "Agrégateurs de prix",
+      "description": "Clés API utilisées pour récupérer les prix des cryptos et des actions. Les clés sont chiffrées au repos — ajoutez-en plusieurs pour répartir la limite de débit d'un fournisseur.",
+      "noKeys": "Aucune clé API — palier gratuit anonyme",
+      "keyCount_one": "{{count}} clé API",
+      "keyCount_other": "{{count}} clés API",
+      "unlabeledKey": "Clé n°{{id}}",
+      "toggleKey": "Activer la clé",
+      "deleteKey": "Supprimer la clé",
+      "labelPlaceholder": "Libellé (facultatif)",
+      "keyPlaceholder": "Clé API",
+      "addKey": "Ajouter"
+    },
     "members": {
       "title": "Membres",
       "description": "Gérer les comptes des membres de la famille",

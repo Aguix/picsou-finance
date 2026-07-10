@@ -28,6 +28,32 @@ export interface AdminSettings {
   integrations: Record<string, boolean>
 }
 
+/** One credential session of a price aggregator. Secrets are never sent to the client —
+ *  only whether a key/secret is set. */
+export interface AggregatorSessionView {
+  id: number
+  label: string | null
+  enabled: boolean
+  hasKey: boolean
+  hasSecret: boolean
+  lastSyncAt: string | null
+  createdAt: string
+}
+
+export interface AggregatorView {
+  key: string
+  displayName: string
+  enabled: boolean
+  sessions: AggregatorSessionView[]
+}
+
+/** Create body — raw key/secret; the server encrypts them before persisting. */
+export interface CreateAggregatorSessionBody {
+  label?: string
+  apiKey?: string
+  apiSecret?: string
+}
+
 export const adminApi = {
   getSettings: () =>
     api.get<AdminSettings>('/admin/settings').then(r => r.data),
@@ -53,4 +79,19 @@ export const adminApi = {
   reloadCorsFromEnv: () =>
     api.post<{ allowedOrigins: string[] }>('/admin/settings/cors/reload-from-env')
       .then(r => r.data),
+
+  getAggregators: () =>
+    api.get<AggregatorView[]>('/admin/aggregators').then(r => r.data),
+
+  toggleAggregator: (key: string, enabled: boolean) =>
+    api.patch<void>(`/admin/aggregators/${key}`, null, { params: { enabled } }).then(r => r.data),
+
+  createAggregatorSession: (key: string, body: CreateAggregatorSessionBody) =>
+    api.post<AggregatorSessionView>(`/admin/aggregators/${key}/sessions`, body).then(r => r.data),
+
+  toggleAggregatorSession: (id: number, enabled: boolean) =>
+    api.patch<void>(`/admin/aggregators/sessions/${id}`, null, { params: { enabled } }).then(r => r.data),
+
+  deleteAggregatorSession: (id: number) =>
+    api.delete<void>(`/admin/aggregators/sessions/${id}`).then(r => r.data),
 }

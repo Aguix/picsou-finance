@@ -5,6 +5,7 @@ import { useAdminSettings } from '@/features/admin/hooks'
 import { SecuritySection } from './sections/SecuritySection'
 import { EnableBankingSection } from './sections/EnableBankingSection'
 import { IntegrationsSection } from './sections/IntegrationsSection'
+import { AggregatorsSection } from './sections/AggregatorsSection'
 import { MembersSection } from './sections/MembersSection'
 
 export function AdminPage() {
@@ -22,6 +23,7 @@ export function AdminPage() {
           <SecuritySection settings={data.security} />
           <EnableBankingSection settings={data.enableBanking} />
           <IntegrationsSection integrations={data.integrations} />
+          <AggregatorsSection />
         </>
       )}
     </div>
