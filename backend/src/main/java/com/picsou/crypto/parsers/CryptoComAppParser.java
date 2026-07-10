@@ -4,7 +4,6 @@ import com.picsou.crypto.CryptoCsvParser;
 import com.picsou.crypto.CsvTable;
 import com.picsou.crypto.ParsedCryptoTx;
 import com.picsou.model.RewardKind;
-import com.picsou.model.TransactionType;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
