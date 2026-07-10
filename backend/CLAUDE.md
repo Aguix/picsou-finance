@@ -23,7 +23,8 @@ com.picsou/
 ├── controller/   REST controllers (all routes under /api/)
 ├── dto/          Request/response records
 ├── port/         Abstractions for external providers
-├── adapter/      Port implementations (Enable Banking, CoinGecko, Yahoo Finance)
+├── adapter/      Port implementations (Enable Banking, wallets, ETF composition…)
+│   └── price/    PriceProviderPort implementations (CoinGecko, Yahoo Finance)
 ├── config/       Spring beans: security, JWT, rate limiting, properties
 └── exception/    GlobalExceptionHandler + custom exceptions
 ```

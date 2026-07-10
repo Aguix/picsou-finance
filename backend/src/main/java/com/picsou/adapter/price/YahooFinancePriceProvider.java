@@ -1,9 +1,10 @@
-package com.picsou.adapter;
+package com.picsou.adapter.price;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.picsou.port.PriceProviderPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -30,6 +31,7 @@ import java.util.stream.Collectors;
  * Note: This is an unofficial API. For production use consider Alpha Vantage or similar.
  */
 @Component
+@Order(20)   // catch-all for stocks/ETFs — tried after CoinGecko's crypto lookup
 public class YahooFinancePriceProvider implements PriceProviderPort {
 
     private static final Logger log = LoggerFactory.getLogger(YahooFinancePriceProvider.class);
@@ -53,18 +55,29 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
     }
 
     @Override
-    public boolean supports(String ticker) {
+    public String aggregatorKey() {
+        return "yahoo";
+    }
+
+    @Override
+    public Set<Capability> capabilities() {
+        return EnumSet.of(Capability.SPOT, Capability.HISTORY, Capability.INTRADAY);
+    }
+
+    /**
+     * Yahoo is the catch-all quote source: it accepts any ticker whose shape isn't a plain ISIN.
+     * Crypto is no longer skipped via a hardcoded list — the router only reaches Yahoo for a ticker
+     * CoinGecko couldn't price (no {@code coingecko_id} in the {@code financial_asset} registry).
+     */
+    @Override
+    public boolean canPrice(String ticker) {
         if (ticker == null || ticker.isBlank()) {
             return false;
         }
         String upper = ticker.toUpperCase();
 
-        // Crypto is no longer skipped via a hardcoded list: routing is decided upstream by
-        // PriceService, which sends a ticker here only when it has no CoinGecko id in the
-        // financial_asset registry (i.e. it is not a resolved crypto). See V52 / the rework.
-
-        // Don't support plain ISIN codes (12-character alphanumeric starting with 2-letter country code)
-        // ISIN format: AA########X (2 letters, 9 digits, 1 check digit)
+        // Don't price plain ISIN codes (12-character alphanumeric starting with a 2-letter country
+        // code). ISIN format: AA########X (2 letters, 9 digits, 1 check digit).
         if (upper.length() == 12 && upper.matches("[A-Z]{2}[A-Z0-9]{9}[A-Z0-9]")) {
             log.debug("Rejecting unsupported ISIN: {}", ticker);
             return false;
@@ -76,7 +89,7 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
     @Override
     public Map<String, BigDecimal> getPricesEur(Set<String> tickers) {
         Set<String> supported = tickers.stream()
-            .filter(this::supports)
+            .filter(this::canPrice)
             .collect(Collectors.toSet());
 
         if (supported.isEmpty()) return Map.of();
@@ -243,6 +256,7 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
      * Fetch hourly prices for a stock/ETF ticker from Yahoo Finance over the last 24H.
      * Uses interval=1h for intraday granularity.
      */
+    @Override
     public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(String ticker, LocalDateTime from, LocalDateTime to) {
         try {
             YahooResponse response = webClient.get()
@@ -302,6 +316,7 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
      * Fetch historical daily prices for a single ticker from Yahoo Finance.
      * Returns a map of date -> priceEur.
      */
+    @Override
     public Map<LocalDate, BigDecimal> getHistoricalPricesEur(String ticker, LocalDate from, LocalDate to) {
         long days = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
         String range = days <= 7 ? "5d" : days <= 30 ? "1mo" : days <= 90 ? "3mo" : days <= 365 ? "1y" : "5y";

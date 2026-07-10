@@ -1,7 +1,5 @@
 package com.picsou.service;
 
-import com.picsou.adapter.CoinGeckoPriceProvider;
-import com.picsou.adapter.YahooFinancePriceProvider;
 import com.picsou.model.FinancialAsset;
 import com.picsou.model.PriceSnapshot;
 import com.picsou.repository.FinancialAssetRepository;
@@ -24,19 +22,17 @@ public class PriceService {
     private static final Logger log = LoggerFactory.getLogger(PriceService.class);
     private static final long CACHE_TTL_SECONDS = 900; // 15 minutes
 
-    private final CoinGeckoPriceProvider coinGecko;
-    private final YahooFinancePriceProvider yahoo;
+    private final PriceRouter priceRouter;
     private final PriceSnapshotRepository priceSnapshotRepository;
     private final FinancialAssetRepository assetRepository;
 
     // Simple in-memory price cache: ticker → (price, cachedAt)
     private final Map<String, CachedPrice> priceCache = new ConcurrentHashMap<>();
 
-    public PriceService(CoinGeckoPriceProvider coinGecko, YahooFinancePriceProvider yahoo,
+    public PriceService(PriceRouter priceRouter,
                         PriceSnapshotRepository priceSnapshotRepository,
                         FinancialAssetRepository assetRepository) {
-        this.coinGecko = coinGecko;
-        this.yahoo = yahoo;
+        this.priceRouter = priceRouter;
         this.priceSnapshotRepository = priceSnapshotRepository;
         this.assetRepository = assetRepository;
     }
@@ -67,17 +63,8 @@ public class PriceService {
             return cached.price();
         }
 
-        // Fetch from appropriate provider
-        Set<String> singleTicker = Set.of(upper);
-        Map<String, BigDecimal> prices;
-
-        if (coinGecko.supports(upper)) {
-            prices = coinGecko.getPricesEur(singleTicker);
-        } else {
-            prices = yahoo.getPricesEur(singleTicker);
-        }
-
-        BigDecimal price = prices.get(upper);
+        // Fetch from whichever provider the router routes this ticker to.
+        BigDecimal price = priceRouter.getPricesEur(Set.of(upper)).get(upper);
         if (price != null) {
             priceCache.put(upper, new CachedPrice(price, Instant.now()));
             // Opportunistic persistence only: callers like DashboardService run in a read-only
@@ -98,8 +85,7 @@ public class PriceService {
 
         Map<String, BigDecimal> result = new HashMap<>();
 
-        Set<String> cryptoTickers = new HashSet<>();
-        Set<String> stockTickers = new HashSet<>();
+        Set<String> toFetch = new HashSet<>();
         Set<String> worthlessTickers = new HashSet<>();
 
         for (String ticker : tickers) {
@@ -111,22 +97,15 @@ public class PriceService {
                 // without writing a phantom 0 snapshot into the price history.
                 worthlessTickers.add(upper);
                 result.put(upper, BigDecimal.ZERO);
-            } else if (coinGecko.supports(upper)) {
-                cryptoTickers.add(upper);
             } else {
-                stockTickers.add(upper);
+                toFetch.add(upper);
             }
         }
 
-        if (!cryptoTickers.isEmpty()) {
-            coinGecko.getPricesEur(cryptoTickers).forEach((k, v) -> {
-                priceCache.put(k, new CachedPrice(v, Instant.now()));
-                result.put(k, v);
-            });
-        }
-
-        if (!stockTickers.isEmpty()) {
-            yahoo.getPricesEur(stockTickers).forEach((k, v) -> {
+        // The router partitions the set across providers (crypto → CoinGecko, else Yahoo) and batches
+        // each provider into a single call.
+        if (!toFetch.isEmpty()) {
+            priceRouter.getPricesEur(toFetch).forEach((k, v) -> {
                 priceCache.put(k, new CachedPrice(v, Instant.now()));
                 result.put(k, v);
             });
@@ -225,14 +204,9 @@ public class PriceService {
                 }
             }
 
-            Map<LocalDate, BigDecimal> prices;
-            if (coinGecko.supports(upper)) {
-                // The provider absorbs the free tier's 429s with its circuit breaker, so this loop
-                // just walks the tickers.
-                prices = coinGecko.getHistoricalPricesEur(upper, effectiveFrom, to);
-            } else {
-                prices = yahoo.getHistoricalPricesEur(upper, effectiveFrom, to);
-            }
+            // The router picks the history-capable provider for this ticker (CoinGecko's breaker
+            // absorbs the free tier's 429s), so this loop just walks the tickers.
+            Map<LocalDate, BigDecimal> prices = priceRouter.getHistoricalPricesEur(upper, effectiveFrom, to);
 
             if (prices.isEmpty()) {
                 noData.add(upper);
@@ -298,12 +272,6 @@ public class PriceService {
             return Map.of();
         }
 
-        String upper = ticker.toUpperCase();
-
-        if (coinGecko.supports(upper)) {
-            return coinGecko.getIntradayPricesEur(upper, from, to);
-        } else {
-            return yahoo.getIntradayPricesEur(upper, from, to);
-        }
+        return priceRouter.getIntradayPricesEur(ticker.toUpperCase(), from, to);
     }
 }

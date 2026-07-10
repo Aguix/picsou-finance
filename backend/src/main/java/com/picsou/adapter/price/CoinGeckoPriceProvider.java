@@ -1,4 +1,4 @@
-package com.picsou.adapter;
+package com.picsou.adapter.price;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -48,6 +49,7 @@ import java.util.stream.Collectors;
  * gap, and a Demo key ({@code app.coingecko.demo-api-key}) raises the limit enough to avoid 429s.
  */
 @Component
+@Order(10)   // primary crypto aggregator — tried before Yahoo when both can price a ticker
 public class CoinGeckoPriceProvider implements PriceProviderPort {
 
     private static final Logger log = LoggerFactory.getLogger(CoinGeckoPriceProvider.class);
@@ -142,15 +144,36 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             .collect(Collectors.toMap(FinancialAsset::getSymbol, FinancialAsset::getCoingeckoId));
     }
 
+    @Override
+    public String aggregatorKey() {
+        return "coingecko";
+    }
+
+    @Override
+    public Set<Capability> capabilities() {
+        return EnumSet.of(Capability.SPOT, Capability.HISTORY, Capability.INTRADAY);
+    }
+
     /**
      * True once the ticker has an asset <em>with a coin id</em>. A {@code WORTHLESS} asset (no id)
-     * is deliberately not supported — its price is a fixed zero handled by {@code PriceService},
+     * is deliberately not priceable here — its price is a fixed zero handled by {@code PriceService},
      * never a CoinGecko fetch.
      */
     @Override
-    public boolean supports(String ticker) {
+    public boolean canPrice(String ticker) {
         return assetRepository.findBySymbol(ticker.toUpperCase())
             .map(a -> a.getCoingeckoId() != null).orElse(false);
+    }
+
+    /** False while the circuit breaker is open (a recent 429) — the router should skip CoinGecko then. */
+    @Override
+    public boolean isAvailable() {
+        return !paused();
+    }
+
+    @Override
+    public Optional<Instant> pausedUntil() {
+        return paused() ? Optional.of(pausedUntil) : Optional.empty();
     }
 
     @Override
@@ -317,6 +340,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
      * Fetch hourly prices for a crypto ticker from CoinGecko over the last 24H.
      * CoinGecko's market_chart/range returns hourly data for ranges < 90 days.
      */
+    @Override
     public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(String ticker, LocalDateTime from, LocalDateTime to) {
         String coinId = coinId(ticker);
         if (coinId == null) return Map.of();
@@ -368,6 +392,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
      * Fetch historical daily prices for a crypto ticker from CoinGecko.
      * Returns a map of date -> priceEur.
      */
+    @Override
     public Map<LocalDate, BigDecimal> getHistoricalPricesEur(String ticker, LocalDate from, LocalDate to) {
         String coinId = coinId(ticker);
         if (coinId == null) return Map.of();

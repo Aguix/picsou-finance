@@ -1,4 +1,4 @@
-package com.picsou.adapter;
+package com.picsou.adapter.price;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;

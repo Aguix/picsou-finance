@@ -1,7 +1,7 @@
 package com.picsou.service;
 
-import com.picsou.adapter.CoinGeckoPriceProvider;
-import com.picsou.adapter.YahooFinancePriceProvider;
+import com.picsou.adapter.price.CoinGeckoPriceProvider;
+import com.picsou.adapter.price.YahooFinancePriceProvider;
 import com.picsou.dto.EtfComposition;
 import com.picsou.dto.SecurityInsightResponse;
 import com.picsou.port.EtfCompositionProvider;
@@ -64,7 +64,7 @@ public class SecurityInsightService {
 
     /** crypto via CoinGecko, else map Yahoo's instrumentType, else UNKNOWN. */
     private String classify(String upperTicker) {
-        if (coinGecko.supports(upperTicker)) {
+        if (coinGecko.canPrice(upperTicker)) {
             return "CRYPTO";
         }
         Optional<String> instrumentType = yahoo.getInstrumentType(upperTicker);

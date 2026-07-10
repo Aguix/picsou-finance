@@ -37,7 +37,7 @@ public class OpenFigiIsinConverter {
     /**
      * Whether {@code s} looks like an ISIN (2-letter country code + 9 alphanumerics
      * + 1 check digit = 12 chars). Case-insensitive; trims surrounding whitespace.
-     * Mirrors the detection in {@code YahooFinancePriceProvider.supports()}.
+     * Mirrors the detection in {@code YahooFinancePriceProvider.canPrice()}.
      */
     public static boolean isIsin(String s) {
         if (s == null) {

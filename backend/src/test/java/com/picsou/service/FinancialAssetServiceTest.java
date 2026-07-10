@@ -1,7 +1,7 @@
 package com.picsou.service;
 
-import com.picsou.adapter.CoinGeckoPriceProvider;
-import com.picsou.adapter.CoinGeckoPriceProvider.CoinCandidate;
+import com.picsou.adapter.price.CoinGeckoPriceProvider;
+import com.picsou.adapter.price.CoinGeckoPriceProvider.CoinCandidate;
 import com.picsou.model.AssetStatus;
 import com.picsou.model.AssetType;
 import com.picsou.model.FinancialAsset;

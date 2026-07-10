@@ -1,6 +1,6 @@
 # Feature: Price Service
 
-> Last updated: 2026-07-08
+> Last updated: 2026-07-10
 
 ## Context
 
@@ -12,12 +12,12 @@ Since V51, ticker → provider-id resolution is **dynamic**: the `financial_asse
 
 ### Provider routing
 
-`PriceService.getPriceEur(ticker)` routes each ticker to the appropriate provider:
+`PriceService` never names a concrete adapter: it asks `PriceRouter`, which owns the ordered list of `PriceProviderPort` beans and routes each request to the aggregator that can serve it. Priority is the bean `@Order` (CoinGecko `@Order(10)` before Yahoo `@Order(20)`); for a given ticker the router picks the first provider that both declares the needed `Capability` (`SPOT`/`HISTORY`/`INTRADAY`) and `canPrice(ticker)`. Spot requests are partitioned so each provider is still batched into a single call. Adding a new aggregator (CoinMarketCap, step C/E) is a new `PriceProviderPort` bean with an `@Order` — no edit to `PriceService`/`PriceRouter`.
 
-- **CoinGecko** (`CoinGeckoPriceProvider`): Handles any ticker whose `financial_asset` row has a `coingecko_id`. Uses the `/simple/price` endpoint with `vs_currencies=eur`, batched (all tickers in one request). Also exposes `/search` and `/coins/{id}` lookups for the resolver, plus coin logo URLs. An optional Demo API key (`app.coingecko.demo-api-key`, header `x-cg-demo-api-key`) raises the rate limit (~100 req/min vs a handful anonymous).
-- **Yahoo Finance** (`YahooFinancePriceProvider`): Handles everything CoinGecko does not -- stocks, ETFs, indices. Uses the unofficial `/v8/finance/chart/{ticker}` endpoint. Fetched per-ticker (no batch). Tickers like `IWDA.AS`, `MC.PA` are already EUR-denominated; foreign-currency tickers (USD/JPY/GBp/...) are converted to EUR inside the adapter via Yahoo's own `{CURRENCY}EUR=X` chart endpoint, with a 15-minute FX cache mirroring the price cache TTL. See [ADR 2026-05-19](../decisions/2026-05-19-yahoo-fx-conversion.md).
+- **CoinGecko** (`CoinGeckoPriceProvider`, `aggregatorKey() = "coingecko"`): `canPrice` is true for any ticker whose `financial_asset` row has a `coingecko_id`. Uses the `/simple/price` endpoint with `vs_currencies=eur`, batched (all tickers in one request). Also exposes `/search` and `/coins/{id}` lookups for the resolver, plus coin logo URLs (these resolver-only calls stay off the port — they are CoinGecko-specific, not a generic pricing op). An optional Demo API key (`app.coingecko.demo-api-key`, header `x-cg-demo-api-key`) raises the rate limit (~100 req/min vs a handful anonymous).
+- **Yahoo Finance** (`YahooFinancePriceProvider`, `aggregatorKey() = "yahoo"`): the catch-all — `canPrice` is true for any ticker whose shape isn't a plain ISIN, so the router reaches it for whatever CoinGecko couldn't price (stocks, ETFs, indices). Uses the unofficial `/v8/finance/chart/{ticker}` endpoint. Fetched per-ticker (no batch). Tickers like `IWDA.AS`, `MC.PA` are already EUR-denominated; foreign-currency tickers (USD/JPY/GBp/...) are converted to EUR inside the adapter via Yahoo's own `{CURRENCY}EUR=X` chart endpoint, with a 15-minute FX cache mirroring the price cache TTL. See [ADR 2026-05-19](../decisions/2026-05-19-yahoo-fx-conversion.md).
 
-Both providers implement `PriceProviderPort` with `supports(ticker)` and `getPricesEur(tickers)`.
+Both providers implement `PriceProviderPort`: `aggregatorKey()`, `capabilities()`, `canPrice(ticker)`, `isAvailable()`/`pausedUntil()`, and the three pricing ops (`getPricesEur`, `getHistoricalPricesEur`, `getIntradayPricesEur`). The old single `supports(ticker)` boolean was too weak to order a fallback; `capabilities()` + `canPrice()` replace it, and `isAvailable()` (false while a provider is rate-limited) exists for the cross-provider cascade that lands with the second crypto aggregator — today's routing preserves the previous one-provider-per-ticker behaviour.
 
 A ticker marked `WORTHLESS` (delisted coin no aggregator can price) is valued at a fixed zero by `PriceService` — no provider call, no phantom snapshot.
 
@@ -56,13 +56,14 @@ Every successful fetch also persists `financial_asset.last_eur_value`/`price_syn
 
 ### Key files
 
-- `service/PriceService.java` -- Price routing, caching, conversion, gap-aware backfill
+- `service/PriceService.java` -- Caching, conversion, gap-aware backfill, worthless/EUR handling (routing delegated to `PriceRouter`)
+- `service/PriceRouter.java` -- Capability-based routing over the ordered `PriceProviderPort` beans
 - `service/FinancialAssetService.java` -- Dynamic symbol resolution, manual mapping, worthless pinning
 - `model/FinancialAsset.java` / `repository/FinancialAssetRepository.java` -- The registry (V51)
 - `service/SchedulerService.java` -- Hourly price refresh cron
-- `adapter/CoinGeckoPriceProvider.java` -- CoinGecko HTTP client (prices, search, logos, circuit breaker)
-- `adapter/YahooFinancePriceProvider.java` -- Yahoo Finance `/v8/finance/chart/{ticker}`
-- `port/PriceProviderPort.java` -- Port interface with `supports()` and `getPricesEur()`
+- `adapter/price/CoinGeckoPriceProvider.java` -- CoinGecko HTTP client (prices, search, logos, circuit breaker)
+- `adapter/price/YahooFinancePriceProvider.java` -- Yahoo Finance `/v8/finance/chart/{ticker}`
+- `port/PriceProviderPort.java` -- Port interface: `aggregatorKey()`, `capabilities()`, `canPrice()`, `isAvailable()`, `getPricesEur()`/`getHistoricalPricesEur()`/`getIntradayPricesEur()`
 
 ### Flow
 
@@ -82,7 +83,8 @@ Check cache: CachedPrice for "BTC"
         +-- miss or expired
                 |
                 v
-        CoinGeckoPriceProvider.supports("BTC")
+        PriceRouter picks first provider that canPrice("BTC")
+        CoinGeckoPriceProvider.canPrice("BTC")
         (financial_asset.coingecko_id set?) --> true
                 |
                 v
@@ -119,8 +121,7 @@ GET /search?query=tao --> single/dominant match? --> persist AUTO
 - **Yahoo Finance is unofficial**: The Yahoo Finance API is undocumented and can break or get rate-limited without notice. FX conversion is now applied inside `YahooFinancePriceProvider` using the `{CURRENCY}EUR=X` chart endpoint; `GBp`/`GBX` is treated as `GBP / 100`. If the FX call fails the ticker is omitted from the result map (no fabricated rate) — downstream consumers must tolerate a missing key.
 - **CoinGecko rate limits**: the anonymous tier 429s within ~5-6 requests (Cloudflare serves `Retry-After: 60`). The circuit breaker pauses *all* CoinGecko calls until the window elapses; a Demo API key (`COINGECKO_DEMO_API_KEY`) raises the limit to ~100 req/min and is the real fix.
 - **CoinGecko free history is age-limited**: `market_chart/range` 401s when `from` is older than ~365 days, so historical requests are clamped to 364 days (`MAX_FREE_HISTORY_DAYS`). Older history would need a paid Pro key.
-- **Unresolved symbols price as before, not better**: a `PENDING` product has no aggregator ref, so pricing falls through to Yahoo with the raw symbol (usually a miss → unpriced holding). That is the pre-V51 behaviour for unknown coins; the fix is linking the coin in the management UI.
-- **`YahooFinancePriceProvider` still carries a small crypto skip-list**: now dead weight (routing happens upstream via the registry); scheduled for cleanup with the `account_holding` rework (step A2).
+- **Unresolved symbols price as before, not better**: a `PENDING` product has no aggregator ref, so `canPrice` is false on CoinGecko and the router falls through to Yahoo with the raw symbol (usually a miss → unpriced holding). That is the pre-V51 behaviour for unknown coins; the fix is linking the coin in the management UI.
 - **Cache is in-memory only**: prices are lost on restart (the scheduler repopulates within one hour). `financial_asset.last_eur_value` now persists the last known price, but nothing reads it back yet — that lands with the multi-aggregator fallback (step C).
 - **`toEur()` returns raw balance on failure**: If no price is available for a symbol, `toEur()` logs a warning and returns the unconverted balance. This can lead to incorrect dashboard values if a price provider is down.
 - **Historical/intraday series use today's FX**: `getHistoricalPricesEur` and `getIntradayPricesEur` fetch the FX rate once per call and apply it to every candle in the series. Per-day FX would multiply API calls ~250× for a one-year backfill with marginal accuracy gain — see [ADR 2026-05-19](../decisions/2026-05-19-yahoo-fx-conversion.md) for the trade-off.
