@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -119,6 +120,46 @@ public class FinancialAssetService {
         return Optional.of(saved);
     }
 
+    /** Provisional resolution of one imported symbol, shown in the preview and persisted by nothing. */
+    public record AssetResolutionPreview(
+        String symbol,
+        AssetStatus currentStatus,
+        CoinCandidate suggested,
+        List<CoinCandidate> candidates
+    ) {}
+
+    /**
+     * Provisional, <b>non-persisting</b> resolution for the crypto import preview. For every imported
+     * symbol that isn't already settled ({@code USER}/{@code WORTHLESS}) it returns the current
+     * registry status, the best market-cap match ({@link #pickDominant}, possibly null), and the full
+     * candidate list from CoinGecko {@code /search} — the candidates {@link #resolveCrypto} discards
+     * after picking. Nothing is written: the operator confirms or corrects the choice in the preview
+     * and the import applies it as {@code USER} via {@link #applyUserMapping}. This is what stops a
+     * silent {@code AUTO} mis-match (a dominant-by-market-cap guess onto the wrong coin) from being
+     * frozen in the registry before the operator has seen it. A per-symbol search failure degrades to
+     * an empty candidate list rather than failing the batch.
+     */
+    @Transactional(readOnly = true)
+    public List<AssetResolutionPreview> previewResolutions(Set<String> tickers) {
+        List<AssetResolutionPreview> out = new ArrayList<>();
+        for (String raw : tickers) {
+            if (raw == null || raw.isBlank()) continue;
+            String upper = raw.trim().toUpperCase();
+            AssetStatus status = assetRepository.findBySymbol(upper)
+                .map(FinancialAsset::getStatus).orElse(null);
+            if (status == AssetStatus.USER || status == AssetStatus.WORTHLESS) continue;
+            List<CoinCandidate> candidates;
+            try {
+                candidates = coinGecko.searchBySymbol(upper);
+            } catch (Exception e) {
+                log.warn("Candidate search failed for {}: {}", upper, e.getMessage());
+                candidates = List.of();
+            }
+            out.add(new AssetResolutionPreview(upper, status, pickDominant(candidates), candidates));
+        }
+        return out;
+    }
+
     /**
      * Best-effort bulk resolution; unresolved symbols stay {@code PENDING}. Returns the
      * (uppercase) symbols that could not be auto-resolved — the operator disambiguates those via
@@ -185,28 +226,47 @@ public class FinancialAssetService {
         if (ticker == null || ticker.isBlank()) {
             throw new IllegalArgumentException("Ticker is required.");
         }
-        String upper = ticker.trim().toUpperCase();
         String coinId = extractCoinId(coingeckoUrl);
-
         CoinCandidate coin = coinGecko.fetchCoinById(coinId).orElseThrow(() ->
             new IllegalArgumentException("No CoinGecko coin found for id '" + coinId
                 + "' — check the link points to a coin page."));
+        return applyUserMapping(ticker, coin.id(), coin.name());
+    }
+
+    /**
+     * Pin a symbol to a known CoinGecko coin id as {@code USER}, overriding any prior mapping. The
+     * id/name are trusted from the caller — a coin the operator picked from the import-preview
+     * candidates, or one already fetched and validated by {@link #setManualMapping} — so this makes
+     * no extra CoinGecko round-trip. Re-pinning to a <em>different</em> coin purges the symbol's
+     * price history (fetched under the old, wrong id) and refetches it; re-pinning to the same coin
+     * keeps it.
+     */
+    @Transactional
+    public FinancialAsset applyUserMapping(String ticker, String coingeckoId, String name) {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("Ticker is required.");
+        }
+        if (coingeckoId == null || coingeckoId.isBlank()) {
+            throw new IllegalArgumentException("A CoinGecko coin id is required.");
+        }
+        String upper = ticker.trim().toUpperCase();
+        String coinId = coingeckoId.trim();
 
         FinancialAsset asset = assetRepository.findBySymbol(upper)
             .orElseGet(() -> FinancialAsset.builder().symbol(upper).build());
         String previousId = asset.getCoingeckoId();
         if (asset.getType() == AssetType.UNKNOWN) asset.setType(AssetType.CRYPTO);
-        asset.setCoingeckoId(coin.id());
-        asset.setName(coin.name());
+        asset.setCoingeckoId(coinId);
+        asset.setName(name);
         asset.setStatus(AssetStatus.USER);
 
         FinancialAsset saved = assetRepository.save(asset);
-        log.info("User-mapped crypto symbol {} → CoinGecko id '{}' ({})", upper, coin.id(), coin.name());
+        log.info("User-mapped crypto symbol {} → CoinGecko id '{}' ({})", upper, coinId, name);
 
         // Re-pinning to a *different* coin means every price fetched under the old id is wrong:
         // purge the symbol's history and refetch it under the corrected coin. Re-pinning to the
         // same coin keeps the history — it was fetched from the right source.
-        if (previousId != null && !previousId.equals(coin.id())) {
+        if (previousId != null && !previousId.equals(coinId)) {
             purgeAndRefetchPrices(upper);
         }
         return saved;

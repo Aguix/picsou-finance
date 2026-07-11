@@ -16,9 +16,11 @@ import java.util.Map;
  * @param sourceLabel  human label of the detected source (e.g. {@code Kraken}).
  * @param unvaluedCount rows that move holdings but carry no fiat valuation in the CSV; they are
  *                      valued from daily price history at import time.
- * @param unresolvedTickers coins that couldn't be auto-resolved to a {@code financial_asset}
- *                      (ambiguous symbol or unknown); they import unpriced — the import itself
- *                      isn't blocked.
+ * @param assetChoices  every imported coin that isn't already settled ({@code USER}/{@code WORTHLESS}),
+ *                      with the provisional best match and all CoinGecko candidates, for the operator
+ *                      to confirm or correct before the import commits — this is what surfaces a
+ *                      silent {@code AUTO} mis-match. Nothing here blocks the import; unconfirmed
+ *                      coins simply import unpriced.
  */
 public record CryptoPreviewResponse(
     String fileToken,
@@ -38,6 +40,6 @@ public record CryptoPreviewResponse(
     BigDecimal totalInvested,
     BigDecimal totalRewards,
     Map<String, BigDecimal> rewardsByKind,
-    List<String> unresolvedTickers,
+    List<ImportAssetChoice> assetChoices,
     List<AccountResponse> existingAccounts
 ) {}

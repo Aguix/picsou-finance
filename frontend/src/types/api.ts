@@ -367,6 +367,36 @@ export interface CryptoSourceInfo {
   label: string
 }
 
+/** How (and whether) an asset symbol got linked to aggregator ids — mirrors backend `AssetStatus`. */
+export type AssetStatus = 'PENDING' | 'AUTO' | 'USER' | 'WORTHLESS'
+
+/** A CoinGecko coin sharing an imported symbol (best-first by `marketCapRank`). */
+export interface ImportCoinCandidate {
+  coingeckoId: string
+  name: string
+  symbol: string
+  marketCapRank: number | null
+}
+
+/** A coin the import preview asks the operator to confirm/correct before committing. */
+export interface ImportAssetChoice {
+  symbol: string
+  /** Registry status today: `AUTO` (a prior guess), `PENDING` (unresolved), or `null` (unseen). */
+  currentStatus: AssetStatus | null
+  /** Best market-cap match, pre-selected; `null` when the match is ambiguous. */
+  suggestedId: string | null
+  candidates: ImportCoinCandidate[]
+}
+
+/** The operator's decision for one previewed coin, sent with the import request. */
+export interface ImportAssetMapping {
+  symbol: string
+  action: 'MAP' | 'WORTHLESS' | 'IGNORE'
+  /** Required when `action === 'MAP'`. */
+  coingeckoId?: string
+  name?: string
+}
+
 export interface CryptoPreviewResponse {
   fileToken: string
   source: string
@@ -385,7 +415,7 @@ export interface CryptoPreviewResponse {
   totalInvested: number
   totalRewards: number
   rewardsByKind: Record<string, number>
-  unresolvedTickers: string[]
+  assetChoices: ImportAssetChoice[]
   existingAccounts: Account[]
 }
 
@@ -395,6 +425,7 @@ export interface CryptoImportRequest {
   targetAccountId?: number
   accountName?: string
   color?: string
+  assetMappings?: ImportAssetMapping[]
 }
 
 export interface CryptoImportResult {

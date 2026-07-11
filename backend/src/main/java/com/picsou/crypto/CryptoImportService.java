@@ -140,9 +140,21 @@ public class CryptoImportService {
         String fileToken = UUID.randomUUID().toString();
         cache.put(fileToken, new Parsed(parser.sourceId(), txs, nativeCurrency, Instant.now()));
 
-        // Resolve tickers now (against the financial_asset registry) so the UI can flag any the
-        // resolver couldn't pin down before the import runs.
-        List<String> unresolvedTickers = resolveTickers(txs);
+        // Resolve tickers *provisionally* (nothing persisted) and hand the UI a confirm/correct
+        // choice per coin that isn't already settled — the best market-cap guess plus every
+        // CoinGecko candidate that shares the symbol. This is what lets the operator catch a silent
+        // AUTO mis-match before the import commits; the confirmed choices come back on the import
+        // request and are applied as USER by execute() before the price backfill.
+        List<ImportAssetChoice> assetChoices = financialAssetService
+            .previewResolutions(importedTickers(txs)).stream()
+            .map(p -> new ImportAssetChoice(
+                p.symbol(),
+                p.currentStatus() != null ? p.currentStatus().name() : null,
+                p.suggested() != null ? p.suggested().id() : null,
+                p.candidates().stream()
+                    .map(c -> new ImportAssetChoice.Candidate(c.id(), c.name(), c.symbol(), c.marketCapRank()))
+                    .toList()))
+            .toList();
 
         int buy = (int) txs.stream().filter(t -> t.txType() == TransactionType.BUY).count();
         int sell = (int) txs.stream().filter(t -> t.txType() == TransactionType.SELL).count();
@@ -176,7 +188,7 @@ public class CryptoImportService {
             fileToken, parser.sourceId(), parser.label(),
             txs.size(), txs.size(), buy, sell, rewardCount, unknown, unvalued,
             first, last, new ArrayList<>(currencies), nativeCurrency,
-            totalInvested, totalRewards, rewardsByKind, unresolvedTickers, existing);
+            totalInvested, totalRewards, rewardsByKind, assetChoices, existing);
     }
 
     @Transactional
@@ -192,11 +204,13 @@ public class CryptoImportService {
 
         Account account = resolveAccount(req, memberId, parser);
 
-        // Resolve each imported ticker against the financial_asset registry so the price backfill
-        // and holding valuation below can find a provider. The import context guarantees these are
-        // cryptos, so a symbol shared with a stock ticker can't be mis-routed. Ambiguous or unknown
-        // tickers stay unresolved (unpriced) rather than guessed.
-        resolveTickers(parsed.transactions);
+        // Apply the operator's confirmed coin mappings (from the preview) as USER *before* the
+        // backfill, so prices are fetched under the right CoinGecko id from the first import — no
+        // silent AUTO guess, and no re-import needed to correct one. Coins left unconfirmed stay
+        // unresolved and import unpriced (a bare PENDING row is minted later by HoldingComputeService
+        // via getOrCreate); coins already settled (USER/WORTHLESS) aren't in the request and keep
+        // their mapping.
+        applyConfirmedMappings(req.assetMappings());
 
         // Backfill daily price history for the coins first: the valuation enrichment below and
         // the cost-vs-price overlay on the stats page both need it. Best-effort — a provider
@@ -360,21 +374,39 @@ public class CryptoImportService {
         return total;
     }
 
-    /**
-     * Resolve every distinct imported ticker against the {@code financial_asset} registry so the
-     * downstream price backfill/valuation can find a provider. Best-effort — a failure here just
-     * leaves a coin unpriced, it must not fail the import. Returns the (uppercase, sorted) tickers
-     * that stayed unresolved, for the preview to surface for manual disambiguation.
-     */
-    private List<String> resolveTickers(List<ParsedCryptoTx> transactions) {
-        Set<String> tickers = transactions.stream()
+    /** The distinct, uppercase, sorted crypto tickers carried by the parsed transactions. */
+    private static Set<String> importedTickers(List<ParsedCryptoTx> transactions) {
+        return transactions.stream()
             .filter(t -> t.txType() != null && t.ticker() != null && !t.ticker().isBlank())
             .map(t -> t.ticker().toUpperCase())
             .collect(Collectors.toCollection(TreeSet::new));
-        if (tickers.isEmpty()) {
-            return List.of();
+    }
+
+    /**
+     * Apply the operator's confirmed per-coin decisions from the import preview: {@code MAP} pins a
+     * CoinGecko id as a {@code USER} mapping, {@code WORTHLESS} pins a zero, anything else (incl.
+     * {@code IGNORE}) leaves the coin unresolved to import unpriced. Best-effort per coin — a single
+     * bad mapping is logged and skipped, never failing the import.
+     */
+    private void applyConfirmedMappings(List<ImportAssetMapping> mappings) {
+        if (mappings == null) return;
+        for (ImportAssetMapping m : mappings) {
+            if (m == null || m.symbol() == null || m.symbol().isBlank()) continue;
+            String action = m.action() == null ? "" : m.action().trim().toUpperCase();
+            try {
+                switch (action) {
+                    case "MAP" -> {
+                        if (m.coingeckoId() != null && !m.coingeckoId().isBlank()) {
+                            financialAssetService.applyUserMapping(m.symbol(), m.coingeckoId(), m.name());
+                        }
+                    }
+                    case "WORTHLESS" -> financialAssetService.markWorthless(m.symbol());
+                    default -> { /* IGNORE — leave unresolved; imports unpriced */ }
+                }
+            } catch (Exception e) {
+                log.warn("Import mapping for {} ({}) failed: {}", m.symbol(), action, e.getMessage());
+            }
         }
-        return new ArrayList<>(financialAssetService.resolveAll(tickers));
     }
 
     /** Best-effort historical price backfill for the imported coins, from their first activity date. */

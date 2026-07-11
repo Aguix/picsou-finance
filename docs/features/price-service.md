@@ -42,6 +42,8 @@ Resolution order for a crypto symbol (`resolveCrypto`, called from crypto-guaran
 
 Correcting a mapping to a *different* coin purges the ticker's `price_snapshot` history (fetched under the wrong coin id) and refetches it; `markWorthless` pins a delisted coin to zero and re-values its holdings.
 
+The crypto CSV import confirms this resolution *before* it commits. `previewResolutions` resolves each imported coin **provisionally — persisting nothing** — and returns, for every coin not already settled (`USER`/`WORTHLESS`), the best market-cap guess plus **all** CoinGecko candidates that share the symbol (the ones `resolveCrypto` discards after picking). The preview shows one pre-filled picker per coin; the operator confirms, picks another candidate, marks it worthless, or skips it. The confirmed choices ride the import request and `execute()` applies them as `USER` (via `applyUserMapping`, no extra CoinGecko round-trip) **before** the price backfill — so prices are fetched under the right coin id from the first import. This is what stops a silent `AUTO` mis-match (e.g. a `META` ticker pinned to the wrong dominant coin) from being frozen in the registry unnoticed; skipped coins import unpriced and are re-presented next time.
+
 V51 seeds the registry: the 20 formerly-hardcoded crypto mappings, plus an identity `yahoo_symbol` for every other ticker already present in accounts/holdings — existing positions keep pricing without any user action.
 
 ### Caching

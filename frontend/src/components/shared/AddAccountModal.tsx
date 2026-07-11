@@ -54,8 +54,9 @@ import {
   Upload,
   ShieldCheck,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react'
-import type { ExchangeType, ChainType, AccountRequest, FinaryPreviewResponse, FinaryAccountMapping, FinaryMappingAction, FinaryImportResultResponse, AccountType, CryptoPreviewResponse, CryptoImportResult } from '@/types/api'
+import type { ExchangeType, ChainType, AccountRequest, FinaryPreviewResponse, FinaryAccountMapping, FinaryMappingAction, FinaryImportResultResponse, AccountType, CryptoPreviewResponse, CryptoImportResult, ImportAssetChoice, ImportAssetMapping } from '@/types/api'
 
 // ---------------------------------------------------------------------------
 // Props & types
@@ -610,10 +611,11 @@ function WalletWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
 // ---------------------------------------------------------------------------
 // Wizard: Crypto CSV import (compact)
 //
-// Slim variant tailored to the dialog: drop a CSV → preview summary → pick the
-// target account → import. The CoinGecko resolution UI is intentionally left
-// out; unresolved coins import unpriced and are resolvable later from the
-// crypto page (a short note points there).
+// Slim variant tailored to the dialog: drop a CSV → preview summary → review
+// how each coin resolved → pick the target account → import. Coins matched
+// automatically (AUTO) are surfaced with a "verify" link so a silent mis-match
+// can be caught here; unidentified ones (PENDING) import unpriced. Correcting a
+// mapping happens after import from the holding detail (kept out of this dialog).
 // ---------------------------------------------------------------------------
 
 function CryptoCsvWizard({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
@@ -626,6 +628,7 @@ function CryptoCsvWizard({ onDone, onBack }: { onDone: () => void; onBack: () =>
   const [preview, setPreview] = useState<CryptoPreviewResponse | null>(null)
   const [target, setTarget] = useState<'CREATE_NEW' | number>('CREATE_NEW')
   const [accountName, setAccountName] = useState('')
+  const [mappings, setMappings] = useState<Record<string, ImportAssetMapping>>({})
   const [result, setResult] = useState<CryptoImportResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -637,6 +640,7 @@ function CryptoCsvWizard({ onDone, onBack }: { onDone: () => void; onBack: () =>
         setPreview(data)
         setAccountName(data.sourceLabel)
         setTarget('CREATE_NEW')
+        setMappings(initMappingChoices(data.assetChoices))
       },
       onError: (err: unknown) => setError(getErrorDetail(err) || (err as { message?: string })?.message || t('common.retry')),
     })
@@ -651,6 +655,7 @@ function CryptoCsvWizard({ onDone, onBack }: { onDone: () => void; onBack: () =>
         action: target === 'CREATE_NEW' ? 'CREATE_NEW' : 'MAP_EXISTING',
         targetAccountId: target === 'CREATE_NEW' ? undefined : target,
         accountName: target === 'CREATE_NEW' ? accountName : undefined,
+        assetMappings: Object.values(mappings),
       },
       {
         onSuccess: (data) => setResult(data),
@@ -745,12 +750,12 @@ function CryptoCsvWizard({ onDone, onBack }: { onDone: () => void; onBack: () =>
               <MiniStat label={t('sync.crypto.coins')} value={preview.currencies.length} />
               <MiniStat label={t('sync.crypto.rewards')} value={preview.rewardCount} />
             </div>
-            {preview.unresolvedTickers.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                {t('sync.crypto.unresolvedNote', { count: preview.unresolvedTickers.length })}
-              </p>
-            )}
           </div>
+
+          {/* Per-coin confirmation: pre-filled with the best CoinGecko match, correctable before
+              the import commits so a silent AUTO mis-match can't slip through. */}
+          <ImportAssetValidation choices={preview.assetChoices} value={mappings} onChange={setMappings} />
+
 
           {/* Target account */}
           <div className="space-y-2">
@@ -808,6 +813,108 @@ function MiniStat({ label, value }: { label: string; value: number }) {
     <div className="rounded-md bg-muted/40 px-2 py-1.5">
       <p className="text-base font-semibold">{value}</p>
       <p className="text-xs text-muted-foreground">{label}</p>
+    </div>
+  )
+}
+
+const COINGECKO_COIN_URL = 'https://www.coingecko.com/en/coins/'
+
+// Seed one decision per previewed coin: pre-select the best CoinGecko match (so accepting is a
+// no-op), or default to "skip" (import unpriced) when the match is ambiguous or missing.
+function initMappingChoices(choices: ImportAssetChoice[]): Record<string, ImportAssetMapping> {
+  const out: Record<string, ImportAssetMapping> = {}
+  for (const c of choices) {
+    if (c.suggestedId) {
+      const cand = c.candidates.find((x) => x.coingeckoId === c.suggestedId)
+      out[c.symbol] = { symbol: c.symbol, action: 'MAP', coingeckoId: c.suggestedId, name: cand?.name }
+    } else {
+      out[c.symbol] = { symbol: c.symbol, action: 'IGNORE' }
+    }
+  }
+  return out
+}
+
+// Confirm/correct each imported coin before committing. Each row pre-fills the best market-cap
+// match (a "verify" link opens its CoinGecko page); the operator can pick another candidate, mark
+// the coin worthless, or skip it (imports unpriced). Settled coins (USER/WORTHLESS) never appear.
+// The chosen mappings ride the import request and are applied as USER before the price backfill.
+function ImportAssetValidation({
+  choices,
+  value,
+  onChange,
+}: {
+  choices: ImportAssetChoice[]
+  value: Record<string, ImportAssetMapping>
+  onChange: (next: Record<string, ImportAssetMapping>) => void
+}) {
+  const { t } = useTranslation()
+  if (choices.length === 0) return null
+
+  function setChoice(choice: ImportAssetChoice, raw: string) {
+    let mapping: ImportAssetMapping
+    if (raw === 'worthless') {
+      mapping = { symbol: choice.symbol, action: 'WORTHLESS' }
+    } else if (raw === 'ignore') {
+      mapping = { symbol: choice.symbol, action: 'IGNORE' }
+    } else {
+      const id = raw.slice(4) // strip "map:"
+      const cand = choice.candidates.find((c) => c.coingeckoId === id)
+      mapping = { symbol: choice.symbol, action: 'MAP', coingeckoId: id, name: cand?.name }
+    }
+    onChange({ ...value, [choice.symbol]: mapping })
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border p-3">
+      <div>
+        <p className="text-xs font-medium">{t('sync.crypto.validateTitle')}</p>
+        <p className="text-xs text-muted-foreground">{t('sync.crypto.validateNote')}</p>
+      </div>
+      <ul className="max-h-56 space-y-1.5 overflow-y-auto">
+        {choices.map((choice) => {
+          const current = value[choice.symbol]
+          const selected =
+            current?.action === 'WORTHLESS'
+              ? 'worthless'
+              : current?.action === 'MAP' && current.coingeckoId
+                ? `map:${current.coingeckoId}`
+                : 'ignore'
+          const verifyId = current?.action === 'MAP' ? current.coingeckoId : undefined
+          return (
+            <li key={choice.symbol} className="flex items-center gap-2 text-xs">
+              <span className="w-14 shrink-0 font-mono font-medium">{choice.symbol}</span>
+              <select
+                value={selected}
+                onChange={(e) => setChoice(choice, e.target.value)}
+                className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+                aria-label={t('sync.crypto.validateTitle')}
+              >
+                {choice.candidates.map((c) => (
+                  <option key={c.coingeckoId} value={`map:${c.coingeckoId}`}>
+                    {c.name}
+                    {c.marketCapRank ? ` (#${c.marketCapRank})` : ''}
+                  </option>
+                ))}
+                <option value="worthless">{t('sync.crypto.optionWorthless')}</option>
+                <option value="ignore">{t('sync.crypto.optionSkip')}</option>
+              </select>
+              {verifyId ? (
+                <a
+                  href={`${COINGECKO_COIN_URL}${verifyId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex shrink-0 items-center text-primary hover:underline"
+                  title={t('sync.crypto.verify')}
+                >
+                  <ExternalLink className="size-3.5" />
+                </a>
+              ) : (
+                <span className="w-3.5 shrink-0" />
+              )}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

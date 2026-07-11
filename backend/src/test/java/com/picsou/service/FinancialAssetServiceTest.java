@@ -182,6 +182,77 @@ class FinancialAssetServiceTest {
     }
 
     @Test
+    void previewResolutionsSurfacesCandidatesAndSkipsSettledCoinsWithoutPersisting() {
+        // BTC already USER (settled) → not surfaced. META unseen → surfaced with a dominant guess.
+        // AMBI is PENDING with two comparable coins → surfaced, no guess. Nothing is persisted.
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.of(
+            FinancialAsset.builder().symbol("BTC").status(AssetStatus.USER).build()));
+        when(repository.findBySymbol("META")).thenReturn(Optional.empty());
+        when(coinGecko.searchBySymbol("META")).thenReturn(List.of(
+            coin("metabeat", "meta", 300), coin("meta-inu", "meta", 5000)));
+        when(repository.findBySymbol("AMBI")).thenReturn(Optional.of(
+            FinancialAsset.builder().symbol("AMBI").status(AssetStatus.PENDING).build()));
+        when(coinGecko.searchBySymbol("AMBI")).thenReturn(List.of(
+            coin("ambi-one", "ambi", 10), coin("ambi-two", "ambi", 14)));
+
+        var previews = service.previewResolutions(
+            new java.util.LinkedHashSet<>(List.of("btc", "meta", "ambi")));
+
+        assertThat(previews).extracting(FinancialAssetService.AssetResolutionPreview::symbol)
+            .containsExactly("META", "AMBI");
+        assertThat(previews.get(0).suggested().id()).isEqualTo("metabeat"); // #300 dominates #5000
+        assertThat(previews.get(0).candidates()).hasSize(2);
+        assertThat(previews.get(0).currentStatus()).isNull();               // never seen
+        assertThat(previews.get(1).suggested()).isNull();                   // #10 vs #14 comparable
+        assertThat(previews.get(1).currentStatus()).isEqualTo(AssetStatus.PENDING);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void previewResolutionsDegradesToNoCandidatesWhenTheSearchFails() {
+        when(repository.findBySymbol("BOOM")).thenReturn(Optional.empty());
+        when(coinGecko.searchBySymbol("BOOM")).thenThrow(new RuntimeException("rate limit"));
+
+        var previews = service.previewResolutions(new java.util.LinkedHashSet<>(List.of("boom")));
+
+        assertThat(previews).hasSize(1);
+        assertThat(previews.get(0).symbol()).isEqualTo("BOOM");
+        assertThat(previews.get(0).candidates()).isEmpty();
+        assertThat(previews.get(0).suggested()).isNull();
+    }
+
+    @Test
+    void applyUserMappingPinsACandidateIdAsUserWithoutCallingCoinGecko() {
+        // The import path pins a coin the operator picked from preview candidates — the id/name are
+        // trusted, so no extra /coins/{id} round-trip.
+        when(repository.findBySymbol("META")).thenReturn(Optional.empty());
+        expectSaveEcho();
+
+        FinancialAsset result = service.applyUserMapping("meta", "metabeat", "MetaBeat");
+
+        assertThat(result.getSymbol()).isEqualTo("META");
+        assertThat(result.getCoingeckoId()).isEqualTo("metabeat");
+        assertThat(result.getName()).isEqualTo("MetaBeat");
+        assertThat(result.getStatus()).isEqualTo(AssetStatus.USER);
+        assertThat(result.getType()).isEqualTo(AssetType.CRYPTO);
+        verify(coinGecko, never()).fetchCoinById(anyString());
+    }
+
+    @Test
+    void applyUserMappingPurgesHistoryWhenItChangesAnExistingCoinId() {
+        FinancialAsset existing = FinancialAsset.builder().symbol("META").coingeckoId("wrong-meta")
+            .type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
+        when(repository.findBySymbol("META")).thenReturn(Optional.of(existing));
+        expectSaveEcho();
+
+        service.applyUserMapping("META", "metabeat", "MetaBeat");
+
+        verify(priceSnapshotRepository).deleteByTicker("META");
+        verify(priceService).evictFromCache("META");
+        verify(priceService).backfillHistoricalPrices(anyMap());
+    }
+
+    @Test
     void setManualMappingExtractsIdFromLinkAndPersistsAsUser() {
         when(coinGecko.fetchCoinById("loaded-lions"))
             .thenReturn(Optional.of(new CoinCandidate("loaded-lions", "Loaded Lions", "lion", 3500)));
