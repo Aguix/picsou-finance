@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { NumericInput } from '@/components/shared/NumericInput'
+import { AggregatorLinkCard } from '@/components/shared/AggregatorLinkCard'
 import { Label } from '@/components/ui/label'
 import { parseAmount } from '@/lib/utils'
 import { Loader2 } from 'lucide-react'
@@ -28,13 +29,26 @@ export function EditHoldingModal({ open, onOpenChange, holding, onSubmit, isLoad
         {/* Remount per holding so the form's initial values come straight from
             props — no populate-on-open effect needed. */}
         {open && holding && (
-          <HoldingForm
-            key={holding.ticker}
-            holding={holding}
-            onOpenChange={onOpenChange}
-            onSubmit={onSubmit}
-            isLoading={isLoading}
-          />
+          <>
+            <HoldingForm
+              key={holding.ticker}
+              holding={holding}
+              onOpenChange={onOpenChange}
+              onSubmit={onSubmit}
+              isLoading={isLoading}
+            />
+            {/* Aggregator link — standing crypto mapping/verification (D2). Rendered as a sibling
+                of the form (not inside it) so its buttons never submit the buy-in form. */}
+            {holding.assetType === 'CRYPTO' && holding.ticker && holding.ticker !== 'EUR' && (
+              <AggregatorLinkCard
+                key={`agg-${holding.ticker}`}
+                symbol={holding.ticker}
+                status={holding.assetStatus}
+                coingeckoId={holding.coingeckoId}
+                open={open}
+              />
+            )}
+          </>
         )}
       </DialogContent>
     </Dialog>

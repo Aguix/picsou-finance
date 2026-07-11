@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Coins, KeyRound, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Coins, KeyRound, ListChecks, Loader2, Plus, Trash2 } from 'lucide-react'
+import { AssetRegistryModal } from '@/components/shared/AssetRegistryModal'
 import {
   Card,
   CardContent,
@@ -24,15 +25,24 @@ import type { AggregatorView, AggregatorSessionView } from '@/features/admin/api
 export function AggregatorsSection() {
   const { t } = useTranslation()
   const { data, isLoading } = useAggregators()
+  const [showRegistry, setShowRegistry] = useState(false)
 
   return (
     <Card className="rounded-4xl bg-card">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <Coins className="size-5 text-muted-foreground" />
-          {t('admin.aggregators.title')}
-        </CardTitle>
-        <CardDescription>{t('admin.aggregators.description')}</CardDescription>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Coins className="size-5 text-muted-foreground" />
+              {t('admin.aggregators.title')}
+            </CardTitle>
+            <CardDescription>{t('admin.aggregators.description')}</CardDescription>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => setShowRegistry(true)}>
+            <ListChecks className="mr-1 size-4" />
+            {t('assets.registry.button')}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {isLoading && <Loader2 className="size-5 animate-spin text-muted-foreground" />}
@@ -40,6 +50,7 @@ export function AggregatorsSection() {
           <AggregatorRow key={aggregator.key} aggregator={aggregator} />
         ))}
       </CardContent>
+      <AssetRegistryModal open={showRegistry} onOpenChange={setShowRegistry} />
     </Card>
   )
 }

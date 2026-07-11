@@ -5,6 +5,7 @@ import { useAccounts, useUpdateAccount, useDeleteAccount, useUpdateDebtMetadata 
 import { useHistory } from '@/features/history/hooks'
 import { AccountForm } from '@/components/shared/AccountForm'
 import { AddAccountModal } from '@/components/shared/AddAccountModal'
+import { AssetRegistryModal } from '@/components/shared/AssetRegistryModal'
 import { AccountCard } from '@/components/shared/AccountCard'
 import { AccountsStackedChart } from '@/components/shared/AccountsStackedChart'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
@@ -14,7 +15,7 @@ import { PageHeader } from '@/components/shared/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Wallet, Pencil, Trash2, TrendingUp, TrendingDown } from 'lucide-react'
+import { Plus, Wallet, Pencil, Trash2, TrendingUp, TrendingDown, ListChecks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Account, AccountRequest, AccountType } from '@/types/api'
 
@@ -85,6 +86,7 @@ export function AccountsPage() {
   const deleteAccount = useDeleteAccount()
 
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showRegistry, setShowRegistry] = useState(false)
   const [showEditForm, setShowEditForm] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [deleteId, setDeleteId] = useState<number | null>(null)
@@ -285,10 +287,16 @@ export function AccountsPage() {
       <PageHeader
         title={t('accounts.title')}
         actions={
-          <Button onClick={handleOpenCreate} size="sm">
-            <Plus className="size-4" />
-            {t('accounts.addAccount')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setShowRegistry(true)} size="sm" variant="outline">
+              <ListChecks className="size-4" />
+              {t('assets.registry.button')}
+            </Button>
+            <Button onClick={handleOpenCreate} size="sm">
+              <Plus className="size-4" />
+              {t('accounts.addAccount')}
+            </Button>
+          </div>
         }
       />
 
@@ -406,6 +414,8 @@ export function AccountsPage() {
         open={showCreateModal}
         onOpenChange={setShowCreateModal}
       />
+
+      <AssetRegistryModal open={showRegistry} onOpenChange={setShowRegistry} />
 
       <AccountForm
         open={showEditForm}

@@ -2,8 +2,8 @@
   "assets": {
     "status": {
       "pending": "À résoudre",
-      "auto": "Auto",
-      "user": "Lié",
+      "auto": "À confirmer",
+      "user": "Confirmé",
       "worthless": "Sans valeur"
     },
     "link": {
@@ -14,13 +14,26 @@
       "resolve": "Lier une pièce",
       "edit": "Modifier",
       "searching": "Recherche sur CoinGecko…",
-      "pickCoin": "Choisir la pièce correspondante",
-      "noCandidates": "Aucune correspondance CoinGecko pour ce symbole",
+      "coinLink": "Lien CoinGecko",
+      "linkHint": "Collez l'URL de la page CoinGecko de la pièce, ou choisissez une suggestion ci-dessous.",
+      "suggestions": "Suggestions",
       "optionWorthless": "Marquer sans valeur (0)",
-      "pasteLink": "Ou coller un lien CoinGecko",
-      "pasteHint": "Utilisez l'URL de la page CoinGecko de la pièce si la bonne n'est pas listée ci-dessus.",
       "forget": "Oublier le lien",
       "error": "Impossible d'appliquer le lien — vérifiez l'URL et réessayez."
+    },
+    "registry": {
+      "button": "Résolutions d'actifs",
+      "title": "Résolutions d'actifs",
+      "subtitle": "Chaque actif suivi et l'agrégateur qui le valorise. Confirmez une résolution automatique ou corrigez un lien.",
+      "empty": "Aucun actif dans le registre pour l'instant.",
+      "colSymbol": "Symbole",
+      "colName": "Nom",
+      "colType": "Type",
+      "colValue": "Valeur",
+      "colStatus": "Statut",
+      "colActions": "Actions",
+      "confirm": "Confirmer",
+      "edit": "Modifier"
     }
   },
   "common": {

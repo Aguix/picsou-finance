@@ -2,6 +2,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { assetsApi } from './api'
 import type { AssetMappingRequest } from '@/types/api'
 
+/** The whole asset registry, for the management table. */
+export function useAssets(enabled = true) {
+  return useQuery({
+    queryKey: ['assets', 'list'],
+    queryFn: assetsApi.list,
+    enabled,
+    staleTime: 60_000,
+  })
+}
+
 /**
  * CoinGecko candidates for a symbol (standing mapping editor). Lazy — only fetched when `enabled`,
  * so opening a holding detail doesn't fire a CoinGecko `/search` until the operator actually edits
@@ -24,7 +34,7 @@ export function useAssetCandidates(symbol: string | null, enabled: boolean) {
 function invalidateAfterMapping(queryClient: ReturnType<typeof useQueryClient>, symbol: string) {
   queryClient.invalidateQueries({ queryKey: ['accounts'] })
   queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-  queryClient.invalidateQueries({ queryKey: ['assets', symbol] })
+  queryClient.invalidateQueries({ queryKey: ['assets'] })   // registry list + per-symbol candidates
   queryClient.invalidateQueries({ queryKey: ['prices', symbol] })
 }
 

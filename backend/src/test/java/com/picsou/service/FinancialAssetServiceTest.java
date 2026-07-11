@@ -2,6 +2,7 @@ package com.picsou.service;
 
 import com.picsou.adapter.price.CoinGeckoPriceProvider;
 import com.picsou.adapter.price.CoinGeckoPriceProvider.CoinCandidate;
+import com.picsou.model.AccountHolding;
 import com.picsou.model.AssetStatus;
 import com.picsou.model.AssetType;
 import com.picsou.model.FinancialAsset;
@@ -24,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -47,6 +49,52 @@ class FinancialAssetServiceTest {
 
     private void expectSaveEcho() {
         when(repository.save(any(FinancialAsset.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    @Test
+    void clearMapping_revertsToPendingAndPurgesHistoryKeepingTheRow() {
+        FinancialAsset mapped = FinancialAsset.builder()
+            .symbol("BTC").coingeckoId("bitcoin").name("Bitcoin")
+            .type(AssetType.CRYPTO).status(AssetStatus.USER).build();
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.of(mapped));
+        expectSaveEcho();
+
+        FinancialAsset result = service.clearMapping("btc");
+
+        assertThat(result.getStatus()).isEqualTo(AssetStatus.PENDING);
+        assertThat(result.getCoingeckoId()).isNull();
+        assertThat(result.getName()).isNull();
+        verify(priceSnapshotRepository).deleteByTicker("BTC");
+        verify(priceService).evictFromCache("BTC");
+        verify(repository, never()).delete(any());
+    }
+
+    @Test
+    void delete_refusesWhenSymbolIsStillHeld() {
+        FinancialAsset asset = FinancialAsset.builder().symbol("BTC").coingeckoId("bitcoin").build();
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.of(asset));
+        when(accountHoldingRepository.findByTickerIgnoreCase("BTC"))
+            .thenReturn(List.of(mock(AccountHolding.class)));
+
+        assertThatThrownBy(() -> service.delete("btc"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("still held");
+
+        verify(repository, never()).delete(any());
+        verify(priceSnapshotRepository, never()).deleteByTicker(anyString());
+    }
+
+    @Test
+    void delete_removesOrphanAssetAndPurgesHistory() {
+        FinancialAsset asset = FinancialAsset.builder().symbol("BTC").coingeckoId("bitcoin").build();
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.of(asset));
+        when(accountHoldingRepository.findByTickerIgnoreCase("BTC")).thenReturn(List.of());
+
+        service.delete("btc");
+
+        verify(repository).delete(asset);
+        verify(priceSnapshotRepository).deleteByTicker("BTC");
+        verify(priceService).evictFromCache("BTC");
     }
 
     @Test

@@ -13,8 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 
@@ -29,7 +27,8 @@ import static org.mockito.Mockito.when;
  * Pure-Mockito controller test (no Spring context) — mirrors {@code AccessKeyControllerTest}. Pins
  * the standing mapping contract: candidates flow through unchanged even for a settled coin, MAP with
  * a link vs. a picked id routes to the right service call, WORTHLESS marks worthless, an unknown
- * action is a 400-worthy {@link IllegalArgumentException}, and DELETE forgets + returns 204.
+ * action is a 400-worthy {@link IllegalArgumentException}, and DELETE clears the mapping (reverts to
+ * PENDING) without deleting the row.
  */
 @ExtendWith(MockitoExtension.class)
 class AssetControllerTest {
@@ -44,6 +43,19 @@ class AssetControllerTest {
         return FinancialAsset.builder()
             .symbol(symbol).name("Bitcoin").type(AssetType.CRYPTO)
             .status(status).coingeckoId(coingeckoId).build();
+    }
+
+    @Test
+    void list_mapsWholeRegistry() {
+        when(assetService.listAll()).thenReturn(List.of(
+            asset("BTC", AssetStatus.USER, "bitcoin"),
+            asset("ETH", AssetStatus.AUTO, "ethereum")));
+
+        List<AssetResponse> res = controller().list();
+
+        assertThat(res).extracting(AssetResponse::symbol).containsExactly("BTC", "ETH");
+        assertThat(res).extracting(AssetResponse::coingeckoId).containsExactly("bitcoin", "ethereum");
+        assertThat(res).extracting(AssetResponse::status).containsExactly("USER", "AUTO");
     }
 
     @Test
@@ -117,10 +129,14 @@ class AssetControllerTest {
     }
 
     @Test
-    void forget_delegatesAndReturns204() {
-        ResponseEntity<Void> res = controller().forget("BTC");
+    void forget_clearsMappingToPendingWithoutDeletingTheRow() {
+        when(assetService.clearMapping("BTC")).thenReturn(asset("BTC", AssetStatus.PENDING, null));
 
-        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
-        verify(assetService).delete("BTC");
+        AssetResponse res = controller().forget("BTC");
+
+        assertThat(res.status()).isEqualTo("PENDING");
+        assertThat(res.coingeckoId()).isNull();
+        verify(assetService).clearMapping("BTC");
+        verify(assetService, never()).delete(org.mockito.ArgumentMatchers.anyString());
     }
 }

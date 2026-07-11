@@ -300,15 +300,54 @@ public class FinancialAssetService {
     }
 
     /**
-     * Forget an asset entirely — used when a symbol was mapped by mistake. The symbol's price
-     * history is purged too (it was fetched under the now-disowned coin id); the symbol goes back
-     * to unregistered and the next import preview re-runs auto-resolution.
+     * Un-link a symbol — revert it to {@code PENDING} <b>keeping the registry row</b>, so a holding's
+     * {@code account_holding.asset_id} FK stays valid. This is what the standing "forget the link"
+     * action does: the coin id (and the name it carried) is dropped, the symbol's price history is
+     * purged (it was fetched under the now-removed coin id) and the live cache evicted, and the next
+     * resolve/import re-runs auto-resolution. Contrast with {@link #delete}, which removes the row
+     * entirely and therefore fails for any symbol a holding still references (the common case).
+     */
+    @Transactional
+    public FinancialAsset clearMapping(String ticker) {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("Ticker is required.");
+        }
+        String upper = ticker.trim().toUpperCase();
+        FinancialAsset asset = assetRepository.findBySymbol(upper).orElseThrow(() ->
+            new IllegalArgumentException("No asset exists for symbol '" + upper + "'."));
+        asset.setCoingeckoId(null);
+        asset.setName(null);
+        asset.setStatus(AssetStatus.PENDING);
+        FinancialAsset saved = assetRepository.save(asset);
+
+        priceSnapshotRepository.deleteByTicker(upper);
+        priceService.evictFromCache(upper);
+        log.info("Cleared mapping for {} — reverted to PENDING and purged its price history", upper);
+        return saved;
+    }
+
+    /**
+     * Forget an asset entirely — remove the registry row. Only safe for an <b>orphan</b> symbol (no
+     * {@code account_holding} references it), so this is <em>not</em> what the standing "forget the
+     * link" button calls — that uses {@link #clearMapping}. The symbol's price history is purged too
+     * (it was fetched under the now-disowned coin id); the symbol goes back to unregistered and the
+     * next import preview re-runs auto-resolution.
      */
     @Transactional
     public void delete(String ticker) {
         String upper = ticker.trim().toUpperCase();
         FinancialAsset asset = assetRepository.findBySymbol(upper).orElseThrow(() ->
             new IllegalArgumentException("No asset exists for symbol '" + upper + "'."));
+
+        // The account_holding.asset_id FK has no cascade, so deleting a held asset would fail at the
+        // DB with a raw DataIntegrityViolation (→ generic 500). Guard it up front with a clear 400:
+        // a held symbol must be un-linked ({@link #clearMapping}), not removed.
+        int held = accountHoldingRepository.findByTickerIgnoreCase(upper).size();
+        if (held > 0) {
+            throw new IllegalArgumentException("Asset '" + upper + "' is still held by " + held
+                + " holding(s) — clear its mapping instead of deleting it.");
+        }
+
         assetRepository.delete(asset);
         priceSnapshotRepository.deleteByTicker(upper);
         priceService.evictFromCache(upper);

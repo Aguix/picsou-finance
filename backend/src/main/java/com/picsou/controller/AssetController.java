@@ -7,7 +7,6 @@ import com.picsou.service.FinancialAssetService;
 import com.picsou.service.FinancialAssetService.AssetResolutionPreview;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -15,6 +14,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * Standing mapping/verification of the {@code financial_asset} registry — the always-available
@@ -33,6 +34,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class AssetController {
 
     private final FinancialAssetService assetService;
+
+    /**
+     * The whole {@code financial_asset} registry, for the standing management table (one row per
+     * asset, one column per aggregator). Any authenticated member may read it; confirming/correcting
+     * a row is the admin-only {@link #map}/{@link #forget}.
+     */
+    @GetMapping
+    public List<AssetResponse> list() {
+        return assetService.listAll().stream().map(AssetResponse::from).toList();
+    }
 
     /**
      * CoinGecko candidates for a symbol, plus its current registry status and the market-cap
@@ -71,12 +82,13 @@ public class AssetController {
     }
 
     /**
-     * Forget a symbol's mapping entirely — back to unregistered, price history purged. The next
-     * resolve (import preview or {@link #candidates}) re-runs auto-resolution.
+     * Forget a symbol's <b>link</b> — clear the mapping and revert it to {@code PENDING}, keeping the
+     * registry row so a holding's {@code asset_id} FK stays valid (a full row delete would fail for a
+     * held symbol). Price history is purged; the next resolve (import preview or {@link #candidates})
+     * re-runs auto-resolution. Returns the reverted asset.
      */
     @DeleteMapping("/{symbol}")
-    public ResponseEntity<Void> forget(@PathVariable String symbol) {
-        assetService.delete(symbol);
-        return ResponseEntity.noContent().build();
+    public AssetResponse forget(@PathVariable String symbol) {
+        return AssetResponse.from(assetService.clearMapping(symbol));
     }
 }

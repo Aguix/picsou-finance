@@ -2,8 +2,8 @@
   "assets": {
     "status": {
       "pending": "Unresolved",
-      "auto": "Auto",
-      "user": "Linked",
+      "auto": "To confirm",
+      "user": "Confirmed",
       "worthless": "Worthless"
     },
     "link": {
@@ -14,13 +14,26 @@
       "resolve": "Link a coin",
       "edit": "Edit",
       "searching": "Searching CoinGecko…",
-      "pickCoin": "Pick the matching coin",
-      "noCandidates": "No CoinGecko match for this symbol",
+      "coinLink": "CoinGecko link",
+      "linkHint": "Paste the coin's CoinGecko page URL, or pick a suggestion below.",
+      "suggestions": "Suggestions",
       "optionWorthless": "Mark worthless (0)",
-      "pasteLink": "Or paste a CoinGecko link",
-      "pasteHint": "Use the coin's CoinGecko page URL when the right coin isn't listed above.",
       "forget": "Forget mapping",
       "error": "Could not apply the mapping — check the link and try again."
+    },
+    "registry": {
+      "button": "Asset mappings",
+      "title": "Asset mappings",
+      "subtitle": "Every tracked asset and the aggregator it is priced from. Confirm an automatic guess or correct a mapping.",
+      "empty": "No assets in the registry yet.",
+      "colSymbol": "Symbol",
+      "colName": "Name",
+      "colType": "Type",
+      "colValue": "Value",
+      "colStatus": "Status",
+      "colActions": "Actions",
+      "confirm": "Confirm",
+      "edit": "Edit"
     }
   },
   "common": {

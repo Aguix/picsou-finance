@@ -244,6 +244,17 @@ for (const [symbol, data] of Object.entries(demoAssetCandidates)) {
   handlers.set(key('DELETE', `/assets/${symbol}`), () => ({}))
 }
 
+// Asset registry table (management modal) — the whole financial_asset registry, one row per asset.
+handlers.set(key('GET', '/assets'), () => ([
+  { symbol: 'BTC', name: 'Bitcoin', type: 'CRYPTO', status: 'USER', coingeckoId: 'bitcoin', yahooSymbol: null, lastEurValue: 84500, priceSyncedAt: new Date().toISOString() },
+  { symbol: 'ETH', name: 'Ethereum', type: 'CRYPTO', status: 'AUTO', coingeckoId: 'ethereum', yahooSymbol: null, lastEurValue: 2100, priceSyncedAt: new Date().toISOString() },
+  // Unlinked crypto that still carries a (spurious Yahoo-fallback) value — the table hides it since there's no CoinGecko id.
+  { symbol: 'SOL', name: 'Solana', type: 'CRYPTO', status: 'PENDING', coingeckoId: null, yahooSymbol: null, lastEurValue: 148, priceSyncedAt: new Date().toISOString() },
+  { symbol: 'AAPL', name: 'Apple Inc.', type: 'STOCK', status: 'AUTO', coingeckoId: null, yahooSymbol: 'AAPL', lastEurValue: 182.5, priceSyncedAt: new Date().toISOString() },
+  { symbol: 'IWDA', name: 'iShares Core MSCI World', type: 'ETF', status: 'AUTO', coingeckoId: null, yahooSymbol: 'IWDA.AS', lastEurValue: 85, priceSyncedAt: new Date().toISOString() },
+  { symbol: 'LUNC', name: null, type: 'CRYPTO', status: 'WORTHLESS', coingeckoId: null, yahooSymbol: null, lastEurValue: 0, priceSyncedAt: null },
+]))
+
 // Crypto exchange
 handlers.set(key('GET', '/crypto/exchange/status'), () => mockExchangeStatuses)
 
