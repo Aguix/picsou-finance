@@ -27,8 +27,7 @@
     "yes": "Yes",
     "no": "No",
     "today": "Today",
-    "currency": "EUR",
-    "locale": "en-US"
+    "currency": "EUR"
   },
   "nav": {
     "dashboard": "Dashboard",
