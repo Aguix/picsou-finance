@@ -1,4 +1,4 @@
--- V40__fix_negative_loan_balances.sql
+-- V52__fix_negative_loan_balances.sql
 -- Finary API sync stored loan balances negative (fixed in code at the same
 -- commit). Repo convention: LOAN balances are stored positive and negated at
 -- aggregation. Flip corrupted rows and their snapshots.

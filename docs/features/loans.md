@@ -17,7 +17,7 @@ and negated only at aggregation time:
 - Negation sites: `DashboardService` and `HistoryService` (inline LOAN branches, kept until
   plan 005), `FamilyViewService` and `GoalService` (via `signedLiveBalanceEur`).
 - The Finary API sync (`FinaryApiSyncService.toLoanAccountDto`) stores the outstanding amount
-  positive. It briefly stored it negative — migration `V40__fix_negative_loan_balances.sql`
+  positive. It briefly stored it negative — migration `V52__fix_negative_loan_balances.sql`
   repaired the corrupted rows and snapshots (existing users saw their net worth *drop to the
   correct value*: the data was wrong before, not after).
 
