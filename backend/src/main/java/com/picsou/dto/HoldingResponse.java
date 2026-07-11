@@ -13,5 +13,9 @@ public record HoldingResponse(
     BigDecimal costBasisEur,
     BigDecimal pnlEur,
     BigDecimal pnlPercent,
-    Instant priceUpdatedAt       // when the price was last fetched (null if unknown)
+    Instant priceUpdatedAt,      // when the price was last fetched (null if unknown)
+    String assetType,            // registry AssetType of the underlying asset (CRYPTO, STOCK, …)
+    String assetStatus,          // registry AssetStatus: PENDING/AUTO/USER/WORTHLESS — drives the
+                                 // resolution badge + aggregator-link editor in the holding detail
+    String coingeckoId           // linked CoinGecko id, or null when unresolved/worthless
 ) {}

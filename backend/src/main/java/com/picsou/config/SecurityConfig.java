@@ -67,6 +67,11 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/auth/activate/*").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                // Asset mappings are a global, family-shared registry: any member may read the
+                // resolution state / candidates (GET), but changing or forgetting a mapping is
+                // admin-only, since it re-values everyone's holdings.
+                .requestMatchers(HttpMethod.PUT, "/api/assets/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.DELETE, "/api/assets/**").hasRole("ADMIN")
                 .requestMatchers("/mcp/**").authenticated()
                 .anyRequest().authenticated()
             )

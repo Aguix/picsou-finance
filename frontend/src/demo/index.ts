@@ -209,6 +209,41 @@ handlers.set(key('GET', '/sync/institutions'), () => [
   { id: 'BOURSOBANK', name: 'BoursoBank', bic: 'BNPAFRPP', logoUrl: null, country: 'FR' },
 ])
 
+// Asset mapping (standing crypto verification — D2). Candidates per demo crypto symbol, plus the
+// map/forget mutations (echoed back so the holding-detail editor reflects the change immediately).
+const demoAssetCandidates: Record<string, { currentStatus: string | null; suggestedId: string | null; candidates: { coingeckoId: string; name: string; symbol: string; marketCapRank: number | null }[] }> = {
+  BTC: { currentStatus: 'USER', suggestedId: 'bitcoin', candidates: [
+    { coingeckoId: 'bitcoin', name: 'Bitcoin', symbol: 'btc', marketCapRank: 1 },
+    { coingeckoId: 'bitcoin-bep2', name: 'Bitcoin BEP2', symbol: 'btc', marketCapRank: 1200 },
+  ] },
+  ETH: { currentStatus: 'AUTO', suggestedId: 'ethereum', candidates: [
+    { coingeckoId: 'ethereum', name: 'Ethereum', symbol: 'eth', marketCapRank: 2 },
+  ] },
+  SOL: { currentStatus: 'PENDING', suggestedId: 'solana', candidates: [
+    { coingeckoId: 'solana', name: 'Solana', symbol: 'sol', marketCapRank: 5 },
+    { coingeckoId: 'wrapped-solana', name: 'Wrapped Solana', symbol: 'sol', marketCapRank: 340 },
+  ] },
+}
+for (const [symbol, data] of Object.entries(demoAssetCandidates)) {
+  handlers.set(key('GET', `/assets/${symbol}/candidates`), () => ({ symbol, ...data }))
+  handlers.set(key('PUT', `/assets/${symbol}/mapping`), (config) => {
+    const body = JSON.parse(config.data || '{}')
+    const worthless = body.action === 'WORTHLESS'
+    const cand = data.candidates.find((c) => c.coingeckoId === body.coingeckoId)
+    return {
+      symbol,
+      name: worthless ? null : (cand?.name ?? data.candidates[0]?.name ?? null),
+      type: 'CRYPTO',
+      status: worthless ? 'WORTHLESS' : 'USER',
+      coingeckoId: worthless ? null : (body.coingeckoId ?? data.suggestedId ?? null),
+      yahooSymbol: null,
+      lastEurValue: null,
+      priceSyncedAt: null,
+    }
+  })
+  handlers.set(key('DELETE', `/assets/${symbol}`), () => ({}))
+}
+
 // Crypto exchange
 handlers.set(key('GET', '/crypto/exchange/status'), () => mockExchangeStatuses)
 

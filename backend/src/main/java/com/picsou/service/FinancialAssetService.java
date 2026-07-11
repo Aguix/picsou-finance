@@ -161,6 +161,33 @@ public class FinancialAssetService {
     }
 
     /**
+     * Candidate lookup for the <b>standing</b> mapping/verification UI (holding detail), as opposed to
+     * {@link #previewResolutions} which serves the import preview. Unlike that method this never skips a
+     * symbol: it returns the current registry status plus every CoinGecko candidate even for a coin
+     * already settled as {@code USER}/{@code WORTHLESS}, so the operator can re-verify or correct a
+     * standing mapping at any time. Nothing is persisted — the choice is applied via
+     * {@link #applyUserMapping}/{@link #setManualMapping}/{@link #markWorthless}. A search failure
+     * degrades to an empty candidate list.
+     */
+    @Transactional(readOnly = true)
+    public AssetResolutionPreview previewResolution(String ticker) {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("Ticker is required.");
+        }
+        String upper = ticker.trim().toUpperCase();
+        AssetStatus status = assetRepository.findBySymbol(upper)
+            .map(FinancialAsset::getStatus).orElse(null);
+        List<CoinCandidate> candidates;
+        try {
+            candidates = coinGecko.searchBySymbol(upper);
+        } catch (Exception e) {
+            log.warn("Candidate search failed for {}: {}", upper, e.getMessage());
+            candidates = List.of();
+        }
+        return new AssetResolutionPreview(upper, status, pickDominant(candidates), candidates);
+    }
+
+    /**
      * Best-effort bulk resolution; unresolved symbols stay {@code PENDING}. Returns the
      * (uppercase) symbols that could not be auto-resolved — the operator disambiguates those via
      * {@link #setManualMapping(String, String)}.

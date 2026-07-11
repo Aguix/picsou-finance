@@ -196,6 +196,12 @@ export interface HoldingResponse {
   pnlEur: number | null
   pnlPercent: number | null
   priceUpdatedAt: string | null
+  /** Registry AssetType of the underlying asset (CRYPTO, STOCK, ETF, UNKNOWN). */
+  assetType: string | null
+  /** Registry resolution status — drives the aggregator-link badge/editor. */
+  assetStatus: AssetStatus | null
+  /** Linked CoinGecko id, or null when unresolved/worthless. */
+  coingeckoId: string | null
 }
 
 // --- Security insight (asset type + ETF composition) ---
@@ -393,6 +399,35 @@ export interface ImportAssetMapping {
   symbol: string
   action: 'MAP' | 'WORTHLESS' | 'IGNORE'
   /** Required when `action === 'MAP'`. */
+  coingeckoId?: string
+  name?: string
+}
+
+/**
+ * Candidates for one symbol from the standing mapping UI (holding detail). Same shape as
+ * `ImportAssetChoice` — the backend `AssetCandidatesResponse` — but served for any symbol, even one
+ * already settled, so a mapping can be re-verified outside an import.
+ */
+export type AssetCandidatesResponse = ImportAssetChoice
+
+/** A `financial_asset` registry row, returned after applying a standing mapping. */
+export interface AssetResponse {
+  symbol: string
+  name: string | null
+  type: string | null
+  status: AssetStatus | null
+  coingeckoId: string | null
+  yahooSymbol: string | null
+  lastEurValue: number | null
+  priceSyncedAt: string | null
+}
+
+/** The operator's standing mapping decision for one symbol (holding detail). */
+export interface AssetMappingRequest {
+  action: 'MAP' | 'WORTHLESS'
+  /** A CoinGecko coin-page URL; takes precedence over `coingeckoId` for MAP. */
+  coingeckoUrl?: string
+  /** A known CoinGecko coin id (a picked candidate); used for MAP when no URL. */
   coingeckoId?: string
   name?: string
 }

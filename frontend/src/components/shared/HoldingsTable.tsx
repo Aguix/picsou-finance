@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import type { HoldingResponse } from '@/types/api'
 import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
 import { PriceFreshnessDot } from '@/components/shared/PriceFreshnessDot'
+import { AssetStatusBadge } from '@/components/shared/AssetStatusBadge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -50,7 +51,12 @@ export function HoldingsTable({ holdings, onEdit, onDelete }: HoldingsTableProps
             {holdings.map((h) => (
               <TableRow key={h.ticker}>
                 <TableCell className="font-mono font-medium">{h.ticker}</TableCell>
-                <TableCell>{h.name ?? h.ticker}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <span className="truncate">{h.name ?? h.ticker}</span>
+                    {h.assetType === 'CRYPTO' && <AssetStatusBadge status={h.assetStatus} />}
+                  </div>
+                </TableCell>
                 <TableCell className="text-right">{h.quantity}</TableCell>
                 <TableCell className="text-right">
                   {h.averageBuyIn ? <CurrencyDisplay value={h.averageBuyIn} className="text-sm" /> : '\u2014'}

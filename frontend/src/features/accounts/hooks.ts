@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { accountsApi } from './api'
-import type { AccountRequest, Account, DebtRequest, HoldingResponse, RealEstateMetadataRequest, TransactionRequest } from '@/types/api'
+import type { AccountRequest, Account, AssetStatus, DebtRequest, HoldingResponse, RealEstateMetadataRequest, TransactionRequest } from '@/types/api'
 import { QUERY_STALE_TIMES } from '@/lib/constants'
 
 export interface HoldingWithAccount extends HoldingResponse {
@@ -23,6 +23,9 @@ export interface PortfolioLine {
   pnlEur: number | null
   pnlPercent: number | null
   priceUpdatedAt: string | null
+  assetType: string | null
+  assetStatus: AssetStatus | null
+  coingeckoId: string | null
 }
 
 const HOLDING_ACCOUNT_TYPES: Account['type'][] = ['PEA', 'COMPTE_TITRES', 'CRYPTO']
@@ -69,6 +72,9 @@ export function usePortfolio() {
               pnlEur: h.pnlEur,
               pnlPercent: h.pnlPercent,
               priceUpdatedAt: h.priceUpdatedAt,
+              assetType: h.assetType,
+              assetStatus: h.assetStatus,
+              coingeckoId: h.coingeckoId,
             }))
           } catch {
             return []
@@ -122,6 +128,9 @@ export function usePortfolio() {
           pnlEur: null,
           pnlPercent: null,
           priceUpdatedAt: null,
+          assetType: null,
+          assetStatus: null,
+          coingeckoId: null,
         })
       }
 

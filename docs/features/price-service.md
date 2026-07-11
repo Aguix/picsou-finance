@@ -1,6 +1,6 @@
 # Feature: Price Service
 
-> Last updated: 2026-07-10
+> Last updated: 2026-07-11
 
 ## Context
 
@@ -44,6 +44,18 @@ Correcting a mapping to a *different* coin purges the ticker's `price_snapshot` 
 
 The crypto CSV import confirms this resolution *before* it commits. `previewResolutions` resolves each imported coin **provisionally — persisting nothing** — and returns, for every coin not already settled (`USER`/`WORTHLESS`), the best market-cap guess plus **all** CoinGecko candidates that share the symbol (the ones `resolveCrypto` discards after picking). The preview shows one pre-filled picker per coin; the operator confirms, picks another candidate, marks it worthless, or skips it. The confirmed choices ride the import request and `execute()` applies them as `USER` (via `applyUserMapping`, no extra CoinGecko round-trip) **before** the price backfill — so prices are fetched under the right coin id from the first import. This is what stops a silent `AUTO` mis-match (e.g. a `META` ticker pinned to the wrong dominant coin) from being frozen in the registry unnoticed; skipped coins import unpriced and are re-presented next time.
 
+### Standing mapping / verification (holding detail)
+
+The import preview only surfaces a coin *while* importing. The **standing** counterpart is per-holding and always available: the crypto holding detail (`HoldingDetailModal`) carries an **Aggregator link** card (`AggregatorLinkCard`) that shows the symbol's current resolution status and lets the operator verify or correct it any time — pick a candidate, paste a CoinGecko coin link, mark it worthless, or forget the mapping. The account-detail holdings table badges each crypto row with its status (`AssetStatusBadge`), so an unresolved (`PENDING`) coin is visible at a glance without opening anything.
+
+This is exposed by `AssetController` under `/api/assets`. The registry is **not** member-scoped — `financial_asset` is a global, member-agnostic catalogue (one row per symbol, shared across the family), unlike the account/holding endpoints. Reads are open to any authenticated member; **writes are admin-only** (`SecurityConfig` gates `PUT`/`DELETE /api/assets/**` to `ROLE_ADMIN`), because changing or forgetting a mapping re-values *everyone's* holdings — the frozen permission rule (any member may confirm a `PENDING` from their own import; changing a settled mapping is admin-only). The card hides its editor for non-admins accordingly.
+
+- `GET /api/assets/{symbol}/candidates` (any member) → the current status, the market-cap suggestion, and every CoinGecko candidate (`previewResolution` — the single-symbol sibling of `previewResolutions` that, unlike it, returns candidates even for a coin already settled, so a standing mapping can always be re-verified). Fetched **lazily** by the card (only once the operator opens the editor) to respect the CoinGecko rate limit.
+- `PUT /api/assets/{symbol}/mapping` (admin) → apply a mapping: a pasted link (`setManualMapping`) or a picked candidate id (`applyUserMapping`) lands `USER`; `action=WORTHLESS` calls `markWorthless`.
+- `DELETE /api/assets/{symbol}` (admin) → `delete` (forget).
+
+These are the *same* `FinancialAssetService` entry points the import path calls, so a mapping made from a holding and one confirmed during an import are identical (both land `USER`/`WORTHLESS`, and re-pinning to a different coin purges + refetches history exactly as above). `HoldingResponse` now carries `assetType`/`assetStatus`/`coingeckoId` (read straight off the already-loaded asset), so the badge and the card render without an extra round-trip. Kept crypto-only for now — the resolution *engine* is still CoinGecko-bound; generalising it (Yahoo-symbol resolution for stocks/ETFs, per-type UI) is later work.
+
 V51 seeds the registry: the 20 formerly-hardcoded crypto mappings, plus an identity `yahoo_symbol` for every other ticker already present in accounts/holdings — existing positions keep pricing without any user action.
 
 ### Caching
@@ -70,7 +82,10 @@ Every successful fetch also persists `financial_asset.last_eur_value`/`price_syn
 
 - `service/PriceService.java` -- Caching, conversion, gap-aware backfill, worthless/EUR handling (routing delegated to `PriceRouter`)
 - `service/PriceRouter.java` -- Capability-based routing over the ordered `PriceProviderPort` beans
-- `service/FinancialAssetService.java` -- Dynamic symbol resolution, manual mapping, worthless pinning
+- `service/FinancialAssetService.java` -- Dynamic symbol resolution, manual mapping, worthless pinning, `previewResolution` (standing candidates)
+- `controller/AssetController.java` -- Standing mapping/verification endpoints (`/api/assets`): candidates, apply mapping, forget
+- `dto/AssetResponse.java` / `AssetCandidatesResponse.java` / `AssetMappingRequest.java` -- Standing-mapping DTOs
+- `components/shared/AggregatorLinkCard.tsx` / `AssetStatusBadge.tsx` + `features/assets/` -- Holding-detail mapping card, status badge, and its query hooks (frontend)
 - `model/FinancialAsset.java` / `repository/FinancialAssetRepository.java` -- The registry (V51)
 - `model/Aggregator.java` / `model/AggregatorSession.java` -- Aggregator identity + encrypted API credentials (V54)
 - `service/AggregatorService.java` -- Credential CRUD, encrypt-on-write / decrypt-on-read, `enabledCredentials()` for the adapters
@@ -136,7 +151,7 @@ GET /search?query=tao --> single/dominant match? --> persist AUTO
 - **Yahoo Finance is unofficial**: The Yahoo Finance API is undocumented and can break or get rate-limited without notice. FX conversion is now applied inside `YahooFinancePriceProvider` using the `{CURRENCY}EUR=X` chart endpoint; `GBp`/`GBX` is treated as `GBP / 100`. If the FX call fails the ticker is omitted from the result map (no fabricated rate) — downstream consumers must tolerate a missing key.
 - **CoinGecko rate limits**: the anonymous tier 429s within ~5-6 requests (Cloudflare serves `Retry-After: 60`). The circuit breaker is now **per session (key)**: a 429 pauses only the key that hit it, so the next request rolls over to another enabled key; all calls stop only once every key is paused. Adding one or more Demo keys from the admin panel (**Administration → Price aggregators**) raises the limit to ~100 req/min per key and is the real fix.
 - **CoinGecko free history is age-limited**: `market_chart/range` 401s when `from` is older than ~365 days, so historical requests are clamped to 364 days (`MAX_FREE_HISTORY_DAYS`). Older history would need a paid Pro key.
-- **Unresolved symbols price as before, not better**: a `PENDING` product has no aggregator ref, so `canPrice` is false on CoinGecko and the router falls through to Yahoo with the raw symbol (usually a miss → unpriced holding). That is the pre-V51 behaviour for unknown coins; the fix is linking the coin in the management UI.
+- **Unresolved symbols price as before, not better**: a `PENDING` product has no aggregator ref, so `canPrice` is false on CoinGecko and the router falls through to Yahoo with the raw symbol (usually a miss → unpriced holding). That is the pre-V51 behaviour for unknown coins; the fix is linking the coin — during a crypto import, or any time afterwards from the holding detail's **Aggregator link** card (a `PENDING`-badged row in the holdings table flags which coins need it).
 - **Cache is in-memory only**: prices are lost on restart (the scheduler repopulates within one hour). `financial_asset.last_eur_value` now persists the last known price, but nothing reads it back yet — that lands with the multi-aggregator fallback (step C).
 - **`toEur()` returns raw balance on failure**: If no price is available for a symbol, `toEur()` logs a warning and returns the unconverted balance. This can lead to incorrect dashboard values if a price provider is down.
 - **Historical/intraday series use today's FX**: `getHistoricalPricesEur` and `getIntradayPricesEur` fetch the FX rate once per call and apply it to every candle in the series. Per-day FX would multiply API calls ~250× for a one-year backfill with marginal accuracy gain — see [ADR 2026-05-19](../decisions/2026-05-19-yahoo-fx-conversion.md) for the trade-off.

@@ -403,9 +403,10 @@ public class AccountService {
             ? pnlEur.divide(costBasis, 4, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
             : null;
 
+        FinancialAsset asset = holding.getAsset();
         return new HoldingResponse(
             symbol,
-            holding.getAsset().getName(),
+            asset.getName(),
             quantity,
             averageBuyIn,
             currentPrice,
@@ -413,7 +414,10 @@ public class AccountService {
             costBasis,
             pnlEur,
             pnlPercent,
-            priceUpdatedAt
+            priceUpdatedAt,
+            asset.getType() != null ? asset.getType().name() : null,
+            asset.getStatus() != null ? asset.getStatus().name() : null,
+            asset.getCoingeckoId()
         );
     }
 }

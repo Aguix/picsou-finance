@@ -5,6 +5,7 @@ import { NetWorthChart } from '@/components/shared/NetWorthChart'
 import { EmptyChartState } from '@/components/shared/EmptyChartState'
 import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
 import { HoldingInsightSection } from '@/components/shared/HoldingInsightSection'
+import { AggregatorLinkCard } from '@/components/shared/AggregatorLinkCard'
 import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
@@ -215,6 +216,17 @@ export function HoldingDetailModal({ line, onClose }: HoldingDetailModalProps) {
 
               {/* Asset-type & ETF composition insight */}
               <HoldingInsightSection ticker={line.ticker} name={line.name} open={open} />
+
+              {/* Aggregator link — standing crypto mapping/verification (D2) */}
+              {line.accountType === 'CRYPTO' && line.ticker && line.ticker !== 'EUR' && (
+                <AggregatorLinkCard
+                  key={line.ticker}
+                  symbol={line.ticker}
+                  status={line.assetStatus}
+                  coingeckoId={line.coingeckoId}
+                  open={open}
+                />
+              )}
             </div>
           </>
         )}
