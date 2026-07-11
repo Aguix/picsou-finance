@@ -6,19 +6,18 @@
 -- skip-list in YahooFinancePriceProvider can be retired. The pricing layer still speaks in symbol
 -- strings — call-sites recover the symbol via the join (holding.asset.symbol).
 --
--- V51's Seed 2 already registered a financial_asset row for every ticker referenced by a holding
--- or an account EXCEPT EUR, Trade Republic's fake crypto ISINs (XF000…) and raw ISINs. Those
--- residual tickers are minted here on the fly as PENDING/UNKNOWN so no holding is left without an
--- asset (the FK is NOT NULL). A PENDING row carries no aggregator ref, so it stays unpriced until
--- resolved via the management UI / FinancialAssetService.resolveCrypto — exactly as before. The
--- runtime counterpart of this mint is FinancialAssetService.getOrCreate(symbol), called by the
+-- V51 seeds no rows, so this mint is the sole populator of the registry from pre-existing data:
+-- it registers a financial_asset row for EVERY ticker referenced by a holding, as PENDING/UNKNOWN,
+-- so no holding is left without an asset (the FK is NOT NULL). A PENDING row carries no aggregator
+-- ref, so it stays unpriced until resolved via the management UI / FinancialAssetService.resolveCrypto.
+-- The runtime counterpart of this mint is FinancialAssetService.getOrCreate(symbol), called by the
 -- holding write paths (TR/Bourso/wallet sync, HoldingComputeService, AccountService.upsertHolding).
 --
 -- `name` is a property of the asset (BTC is "Bitcoin" no matter which account holds it), not of
 -- the (account, asset) pairing, so it moves to financial_asset.name — one label shared by every
 -- holding of that symbol instead of a copy per account that could drift out of sync. Existing
 -- holding names (set by OpenFIGI on broker sync) backfill financial_asset.name wherever it's still
--- empty; CoinGecko's canonical crypto names from V51 Seed 1 are never overwritten.
+-- empty (the mint above leaves name NULL, so every migrated row is eligible).
 
 ALTER TABLE account_holding ADD COLUMN asset_id BIGINT;
 

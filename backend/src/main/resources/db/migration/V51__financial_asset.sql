@@ -30,44 +30,10 @@ CREATE TABLE financial_asset (
     CONSTRAINT uk_financial_asset_symbol UNIQUE (symbol)
 );
 
--- Seed 1: the crypto mappings formerly hardcoded in CoinGeckoPriceProvider, with CoinGecko's
--- canonical coin names. Status AUTO — resolved by code, not confirmed by a user.
-INSERT INTO financial_asset (symbol, name, type, status, coingecko_id) VALUES
-    ('BTC',   'Bitcoin',       'CRYPTO', 'AUTO', 'bitcoin'),
-    ('ETH',   'Ethereum',      'CRYPTO', 'AUTO', 'ethereum'),
-    ('SOL',   'Solana',        'CRYPTO', 'AUTO', 'solana'),
-    ('BNB',   'BNB',           'CRYPTO', 'AUTO', 'binancecoin'),
-    ('ADA',   'Cardano',       'CRYPTO', 'AUTO', 'cardano'),
-    ('XRP',   'XRP',           'CRYPTO', 'AUTO', 'ripple'),
-    ('DOGE',  'Dogecoin',      'CRYPTO', 'AUTO', 'dogecoin'),
-    ('DOT',   'Polkadot',      'CRYPTO', 'AUTO', 'polkadot'),
-    ('MATIC', 'Polygon',       'CRYPTO', 'AUTO', 'matic-network'),
-    ('AVAX',  'Avalanche',     'CRYPTO', 'AUTO', 'avalanche-2'),
-    ('LINK',  'Chainlink',     'CRYPTO', 'AUTO', 'chainlink'),
-    ('UNI',   'Uniswap',       'CRYPTO', 'AUTO', 'uniswap'),
-    ('ATOM',  'Cosmos Hub',    'CRYPTO', 'AUTO', 'cosmos'),
-    ('LTC',   'Litecoin',      'CRYPTO', 'AUTO', 'litecoin'),
-    ('NEAR',  'NEAR Protocol', 'CRYPTO', 'AUTO', 'near'),
-    ('ARB',   'Arbitrum',      'CRYPTO', 'AUTO', 'arbitrum'),
-    ('OP',    'Optimism',      'CRYPTO', 'AUTO', 'optimism'),
-    ('SHIB',  'Shiba Inu',     'CRYPTO', 'AUTO', 'shiba-inu'),
-    ('PEPE',  'Pepe',          'CRYPTO', 'AUTO', 'pepe'),
-    ('SUI',   'Sui',           'CRYPTO', 'AUTO', 'sui');
-
--- Seed 2: identity Yahoo mapping for every other ticker already referenced by an account or a
--- holding, so existing stock/ETF positions keep pricing exactly as before (the stored ticker
--- has always been the Yahoo symbol, used verbatim). Excluded: EUR (no conversion needed),
--- Trade Republic's fake crypto ISINs (XF000…, unresolvable), and raw ISINs (Yahoo rejects them).
-INSERT INTO financial_asset (symbol, type, status, yahoo_symbol)
-SELECT DISTINCT UPPER(TRIM(t.ticker)), 'UNKNOWN', 'AUTO', UPPER(TRIM(t.ticker))
-FROM (
-    SELECT ticker FROM account_holding
-    UNION
-    SELECT ticker FROM account
-) t
-WHERE t.ticker IS NOT NULL
-  AND TRIM(t.ticker) <> ''
-  AND UPPER(TRIM(t.ticker)) <> 'EUR'
-  AND UPPER(TRIM(t.ticker)) NOT LIKE 'XF000%'
-  AND UPPER(TRIM(t.ticker)) !~ '^[A-Z]{2}[A-Z0-9]{9}[A-Z0-9]$'
-  AND UPPER(TRIM(t.ticker)) NOT IN (SELECT symbol FROM financial_asset);
+-- No seed rows. The registry starts EMPTY and is built entirely from real data:
+--   • existing holdings are migrated into it by V52 (one row per held ticker, PENDING/UNKNOWN);
+--   • at runtime, holding write paths call FinancialAssetService.getOrCreate(symbol), and the
+--     crypto import/verification flow resolves each symbol to a CoinGecko id (AUTO/USER).
+-- A fresh install therefore boots with an empty registry that fills as accounts are synced —
+-- no hardcoded ticker→id list lives in the schema (that map used to be
+-- CoinGeckoPriceProvider.TICKER_TO_ID; it is gone, resolution is now dynamic).
