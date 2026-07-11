@@ -94,6 +94,12 @@ management:
   endpoint:
     health:
       show-details: never
+  info:
+    # Expose `info.*` properties (below) via /actuator/info. The env info
+    # contributor is disabled by default since Spring Boot 2.6, so without this
+    # the app.version block would never surface.
+    env:
+      enabled: true
 
 info:
   app:

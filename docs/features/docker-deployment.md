@@ -95,10 +95,11 @@ in Settings → About (for example both `1.0.13` and `v1.0.13` tags display
 Local source builds fall back to `frontend/package.json` for the frontend About
 screen. Backend runtime metadata (`/actuator/info` and the embedded MCP server
 version) uses `APP_VERSION` when it is set and otherwise falls back to `dev`.
-For a local release-style build, pass both values explicitly:
+A single `APP_VERSION` build arg feeds both the frontend and backend. For a
+local release-style build, pass it explicitly:
 
 ```bash
-APP_VERSION=1.0.13 docker build -f docker/Dockerfile --build-arg APP_VERSION=1.0.13 .
+docker build -f docker/Dockerfile --build-arg APP_VERSION=1.0.13 .
 ```
 
 ## Technical choices
