@@ -347,7 +347,7 @@ export interface Transaction {
   name: string | null
   quantity: number | null
   pricePerUnit: number | null
-  rewardKind: RewardKind | null
+  rewardKind?: RewardKind | null
 }
 
 export interface TransactionRequest {
