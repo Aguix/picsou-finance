@@ -68,6 +68,7 @@ code must not re-shape a control with a local `rounded-*` className.
 
 ## Links
 
+- ADR: `docs/decisions/2026-07-12-ui-controls-follow-shadcn-theme-radius.md`
 - Convention: `docs/conventions/frontend.md` (§ Controls, § Don'ts)
 - Charter: `docs/CODING_RULES.md`
 - Related feature: `docs/features/theme-persistence.md` (theme tokens, dark/light)
