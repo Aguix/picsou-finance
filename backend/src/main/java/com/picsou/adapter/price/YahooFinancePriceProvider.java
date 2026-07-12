@@ -1,6 +1,7 @@
 package com.picsou.adapter.price;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.picsou.model.FinancialAsset;
 import com.picsou.port.PriceProviderPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,7 +19,6 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * Fetches stock/ETF prices from Yahoo Finance (unofficial, no API key needed).
@@ -65,44 +65,47 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
     }
 
     /**
-     * Yahoo is the catch-all quote source: it accepts any ticker whose shape isn't a plain ISIN.
-     * Crypto is no longer skipped via a hardcoded list — the router only reaches Yahoo for a ticker
-     * CoinGecko couldn't price (no {@code coingecko_id} in the {@code financial_asset} registry).
+     * Yahoo is the catch-all quote source: it accepts any asset whose Yahoo symbol
+     * ({@code yahoo_symbol}, falling back to the internal symbol) isn't a plain ISIN. The router only
+     * reaches Yahoo for an asset CoinGecko couldn't price (no {@code coingecko_id}).
      */
     @Override
-    public boolean canPrice(String ticker) {
-        if (ticker == null || ticker.isBlank()) {
+    public boolean canPrice(FinancialAsset asset) {
+        String sym = yahooSymbol(asset);
+        if (sym == null || sym.isBlank()) {
             return false;
         }
-        String upper = ticker.toUpperCase();
+        String upper = sym.toUpperCase();
 
         // Don't price plain ISIN codes (12-character alphanumeric starting with a 2-letter country
         // code). ISIN format: AA########X (2 letters, 9 digits, 1 check digit).
         if (upper.length() == 12 && upper.matches("[A-Z]{2}[A-Z0-9]{9}[A-Z0-9]")) {
-            log.debug("Rejecting unsupported ISIN: {}", ticker);
+            log.debug("Rejecting unsupported ISIN: {}", sym);
             return false;
         }
 
         return true;
     }
 
+    /** The symbol Yahoo is queried with: the asset's {@code yahoo_symbol} when set, else its symbol. */
+    private static String yahooSymbol(FinancialAsset asset) {
+        return asset.getYahooSymbol() != null ? asset.getYahooSymbol() : asset.getSymbol();
+    }
+
     @Override
-    public Map<String, BigDecimal> getPricesEur(Set<String> tickers) {
-        Set<String> supported = tickers.stream()
-            .filter(this::canPrice)
-            .collect(Collectors.toSet());
-
-        if (supported.isEmpty()) return Map.of();
-
+    public Map<String, BigDecimal> getPricesEur(Collection<FinancialAsset> assets) {
         Map<String, BigDecimal> result = new HashMap<>();
 
-        // Yahoo Finance is fetched per-ticker (no batch endpoint for EUR conversion)
-        for (String ticker : supported) {
+        // Yahoo Finance is fetched per-ticker (no batch endpoint for EUR conversion). The result is
+        // keyed by the asset's internal symbol (what callers look prices up by); the request uses the
+        // Yahoo symbol.
+        for (FinancialAsset asset : assets) {
+            if (!canPrice(asset)) continue;
             try {
-                BigDecimal price = fetchSinglePrice(ticker);
-                if (price != null) result.put(ticker.toUpperCase(), price);
+                BigDecimal price = fetchSinglePrice(yahooSymbol(asset));
+                if (price != null) result.put(asset.getSymbol().toUpperCase(), price);
             } catch (Exception ex) {
-                log.warn("Yahoo Finance price fetch failed for {}: {}", ticker, ex.getMessage());
+                log.warn("Yahoo Finance price fetch failed for {}: {}", asset.getSymbol(), ex.getMessage());
             }
         }
 
@@ -257,7 +260,8 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
      * Uses interval=1h for intraday granularity.
      */
     @Override
-    public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(String ticker, LocalDateTime from, LocalDateTime to) {
+    public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(FinancialAsset asset, LocalDateTime from, LocalDateTime to) {
+        String ticker = yahooSymbol(asset);
         try {
             YahooResponse response = webClient.get()
                 .uri("/v8/finance/chart/{ticker}?range=1d&interval=1h", ticker)
@@ -317,7 +321,8 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
      * Returns a map of date -> priceEur.
      */
     @Override
-    public Map<LocalDate, BigDecimal> getHistoricalPricesEur(String ticker, LocalDate from, LocalDate to) {
+    public Map<LocalDate, BigDecimal> getHistoricalPricesEur(FinancialAsset asset, LocalDate from, LocalDate to) {
+        String ticker = yahooSymbol(asset);
         long days = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
         String range = days <= 7 ? "5d" : days <= 30 ? "1mo" : days <= 90 ? "3mo" : days <= 365 ? "1y" : "5y";
 

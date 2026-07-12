@@ -1,0 +1,349 @@
+<mxfile host="65bd71144e">
+    <diagram name="Cycle de vie d&#39;un asset" id="asset-lifecycle-diagram">
+        <mxGraphModel dx="509" dy="2207" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1900" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="nTitle" value="Cycle de vie d&#39;un asset — Picsou Finance&lt;br&gt;&lt;span style=&quot;font-size:12px;font-weight:normal&quot;&gt;Import CSV → résolution CoinGecko → mapping → schéma FK → fetch récurrent des prix → consommateurs&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=22;fontStyle=1;fontColor=#1a1a1a;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="-70" width="1400" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="nLegend" value="Légende — rectangle bleu = méthode/classe · losange jaune = décision opérateur · cylindre vert = table BDD · rectangle orange = déclencheur frontend (5 min) · trait plein = flux principal · trait pointillé = lecture/écriture indirecte" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=10;fontColor=#555555;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="-60" width="740" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="nH1" value="PHASE 1 — Import CSV : détection &amp; résolution d&#39;un asset inconnu" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="20" width="900" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="nH2" value="Schéma BDD — FK asset_id (migrations V55 / V56)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="20" width="400" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="nH3" value="Wallet Sync — déclencheur parallèle&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-style:italic;font-size:11px&quot;&gt;(source d&#39;assets inconnus, elle aussi)&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="20" width="400" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="nH4" value="PHASE 2 — Exécution de l&#39;import &amp; persistance" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="420" width="900" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="nH9" value="Mapping standalone (hors import CSV)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="800" width="400" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="nH5" value="PHASE 3 — Fetch récurrent des prix&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-style:italic;font-size:11px&quot;&gt;Deux déclencheurs distincts coexistent : cron backend (horaire) vs refetch frontend (5 min)&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="940" width="900" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="nH6" value="Adaptateurs de prix (PriceRouter)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="940" width="400" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="nH7" value="Persistance &amp; cache" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="1360" width="400" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="nH8" value="PHASE 4 — Consommateurs" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="1650" width="900" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="n1" value="&lt;b&gt;CryptoImportService.preview(file, memberId)&lt;/b&gt;&lt;br&gt;&lt;i&gt;Parse le CSV → ParsedCryptoTx, cache par fileToken&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="60" width="280" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="n2" value="&lt;b&gt;FinancialAssetService.previewResolutions(tickers)&lt;/b&gt;&lt;br&gt;&lt;i&gt;Pour chaque ticker non USER/WORTHLESS → candidats (lecture seule, rien n&#39;est persisté)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="360" y="60" width="280" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="n3" value="&lt;b&gt;CoinGeckoPriceProvider.searchBySymbol(ticker)&lt;/b&gt;&lt;br&gt;&lt;i&gt;GET /search → CoinCandidate[]&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="680" y="60" width="260" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="n4" value="&lt;b&gt;FinancialAssetService.pickDominant(candidates)&lt;/b&gt;&lt;br&gt;&lt;i&gt;1 seul match → auto ; sinon dominance ×5 sur le rang market-cap ; sinon ambigu → reste PENDING&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="680" y="190" width="260" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="n5" value="&lt;b&gt;Opérateur choisit (UI)&lt;/b&gt;&lt;br&gt;ImportAssetChoice → &lt;b&gt;MAP&lt;/b&gt; / &lt;b&gt;WORTHLESS&lt;/b&gt; / &lt;b&gt;IGNORE&lt;/b&gt;&lt;br&gt;&lt;i&gt;→ ImportAssetMapping(symbol, action, coingeckoId)&lt;/i&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="360" y="190" width="280" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="ndb1" value="&lt;b&gt;financial_asset&lt;/b&gt;&lt;br&gt;id, symbol, status [PENDING|USER|WORTHLESS], coingecko_id, name, last_eur_value, price_synced_at" style="shape=cylinder;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="60" width="260" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="ndb2" value="&lt;b&gt;account.asset_id&lt;/b&gt; → FK financial_asset&lt;br&gt;&lt;i&gt;V55 — nullable, remplace account.ticker (dropped)&lt;/i&gt;" style="shape=cylinder;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="200" width="260" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="ndb3" value="&lt;b&gt;price_snapshot.asset_id&lt;/b&gt; → FK financial_asset&lt;br&gt;&lt;i&gt;V56 — NOT NULL, unique(asset_id,date), remplace price_snapshot.ticker (dropped)&lt;/i&gt;" style="shape=cylinder;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="310" width="260" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="nc1" value="&lt;b&gt;Déclencheur Wallet Sync&lt;/b&gt;&lt;br&gt;WalletSyncService.addWallet()→sync() (à la demande)&lt;br&gt;ou SchedulerService.dailyBankSync() (cron 8h) → resyncAll()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="60" width="300" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="nc2" value="&lt;b&gt;adapter.fetchBalances(address)&lt;/b&gt;&lt;br&gt;&lt;i&gt;solde brut par ticker&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="190" width="300" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="nc3" value="&lt;b&gt;priceService.refreshPrices(tickers)&lt;/b&gt;&lt;br&gt;&lt;i&gt;même méthode que la Phase 3&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="310" width="300" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="nc4" value="&lt;b&gt;resolveAccount(...)&lt;/b&gt; → Account&lt;br&gt;&lt;i&gt;asset = null volontairement (solde déjà converti)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="430" width="300" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="nc5" value="&lt;b&gt;AccountService.upsertHolding(...)&lt;/b&gt;&lt;br&gt;→ FinancialAssetService.getOrCreate(symbol)&lt;br&gt;&lt;i&gt;mint un financial_asset PENDING si le symbole est inconnu&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="550" width="300" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="nc6" value="&lt;b&gt;AccountService.upsertSnapshot(account, balanceEur, today)&lt;/b&gt;&lt;br&gt;[table: balance_snapshot]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="680" width="300" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="nf1" value="&lt;b&gt;AssetController&lt;/b&gt; (/api/assets)&lt;br&gt;GET / → listAll()&lt;br&gt;GET /{symbol}/candidates → previewResolution()&lt;br&gt;PUT /{symbol}/mapping → setManualMapping / applyUserMapping / markWorthless&lt;br&gt;DELETE /{symbol} → clearMapping()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1480" y="840" width="300" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="n6" value="&lt;b&gt;CryptoImportService.execute(req, memberId)&lt;/b&gt;&lt;br&gt;&lt;i&gt;@Transactional&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="470" width="280" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="n7" value="&lt;b&gt;resolveAccount(req, memberId, parser)&lt;/b&gt;&lt;br&gt;&lt;i&gt;crée/charge Account (type CRYPTO)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="570" width="280" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="n8" value="&lt;b&gt;applyConfirmedMappings(mappings)&lt;/b&gt;&lt;br&gt;&lt;i&gt;boucle sur ImportAssetMapping[]&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="670" width="280" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="n9a" value="&lt;b&gt;MAP&lt;/b&gt; → FinancialAssetService.&lt;b&gt;applyUserMapping&lt;/b&gt;(ticker, coingeckoId, name)&lt;br&gt;&lt;i&gt;upsert financial_asset (status=USER) ; si remap → purge + refetch price_snapshot&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="600" width="260" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="n9b" value="&lt;b&gt;WORTHLESS&lt;/b&gt; → FinancialAssetService.&lt;b&gt;markWorthless&lt;/b&gt;(ticker)&lt;br&gt;&lt;i&gt;status=WORTHLESS, purge price_snapshot, zero holdings&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="710" width="260" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="n9c" value="&lt;b&gt;IGNORE&lt;/b&gt; → reste PENDING (non résolu)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="820" width="260" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="n10" value="&lt;b&gt;backfillPriceHistory(...)&lt;/b&gt;&lt;br&gt;→ PriceService.backfillHistoricalPrices(tickers, fromDate)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="720" y="600" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="n11" value="&lt;b&gt;enrichValuations(...)&lt;/b&gt;&lt;br&gt;priceSnapshotRepository.findByAssetIdInAndDateBetween(...)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="720" y="700" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="n12" value="&lt;b&gt;transactionRepository&lt;/b&gt;&lt;br&gt;deleteByAccountIdAndIsManualFalse(...) + saveAll(...)&lt;br&gt;[table: transaction]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="720" y="800" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="n13" value="&lt;b&gt;holdingComputeService.recomputeHoldings(account)&lt;/b&gt;&lt;br&gt;[table: account_holding]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="470" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="n14" value="&lt;b&gt;valueHoldings(accountId)&lt;/b&gt;&lt;br&gt;→ priceService.refreshPrices(tickers)&lt;br&gt;→ account.currentBalance [table: account]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="570" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="n15" value="&lt;b&gt;reconstructHistory(account, enriched)&lt;/b&gt;&lt;br&gt;[table: balance_snapshot]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="670" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="np1" value="&lt;b&gt;SchedulerService.refreshPrices()&lt;/b&gt;&lt;br&gt;@Scheduled(fixedDelay=3600000) → &lt;b&gt;HORAIRE&lt;/b&gt; (backend)&lt;br&gt;pour chaque FamilyMember : accountRepository.findTickerSymbolsByMemberId(memberId)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="1010" width="440" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="np2" value="&lt;b&gt;Frontend Dashboard (React Query)&lt;/b&gt;&lt;br&gt;staleTime = &lt;b&gt;5 min&lt;/b&gt; (QUERY_STALE_TIMES.dashboard, constants.ts)&lt;br&gt;refetch au montage/focus → GET /api/prices?tickers=...&lt;br&gt;→ PriceController.getPrices&lt;br&gt;&lt;b&gt;⚠ c&#39;est CE déclencheur qui correspond aux « 5 minutes », pas un cron backend&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="520" y="1010" width="440" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="np3" value="&lt;b&gt;PriceService.refreshPrices(tickers)&lt;/b&gt;&lt;br&gt;&lt;i&gt;partition EUR / worthless / à fetch ; cache mémoire 15 min (CachedPrice)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="270" y="1150" width="440" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="np4" value="&lt;b&gt;PriceRouter.getPricesEur(toFetch)&lt;/b&gt;&lt;br&gt;&lt;i&gt;1er PriceProviderPort par @Order dont canPrice()=true&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="1010" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="np5" value="&lt;b&gt;CoinGeckoPriceProvider&lt;/b&gt; (@Order 10)&lt;br&gt;si coingecko_id présent — /simple/price (batch)&lt;br&gt;circuit breaker sur 429" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="1120" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="np6" value="&lt;b&gt;YahooFinancePriceProvider&lt;/b&gt; (@Order 20)&lt;br&gt;catch-all (stocks/ETF/crypto non mappé)&lt;br&gt;/v8/finance/chart + conversion FX" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="1220" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="np7" value="&lt;b&gt;assetForSnapshot(ticker)&lt;/b&gt; [mint si absent]&lt;br&gt;→ assetRepository.updateLastPrice(...)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="1400" width="260" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="np8" value="&lt;b&gt;priceSnapshotRepository&lt;/b&gt;: findByAssetIdAndDate + save&lt;br&gt;[table: price_snapshot — upsert 1×/jour]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1060" y="1500" width="260" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="ne1" value="&lt;b&gt;DashboardService&lt;/b&gt;&lt;br&gt;priceService.toEur(balance, currency, ticker)&lt;br&gt;priceService.getPriceEur(symbol)&lt;br&gt;&lt;i&gt;valorisation live (cache/financial_asset) — pas de lecture directe de price_snapshot&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="1690" width="400" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="ne2" value="&lt;b&gt;HistoryService&lt;/b&gt;&lt;br&gt;priceSnapshotRepository.findLatestByAssetIdBeforeOrOnDate(assetId, date)&lt;br&gt;&lt;i&gt;lecture directe de price_snapshot pour la courbe patrimoniale&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="1690" width="400" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n1" target="n2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n2" target="n3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n3" target="n4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n4" target="n5" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed5" value="candidats + statut actuel" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;fontSize=9;" parent="1" source="n2" target="n5" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed6" value="lecture seule" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="n2" target="ndb1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed7" value="chemin alternatif de confirmation (hors import CSV)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="nf1" target="n5" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed8" value="lecture/écriture" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;startArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="nf1" target="ndb1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed9" value="ImportAssetMapping[]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;fontSize=9;" parent="1" source="n5" target="n6" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n6" target="n7" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n7" target="n8" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed12" value="assigne asset_id si résolu" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="n7" target="ndb2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed13" value="MAP" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;fontSize=9;" parent="1" source="n8" target="n9a" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed14" value="WORTHLESS" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;fontSize=9;" parent="1" source="n8" target="n9b" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed15" value="IGNORE" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;fontSize=9;" parent="1" source="n8" target="n9c" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed16" value="upsert (status=USER)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#333333;fontSize=9;" parent="1" source="n9a" target="ndb1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed17" value="update (status=WORTHLESS)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#333333;fontSize=9;" parent="1" source="n9b" target="ndb1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed18" value="purge price_snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="n9b" target="ndb3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n9a" target="n10" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n9b" target="n10" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n10" target="n11" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n11" target="n12" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n12" target="n13" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed24" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n13" target="n14" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="n14" target="n15" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed26" value="réutilise PriceService.refreshPrices" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="n14" target="np3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed27" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="nc1" target="nc2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed28" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="nc2" target="nc3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed29" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="nc3" target="nc4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed30" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="nc4" target="nc5" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed31" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="nc5" target="nc6" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed32" value="getOrCreate → mint PENDING si absent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="nc5" target="ndb1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed33" value="même méthode que Phase 3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="nc3" target="np3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed34" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="np1" target="np3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed35" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="np2" target="np3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed36" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="np3" target="np4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed37" value="canPrice=true (coingecko_id présent)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;fontSize=9;" parent="1" source="np4" target="np5" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed38" value="sinon (catch-all)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;fontSize=9;" parent="1" source="np4" target="np6" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed39" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="np5" target="np7" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed40" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="np6" target="np7" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed41" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="np7" target="np8" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed42" value="updateLastPrice" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="np7" target="ndb1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed43" value="upsert 1×/jour" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="np8" target="ndb3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed44" value="lecture (cache/registre)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="ndb1" target="ne1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed45" value="lecture directe" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="ndb3" target="ne2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="trH" value="Trade Republic — deux solutions d&#39;import&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-style:italic;font-size:11px&quot;&gt;(sync WebSocket avec holdings vs CSV soldes seuls — source d&#39;assets inconnus, comme Wallet Sync)&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="20" width="400" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="trA1" value="&lt;b&gt;Déclencheur TR Sync&lt;/b&gt;&lt;br&gt;TradeRepublicController.sync() (manuel) ou completeAuth() → thread background&lt;br&gt;ou SchedulerService.dailyBankSync() (cron 8h) → resyncIfSessionActive()&lt;br&gt;&lt;i&gt;→ TradeRepublicSyncService.syncWithToken(...)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="90" width="400" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="trA2" value="&lt;b&gt;TradeRepublicPort.fetchAccounts(sessionToken)&lt;/b&gt;&lt;br&gt;&lt;i&gt;TradeRepublicAdapter — WebSocket ; positions en ISIN brut (TrPosition)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="220" width="400" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="trA3" value="&lt;b&gt;upsertAccount(data, memberId, replaceHoldings=true)&lt;/b&gt;&lt;br&gt;&lt;i&gt;crée/màj Account + accountService.upsertSnapshot() [table: account, balance_snapshot]&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="340" width="400" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="trA4" value="&lt;b&gt;OpenFigiIsinConverter.resolve(isin)&lt;/b&gt;&lt;br&gt;&lt;i&gt;ISIN → ticker Yahoo (ex. IE00BYVQ9F29 → IWDA.AS) ; si ISIN crypto TR (préfixe XF000…) → FinancialAssetService.resolveCrypto(symbol)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="470" width="400" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="trA5" value="&lt;b&gt;HoldingDedup.vwapMerge(prev, next)&lt;/b&gt;&lt;br&gt;&lt;i&gt;plusieurs ISIN → même ticker : fusion en mémoire (quantité + moyenne pondérée) avant toute résolution FinancialAsset&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="610" width="400" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="trA6" value="&lt;b&gt;FinancialAssetService.getOrCreate(ticker)&lt;/b&gt; + fillNameIfAbsent(...)&lt;br&gt;→ AccountHolding [table: account_holding]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="730" width="400" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="trA7" value="&lt;i&gt;currentPrice vient du ticker WebSocket TR (déjà fourni), pas de PriceService ici — Phase 4 re-fetche via getPriceEur(asset) à l&#39;affichage&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="850" width="400" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="trHB" value="CSV fallback — soldes seulement" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="940" width="400" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="trB1" value="&lt;b&gt;TradeRepublicController.importCsv()&lt;/b&gt;&lt;br&gt;→ TradeRepublicSyncService.importCsv(file, memberId)&lt;br&gt;&lt;i&gt;parse name,type,balance ; externalId = tr_csv_ + nom slugifié&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="980" width="400" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="trB2" value="&lt;b&gt;upsertAccount(data, memberId, replaceHoldings=false)&lt;/b&gt;&lt;br&gt;&lt;i&gt;positions=[] → aucune résolution ISIN/FinancialAsset/dedup ; seul le solde est mis à jour [table: account, balance_snapshot]&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="1920" y="1100" width="400" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="edtr1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="trA1" target="trA2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="edtr2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="trA2" target="trA3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="edtr3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="trA3" target="trA4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="edtr4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="trA4" target="trA5" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="edtr5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="trA5" target="trA6" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="edtr6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;" parent="1" source="trA6" target="trA7" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="edtr7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#333333;" parent="1" source="trB1" target="trB2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="edtr8" value="resolveCrypto (ISIN crypto TR uniquement)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="trA4" target="ndb1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="edtr9" value="getOrCreate → mint PENDING si absent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#666666;fontColor=#666666;fontSize=9;" parent="1" source="trA6" target="ndb1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

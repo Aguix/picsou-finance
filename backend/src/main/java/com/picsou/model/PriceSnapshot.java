@@ -10,7 +10,7 @@ import java.time.LocalDate;
 @Entity
 @Table(
     name = "price_snapshot",
-    uniqueConstraints = @UniqueConstraint(columnNames = {"ticker", "date"})
+    uniqueConstraints = @UniqueConstraint(columnNames = {"asset_id", "date"})
 )
 @Getter
 @Setter
@@ -23,8 +23,10 @@ public class PriceSnapshot {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 30)
-    private String ticker;
+    /** The asset this daily price is for — identity by FK, not a ticker string (see V56). */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "asset_id", nullable = false)
+    private FinancialAsset asset;
 
     @Column(nullable = false)
     private LocalDate date;

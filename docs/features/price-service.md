@@ -1,6 +1,6 @@
 # Feature: Price Service
 
-> Last updated: 2026-07-11
+> Last updated: 2026-07-12
 
 ## Context
 
@@ -12,12 +12,12 @@ Since V51, ticker → provider-id resolution is **dynamic**: the `financial_asse
 
 ### Provider routing
 
-`PriceService` never names a concrete adapter: it asks `PriceRouter`, which owns the ordered list of `PriceProviderPort` beans and routes each request to the aggregator that can serve it. Priority is the bean `@Order` (CoinGecko `@Order(10)` before Yahoo `@Order(20)`); for a given ticker the router picks the first provider that both declares the needed `Capability` (`SPOT`/`HISTORY`/`INTRADAY`) and `canPrice(ticker)`. Spot requests are partitioned so each provider is still batched into a single call. Adding a new aggregator (CoinMarketCap, step C/E) is a new `PriceProviderPort` bean with an `@Order` — no edit to `PriceService`/`PriceRouter`.
+`PriceService` never names a concrete adapter: it asks `PriceRouter`, which owns the ordered list of `PriceProviderPort` beans and routes each request to the aggregator that can serve it. Priority is the bean `@Order` (CoinGecko `@Order(10)` before Yahoo `@Order(20)`); for a given asset the router picks the first provider that both declares the needed `Capability` (`SPOT`/`HISTORY`/`INTRADAY`) and `canPrice(asset)`. Every pricing op takes the `FinancialAsset` itself, not a bare ticker: each provider reads *its own* external ref (`coingecko_id`, `yahoo_symbol`) straight off the asset, so the adapters carry **no registry dependency** and the caller (which already holds the asset) hands it through without re-resolving the symbol. Spot requests are partitioned so each provider is still batched into a single call. Adding a new aggregator (CoinMarketCap, step C/E) is a new `PriceProviderPort` bean with an `@Order` — no edit to `PriceService`/`PriceRouter`.
 
-- **CoinGecko** (`CoinGeckoPriceProvider`, `aggregatorKey() = "coingecko"`): `canPrice` is true for any ticker whose `financial_asset` row has a `coingecko_id`. Uses the `/simple/price` endpoint with `vs_currencies=eur`, batched (all tickers in one request). Also exposes `/search` and `/coins/{id}` lookups for the resolver, plus coin logo URLs (these resolver-only calls stay off the port — they are CoinGecko-specific, not a generic pricing op). Optional Demo API keys (header `x-cg-demo-api-key`) raise the rate limit (~100 req/min vs a handful anonymous); they come from the `aggregator_session` table (admin panel), picked per request — see below. With none configured the provider runs anonymous.
-- **Yahoo Finance** (`YahooFinancePriceProvider`, `aggregatorKey() = "yahoo"`): the catch-all — `canPrice` is true for any ticker whose shape isn't a plain ISIN, so the router reaches it for whatever CoinGecko couldn't price (stocks, ETFs, indices). Uses the unofficial `/v8/finance/chart/{ticker}` endpoint. Fetched per-ticker (no batch). Tickers like `IWDA.AS`, `MC.PA` are already EUR-denominated; foreign-currency tickers (USD/JPY/GBp/...) are converted to EUR inside the adapter via Yahoo's own `{CURRENCY}EUR=X` chart endpoint, with a 15-minute FX cache mirroring the price cache TTL. See [ADR 2026-05-19](../decisions/2026-05-19-yahoo-fx-conversion.md).
+- **CoinGecko** (`CoinGeckoPriceProvider`, `aggregatorKey() = "coingecko"`): `canPrice` is true for any asset carrying a `coingecko_id` (read straight off the asset — no lookup). Uses the `/simple/price` endpoint with `vs_currencies=eur`, batched (all tickers in one request). Also exposes `/search` and `/coins/{id}` lookups for the resolver, plus coin logo URLs (these resolver-only calls stay off the port — they are CoinGecko-specific, not a generic pricing op). Optional Demo API keys (header `x-cg-demo-api-key`) raise the rate limit (~100 req/min vs a handful anonymous); they come from the `aggregator_session` table (admin panel), picked per request — see below. With none configured the provider runs anonymous.
+- **Yahoo Finance** (`YahooFinancePriceProvider`, `aggregatorKey() = "yahoo"`): the catch-all — `canPrice` is true for any asset whose Yahoo symbol (`yahoo_symbol`, falling back to the internal `symbol`) isn't a plain ISIN, so the router reaches it for whatever CoinGecko couldn't price (stocks, ETFs, indices). It queries that Yahoo symbol on the unofficial `/v8/finance/chart/{ticker}` endpoint. `yahoo_symbol` is not populated yet, so the internal symbol is used verbatim exactly as before — gating Yahoo on a populated `yahoo_symbol` (so an unresolved coin no longer falls through to a wasted Yahoo call) is later work. Fetched per-ticker (no batch). Tickers like `IWDA.AS`, `MC.PA` are already EUR-denominated; foreign-currency tickers (USD/JPY/GBp/...) are converted to EUR inside the adapter via Yahoo's own `{CURRENCY}EUR=X` chart endpoint, with a 15-minute FX cache mirroring the price cache TTL. See [ADR 2026-05-19](../decisions/2026-05-19-yahoo-fx-conversion.md).
 
-Both providers implement `PriceProviderPort`: `aggregatorKey()`, `capabilities()`, `canPrice(ticker)`, `isAvailable()`/`pausedUntil()`, and the three pricing ops (`getPricesEur`, `getHistoricalPricesEur`, `getIntradayPricesEur`). The old single `supports(ticker)` boolean was too weak to order a fallback; `capabilities()` + `canPrice()` replace it, and `isAvailable()` (false while a provider is rate-limited) exists for the cross-provider cascade that lands with the second crypto aggregator — today's routing preserves the previous one-provider-per-ticker behaviour.
+Both providers implement `PriceProviderPort`: `aggregatorKey()`, `capabilities()`, `canPrice(asset)`, `isAvailable()`/`pausedUntil()`, and the three pricing ops (`getPricesEur(Collection<FinancialAsset>)`, `getHistoricalPricesEur(FinancialAsset, …)`, `getIntradayPricesEur(FinancialAsset, …)`). The old single `supports(ticker)` boolean was too weak to order a fallback; `capabilities()` + `canPrice()` replace it, and `isAvailable()` (false while a provider is rate-limited) exists for the cross-provider cascade that lands with the second crypto aggregator — today's routing preserves the previous one-provider-per-ticker behaviour.
 
 A ticker marked `WORTHLESS` (delisted coin no aggregator can price) is valued at a fixed zero by `PriceService` — no provider call, no phantom snapshot.
 
@@ -68,9 +68,11 @@ Every successful fetch also persists `financial_asset.last_eur_value`/`price_syn
 
 ### Currency conversion
 
-`PriceService.toEur(balance, currency, ticker)` converts an account balance to EUR:
-- If currency is EUR and no ticker is set, returns the balance as-is.
-- Otherwise, uses the ticker (preferred) or currency code to fetch a price, then multiplies.
+`PriceService.toEur(balance, currency, asset)` converts an account balance to EUR:
+- If currency is EUR and no asset is set, returns the balance as-is.
+- Otherwise, uses the asset (preferred) or the currency code to fetch a price, then multiplies.
+
+The asset path goes straight through `getPriceEur(FinancialAsset)`. A bare currency code (a foreign bank-account currency) and the MCP tool's caller-supplied ticker have no asset in hand, so they go through the `getPriceEur(String)` **seam**: it resolves the symbol to its registered asset — or a transient, non-persisted asset carrying just the symbol when unregistered — then prices it like any other asset. A fiat currency has no registry row, so it rides a transient asset and, absent a Yahoo quote for the raw code, returns `null` → the balance is left unconverted (the pre-existing best-effort behaviour; a dedicated fiat/FX path is future work).
 
 ### Scheduler & backfill
 
@@ -80,7 +82,7 @@ Every successful fetch also persists `financial_asset.last_eur_value`/`price_syn
 
 ### Key files
 
-- `service/PriceService.java` -- Caching, conversion, gap-aware backfill, worthless/EUR handling (routing delegated to `PriceRouter`)
+- `service/PriceService.java` -- Caching, conversion, gap-aware backfill, worthless/EUR handling (routing delegated to `PriceRouter`); `getPriceEur(FinancialAsset)` is the primary entry point, `getPriceEur(String)` a resolve-or-transient seam for callers with only a ticker (currency code, MCP)
 - `service/PriceRouter.java` -- Capability-based routing over the ordered `PriceProviderPort` beans
 - `service/FinancialAssetService.java` -- Dynamic symbol resolution, manual mapping, worthless pinning, `previewResolution` (standing candidates)
 - `controller/AssetController.java` -- Standing mapping/verification endpoints (`/api/assets`): candidates, apply mapping, forget
@@ -93,7 +95,7 @@ Every successful fetch also persists `financial_asset.last_eur_value`/`price_syn
 - `service/SchedulerService.java` -- Hourly price refresh cron
 - `adapter/price/CoinGeckoPriceProvider.java` -- CoinGecko HTTP client (prices, search, logos, circuit breaker)
 - `adapter/price/YahooFinancePriceProvider.java` -- Yahoo Finance `/v8/finance/chart/{ticker}`
-- `port/PriceProviderPort.java` -- Port interface: `aggregatorKey()`, `capabilities()`, `canPrice()`, `isAvailable()`, `getPricesEur()`/`getHistoricalPricesEur()`/`getIntradayPricesEur()`
+- `port/PriceProviderPort.java` -- Port interface, asset-typed: `aggregatorKey()`, `capabilities()`, `canPrice(FinancialAsset)`, `isAvailable()`, `getPricesEur(Collection<FinancialAsset>)`/`getHistoricalPricesEur(FinancialAsset,…)`/`getIntradayPricesEur(FinancialAsset,…)`
 
 ### Flow
 
@@ -101,9 +103,9 @@ Every successful fetch also persists `financial_asset.last_eur_value`/`price_syn
 Dashboard loads --> needs EUR prices
         |
         v
-PriceService.getPriceEur("BTC")
+PriceService.getPriceEur(asset)   // getPriceEur(String) is the seam for callers with only a ticker
         |
-        +-- financial_asset row says WORTHLESS --> return 0
+        +-- asset.isWorthless() --> return 0
         |
         v
 Check cache: CachedPrice for "BTC"
@@ -113,9 +115,9 @@ Check cache: CachedPrice for "BTC"
         +-- miss or expired
                 |
                 v
-        PriceRouter picks first provider that canPrice("BTC")
-        CoinGeckoPriceProvider.canPrice("BTC")
-        (financial_asset.coingecko_id set?) --> true
+        PriceRouter picks first provider that canPrice(asset)
+        CoinGeckoPriceProvider.canPrice(asset)
+        (asset.coingecko_id set?) --> true
                 |
                 v
         GET api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=eur

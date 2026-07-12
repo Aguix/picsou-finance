@@ -60,9 +60,10 @@ class AccountServiceTest {
     @Test
     void getHoldings_returnsNullValue_whenPriceServiceHasNoPrice() {
         when(accountRepository.findByIdAndMemberId(1L, 1L)).thenReturn(Optional.of(ownedAccount()));
+        FinancialAsset phymf = asset("PHYMF");
         AccountHolding holding = AccountHolding.builder()
             .id(10L)
-            .asset(asset("PHYMF"))
+            .asset(phymf)
             .quantity(new BigDecimal("10"))
             .averageBuyIn(new BigDecimal("100"))
             // Stored from a broker sync in unknown currency — must NOT be used as EUR.
@@ -70,7 +71,7 @@ class AccountServiceTest {
             .build();
         when(holdingRepository.findByAccountIdOrderByCurrentPriceDesc(1L))
             .thenReturn(List.of(holding));
-        when(priceService.getPriceEur("PHYMF")).thenReturn(null);
+        when(priceService.getPriceEur(phymf)).thenReturn(null);
 
         List<HoldingResponse> result = accountService.getHoldings(1L, 1L);
 
@@ -85,9 +86,10 @@ class AccountServiceTest {
     @Test
     void getHoldings_computesValue_whenPriceServiceHasPrice() {
         when(accountRepository.findByIdAndMemberId(1L, 1L)).thenReturn(Optional.of(ownedAccount()));
+        FinancialAsset aapl = asset("AAPL");
         AccountHolding holding = AccountHolding.builder()
             .id(10L)
-            .asset(asset("AAPL"))
+            .asset(aapl)
             .quantity(new BigDecimal("5"))
             .averageBuyIn(new BigDecimal("150"))
             .currentPrice(new BigDecimal("180"))  // native-currency, must be ignored
@@ -95,7 +97,7 @@ class AccountServiceTest {
         when(holdingRepository.findByAccountIdOrderByCurrentPriceDesc(1L))
             .thenReturn(List.of(holding));
         // Yahoo returned 200 EUR/share after FX conversion (e.g. ~217 USD × 0.92).
-        when(priceService.getPriceEur("AAPL")).thenReturn(new BigDecimal("200"));
+        when(priceService.getPriceEur(aapl)).thenReturn(new BigDecimal("200"));
 
         List<HoldingResponse> result = accountService.getHoldings(1L, 1L);
 

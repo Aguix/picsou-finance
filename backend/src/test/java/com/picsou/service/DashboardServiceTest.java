@@ -35,16 +35,17 @@ class DashboardServiceTest {
     @Test
     void getDashboard_skipsHoldingCurrentPrice_whenPriceServiceHasNoPrice() {
         Account account = holdingAccount();
+        FinancialAsset phymf = asset("PHYMF");
         AccountHolding holding = AccountHolding.builder()
             .account(account)
-            .asset(asset("PHYMF"))
+            .asset(phymf)
             .quantity(new BigDecimal("10"))
             .averageBuyIn(new BigDecimal("100"))
             .currentPrice(new BigDecimal("999"))
             .build();
         when(accountRepository.findAllByMemberIdOrderByCreatedAtAsc(42L)).thenReturn(List.of(account));
         when(holdingRepository.findByAccount_Id(1L)).thenReturn(List.of(holding));
-        when(priceService.getPriceEur("PHYMF")).thenReturn(null);
+        when(priceService.getPriceEur(phymf)).thenReturn(null);
         when(historyService.buildHistory(List.of(1L), 12, 42L)).thenReturn(List.of());
         when(goalRepository.findAllByMemberIdOrderByCreatedAtAsc(42L)).thenReturn(List.of());
 
@@ -58,16 +59,17 @@ class DashboardServiceTest {
     @Test
     void getDashboard_usesTrustedEurPrice_whenAvailable() {
         Account account = holdingAccount();
+        FinancialAsset aapl = asset("AAPL");
         AccountHolding holding = AccountHolding.builder()
             .account(account)
-            .asset(asset("AAPL"))
+            .asset(aapl)
             .quantity(new BigDecimal("10"))
             .averageBuyIn(new BigDecimal("100"))
             .currentPrice(new BigDecimal("999"))
             .build();
         when(accountRepository.findAllByMemberIdOrderByCreatedAtAsc(42L)).thenReturn(List.of(account));
         when(holdingRepository.findByAccount_Id(1L)).thenReturn(List.of(holding));
-        when(priceService.getPriceEur("AAPL")).thenReturn(new BigDecimal("200"));
+        when(priceService.getPriceEur(aapl)).thenReturn(new BigDecimal("200"));
         when(historyService.buildHistory(List.of(1L), 12, 42L)).thenReturn(List.of());
         when(goalRepository.findAllByMemberIdOrderByCreatedAtAsc(42L)).thenReturn(List.of());
 

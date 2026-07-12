@@ -19,7 +19,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 public class SchedulerService {
@@ -158,10 +157,7 @@ public class SchedulerService {
         List<FamilyMember> members = familyMemberRepository.findAllByOrderByCreatedAtAsc();
 
         for (FamilyMember member : members) {
-            Set<String> tickers = accountRepository.findByTickerIsNotNullAndMemberId(member.getId())
-                .stream()
-                .map(Account::getTicker)
-                .collect(Collectors.toSet());
+            Set<String> tickers = accountRepository.findTickerSymbolsByMemberId(member.getId());
 
             if (!tickers.isEmpty()) {
                 log.debug("Refreshing prices for member {} tickers: {}", member.getId(), tickers);

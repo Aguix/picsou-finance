@@ -7,6 +7,7 @@ import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
 import com.picsou.model.BalanceSnapshot;
 import com.picsou.model.FamilyMember;
+import com.picsou.model.FinancialAsset;
 import com.picsou.model.PriceSnapshot;
 import com.picsou.model.Transaction;
 import com.picsou.model.TransactionType;
@@ -14,6 +15,7 @@ import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.AccountRepository;
 import com.picsou.repository.BalanceSnapshotRepository;
 import com.picsou.repository.FamilyMemberRepository;
+import com.picsou.repository.FinancialAssetRepository;
 import com.picsou.repository.PriceSnapshotRepository;
 import com.picsou.repository.TransactionRepository;
 import com.picsou.service.FinancialAssetService;
@@ -72,6 +74,7 @@ public class CryptoImportService {
     private final PriceSnapshotRepository priceSnapshotRepository;
     private final BalanceSnapshotRepository balanceSnapshotRepository;
     private final FinancialAssetService financialAssetService;
+    private final FinancialAssetRepository assetRepository;
 
     private final ConcurrentHashMap<String, Parsed> cache = new ConcurrentHashMap<>();
 
@@ -87,7 +90,8 @@ public class CryptoImportService {
                                PriceService priceService,
                                PriceSnapshotRepository priceSnapshotRepository,
                                BalanceSnapshotRepository balanceSnapshotRepository,
-                               FinancialAssetService financialAssetService) {
+                               FinancialAssetService financialAssetService,
+                               FinancialAssetRepository assetRepository) {
         // Generic (permissive) signatures must run after the exchange-specific ones.
         this.parsers = parsers.stream()
             .sorted(Comparator.comparingInt(CryptoCsvParser::detectionOrder))
@@ -101,6 +105,7 @@ public class CryptoImportService {
         this.priceSnapshotRepository = priceSnapshotRepository;
         this.balanceSnapshotRepository = balanceSnapshotRepository;
         this.financialAssetService = financialAssetService;
+        this.assetRepository = assetRepository;
     }
 
     /** The supported source formats, in detection order — for the import UI. */
@@ -317,10 +322,12 @@ public class CryptoImportService {
             return txs;
         }
 
+        Map<Long, String> idToSymbol = assetRepository.findBySymbolIn(tickers).stream()
+            .collect(Collectors.toMap(FinancialAsset::getId, FinancialAsset::getSymbol));
         Map<String, TreeMap<LocalDate, BigDecimal>> priceHist = new HashMap<>();
-        for (PriceSnapshot ps : priceSnapshotRepository.findByTickerInAndDateBetween(
-                tickers, from, LocalDate.now())) {
-            priceHist.computeIfAbsent(ps.getTicker().toUpperCase(), k -> new TreeMap<>())
+        for (PriceSnapshot ps : priceSnapshotRepository.findByAssetIdInAndDateBetween(
+                idToSymbol.keySet(), from, LocalDate.now())) {
+            priceHist.computeIfAbsent(idToSymbol.get(ps.getAsset().getId()), k -> new TreeMap<>())
                 .put(ps.getDate(), ps.getPriceEur());
         }
 
@@ -455,9 +462,11 @@ public class CryptoImportService {
                 .collect(Collectors.toSet());
 
             // Price history per ticker as a date→price TreeMap for floor (forward-fill) lookups.
+            Map<Long, String> idToSymbol = assetRepository.findBySymbolIn(tickers).stream()
+                .collect(Collectors.toMap(FinancialAsset::getId, FinancialAsset::getSymbol));
             Map<String, TreeMap<LocalDate, BigDecimal>> priceHist = new HashMap<>();
-            for (PriceSnapshot ps : priceSnapshotRepository.findByTickerInAndDateBetween(tickers, start, today)) {
-                priceHist.computeIfAbsent(ps.getTicker().toUpperCase(), k -> new TreeMap<>())
+            for (PriceSnapshot ps : priceSnapshotRepository.findByAssetIdInAndDateBetween(idToSymbol.keySet(), start, today)) {
+                priceHist.computeIfAbsent(idToSymbol.get(ps.getAsset().getId()), k -> new TreeMap<>())
                     .put(ps.getDate(), ps.getPriceEur());
             }
             // Make sure today's live price (already on the holdings) anchors the latest point.

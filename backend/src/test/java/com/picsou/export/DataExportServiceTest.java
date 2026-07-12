@@ -62,7 +62,7 @@ class DataExportServiceTest {
         Account a = Account.builder()
             .id(100L).member(member).name("Crypto wallet").type(AccountType.CRYPTO)
             .currency("EUR").currentBalance(new BigDecimal("12345.67"))
-            .ticker("BTC").color("#fa0").isManual(true).provider("manual")
+            .asset(FinancialAsset.builder().symbol("BTC").build()).color("#fa0").isManual(true).provider("manual")
             .lastSyncedAt(Instant.parse("2026-01-01T00:00:00Z"))
             .build();
         AccountHolding h = AccountHolding.builder()

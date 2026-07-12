@@ -80,6 +80,12 @@ public class AccountService {
         return toResponse(getOrThrow(id, memberId));
     }
 
+    /** Resolve an account's live-price ticker string to a registry asset (minting one if new), or null when blank. */
+    private FinancialAsset resolveTickerAsset(String ticker) {
+        if (ticker == null || ticker.isBlank()) return null;
+        return financialAssetService.getOrCreate(ticker);
+    }
+
     @Transactional
     public AccountResponse create(AccountRequest req, FamilyMember member) {
         Account account = Account.builder()
@@ -91,7 +97,7 @@ public class AccountService {
             .currentBalance(req.currentBalance() != null ? req.currentBalance() : BigDecimal.ZERO)
             .isManual(req.isManual())
             .color(req.color() != null ? req.color() : "#6366f1")
-            .ticker(req.ticker())
+            .asset(resolveTickerAsset(req.ticker()))
             .build();
 
         account = accountRepository.save(account);
@@ -114,7 +120,7 @@ public class AccountService {
         account.setProvider(req.provider());
         account.setCurrency(req.currency());
         account.setColor(req.color() != null ? req.color() : account.getColor());
-        account.setTicker(req.ticker());
+        account.setAsset(resolveTickerAsset(req.ticker()));
 
         // For manual accounts, allow balance update
         if (account.isManual() && req.currentBalance() != null) {
@@ -256,16 +262,16 @@ public class AccountService {
         if (account.getType() == AccountType.LOAN) {
             return debtRepository.findByAccountId(account.getId())
                 .map(debt -> loanAmortizationService.computeRemainingBalance(debt, LocalDate.now()))
-                .orElseGet(() -> priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getTicker()));
+                .orElseGet(() -> priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getAsset()));
         }
         List<AccountHolding> holdings = holdingRepository.findByAccount_Id(account.getId());
         if (holdings.isEmpty()) {
-            return priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getTicker());
+            return priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getAsset());
         }
         BigDecimal liveValue = BigDecimal.ZERO;
         for (AccountHolding h : holdings) {
             BigDecimal qty = h.getQuantity();
-            BigDecimal livePrice = priceService.getPriceEur(h.getAsset().getSymbol());
+            BigDecimal livePrice = priceService.getPriceEur(h.getAsset());
             if (livePrice == null) continue;
             liveValue = liveValue.add(qty.multiply(livePrice));
         }
@@ -375,8 +381,7 @@ public class AccountService {
 
     private HoldingResponse toHoldingResponse(AccountHolding holding) {
         BigDecimal currentPrice = holding.getCurrentPrice();
-        BigDecimal currentPriceEur = null;
-        Instant priceUpdatedAt = null;
+        FinancialAsset asset = holding.getAsset();
 
         // Only PriceService (Yahoo/CoinGecko, FX-converted) is trusted as a
         // source of EUR-denominated prices. holding.currentPrice may have been
@@ -384,11 +389,8 @@ public class AccountService {
         // currency without conversion — using it as a fallback would silently
         // produce native-as-EUR values. Better to return null and surface
         // "price unknown" than to invent a wrong number.
-        String symbol = holding.getAsset().getSymbol();
-        if (symbol != null && !symbol.isBlank()) {
-            currentPriceEur = priceService.getPriceEur(symbol);
-            priceUpdatedAt = holding.getLastSyncedAt();
-        }
+        BigDecimal currentPriceEur = priceService.getPriceEur(asset);
+        Instant priceUpdatedAt = holding.getLastSyncedAt();
 
         BigDecimal quantity = holding.getQuantity();
         BigDecimal averageBuyIn = holding.getAverageBuyIn();
@@ -403,9 +405,8 @@ public class AccountService {
             ? pnlEur.divide(costBasis, 4, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
             : null;
 
-        FinancialAsset asset = holding.getAsset();
         return new HoldingResponse(
-            symbol,
+            asset.getSymbol(),
             asset.getName(),
             quantity,
             averageBuyIn,

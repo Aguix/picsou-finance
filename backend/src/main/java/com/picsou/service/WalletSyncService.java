@@ -174,7 +174,7 @@ public class WalletSyncService {
             account = existing.get();
             account.setCurrentBalance(balanceEur);
             account.setLastSyncedAt(Instant.now());
-            account.setTicker(null);
+            account.setAsset(null);
         } else {
             FamilyMember member = familyMemberRepository.findById(memberId)
                 .orElseThrow(() -> new ResourceNotFoundException("Family member not found"));

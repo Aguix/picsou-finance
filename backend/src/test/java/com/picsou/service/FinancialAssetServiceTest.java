@@ -64,7 +64,7 @@ class FinancialAssetServiceTest {
         assertThat(result.getStatus()).isEqualTo(AssetStatus.PENDING);
         assertThat(result.getCoingeckoId()).isNull();
         assertThat(result.getName()).isNull();
-        verify(priceSnapshotRepository).deleteByTicker("BTC");
+        verify(priceSnapshotRepository).deleteByAssetId(any());
         verify(priceService).evictFromCache("BTC");
         verify(repository, never()).delete(any());
     }
@@ -81,7 +81,7 @@ class FinancialAssetServiceTest {
             .hasMessageContaining("still held");
 
         verify(repository, never()).delete(any());
-        verify(priceSnapshotRepository, never()).deleteByTicker(anyString());
+        verify(priceSnapshotRepository, never()).deleteByAssetId(any());
     }
 
     @Test
@@ -93,7 +93,7 @@ class FinancialAssetServiceTest {
         service.delete("btc");
 
         verify(repository).delete(asset);
-        verify(priceSnapshotRepository).deleteByTicker("BTC");
+        verify(priceSnapshotRepository).deleteByAssetId(any());
         verify(priceService).evictFromCache("BTC");
     }
 
@@ -295,7 +295,7 @@ class FinancialAssetServiceTest {
 
         service.applyUserMapping("META", "metabeat", "MetaBeat");
 
-        verify(priceSnapshotRepository).deleteByTicker("META");
+        verify(priceSnapshotRepository).deleteByAssetId(any());
         verify(priceService).evictFromCache("META");
         verify(priceService).backfillHistoricalPrices(anyMap());
     }
@@ -361,7 +361,7 @@ class FinancialAssetServiceTest {
         service.setManualMapping("MATIC", "https://www.coingecko.com/en/coins/matic-network");
 
         // Everything priced under the old id is wrong → purged, evicted, and refetched.
-        verify(priceSnapshotRepository).deleteByTicker("MATIC");
+        verify(priceSnapshotRepository).deleteByAssetId(any());
         verify(priceService).evictFromCache("MATIC");
         verify(priceService).backfillHistoricalPrices(anyMap());
     }
@@ -412,7 +412,7 @@ class FinancialAssetServiceTest {
 
         // The mapping is corrected even if the refetch fails — the boot runner fills the gap later.
         assertThat(result.getCoingeckoId()).isEqualTo("matic-network");
-        verify(priceSnapshotRepository).deleteByTicker("MATIC");
+        verify(priceSnapshotRepository).deleteByAssetId(any());
     }
 
     @Test
@@ -425,7 +425,7 @@ class FinancialAssetServiceTest {
         service.delete("lion");
 
         verify(repository).delete(existing);
-        verify(priceSnapshotRepository).deleteByTicker("LION");
+        verify(priceSnapshotRepository).deleteByAssetId(any());
         verify(priceService).evictFromCache("LION");
     }
 
@@ -453,7 +453,7 @@ class FinancialAssetServiceTest {
         assertThat(result.getCoingeckoId()).isNull();
         assertThat(result.isWorthless()).isTrue();
         // Any price fetched while it was still listed is dropped, live cache evicted, holdings re-valued.
-        verify(priceSnapshotRepository).deleteByTicker("METABEAT");
+        verify(priceSnapshotRepository).deleteByAssetId(any());
         verify(priceService).evictFromCache("METABEAT");
         verify(accountHoldingRepository).findByTickerIgnoreCase("METABEAT");
         verify(coinGecko, never()).fetchCoinById(anyString());
@@ -512,7 +512,7 @@ class FinancialAssetServiceTest {
         // Was worthless (no id) → now a real USER mapping; no purge since there was no old coin id.
         assertThat(result.getStatus()).isEqualTo(AssetStatus.USER);
         assertThat(result.getCoingeckoId()).isEqualTo("metabeat");
-        verify(priceSnapshotRepository, never()).deleteByTicker(anyString());
+        verify(priceSnapshotRepository, never()).deleteByAssetId(any());
     }
 
     @Test

@@ -357,7 +357,7 @@ public class HistoryService {
         BigDecimal valueAtFrom = BigDecimal.ZERO;
         int matchedPrices = 0;
         for (AccountHolding h : allHoldings) {
-            Optional<PriceSnapshot> snap = priceSnapshotRepository.findLatestByTickerBeforeOrOnDate(h.getAsset().getSymbol(), fromDate);
+            Optional<PriceSnapshot> snap = priceSnapshotRepository.findLatestByAssetIdBeforeOrOnDate(h.getAsset().getId(), fromDate);
             if (snap.isPresent()) {
                 valueAtFrom = valueAtFrom.add(h.getQuantity().multiply(snap.get().getPriceEur()));
                 matchedPrices++;

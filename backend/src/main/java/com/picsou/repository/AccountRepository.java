@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public interface AccountRepository extends JpaRepository<Account, Long> {
     List<Account> findAllByMemberIdOrderByCreatedAtAsc(Long memberId);
@@ -19,7 +20,9 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
      */
     List<Account> findByIdInAndMemberId(List<Long> ids, Long memberId);
     Optional<Account> findByExternalAccountIdAndMemberId(String externalAccountId, Long memberId);
-    List<Account> findByTickerIsNotNullAndMemberId(Long memberId);
+    /** Uppercase symbols of the member's single-asset accounts (those with an asset FK), for price refresh. */
+    @Query("SELECT a.asset.symbol FROM Account a WHERE a.asset IS NOT NULL AND a.member.id = :memberId")
+    Set<String> findTickerSymbolsByMemberId(@Param("memberId") Long memberId);
 
     /**
      * Returns true if any soft-deleted account exists with this external id for the member.

@@ -7,6 +7,7 @@ import com.picsou.dto.GoalProgressResponse;
 import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
+import com.picsou.model.FinancialAsset;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.AccountRepository;
 import com.picsou.repository.GoalRepository;
@@ -70,7 +71,7 @@ public class DashboardService {
             BigDecimal accountInvested;
 
             if (holdings.isEmpty()) {
-                accountValue = priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getTicker());
+                accountValue = priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getAsset());
                 accountInvested = accountValue;
             } else {
                 BigDecimal liveValue = BigDecimal.ZERO;
@@ -134,7 +135,7 @@ public class DashboardService {
             List<AccountHolding> holdings = holdingsByAccount.getOrDefault(account.getId(), List.of());
             BigDecimal balanceEur;
             if (holdings.isEmpty()) {
-                balanceEur = priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getTicker());
+                balanceEur = priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getAsset());
             } else {
                 balanceEur = BigDecimal.ZERO;
                 for (AccountHolding h : holdings) {
@@ -163,11 +164,11 @@ public class DashboardService {
     }
 
     private BigDecimal holdingValueEur(AccountHolding holding) {
-        String symbol = holding.getAsset().getSymbol();
-        BigDecimal livePrice = priceService.getPriceEur(symbol);
+        FinancialAsset asset = holding.getAsset();
+        BigDecimal livePrice = priceService.getPriceEur(asset);
         if (livePrice == null) {
             log.warn("No live price for ticker '{}' — holding {} valued at zero until a quote is available",
-                symbol, holding.getId());
+                asset.getSymbol(), holding.getId());
             return BigDecimal.ZERO;
         }
         return holding.getQuantity().multiply(livePrice);

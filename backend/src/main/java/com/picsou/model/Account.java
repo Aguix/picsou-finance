@@ -59,9 +59,15 @@ public class Account extends AuditableEntity {
     @Builder.Default
     private String color = "#6366f1";
 
-    /** Ticker symbol for live price lookup, e.g. "BTC", "IWDA.AS" */
-    @Column(length = 20)
-    private String ticker;
+    /**
+     * The asset a single-asset account is priced against — a crypto/stock account whose whole balance
+     * is one coin (e.g. "BTC", "IWDA.AS"). Nullable: bank, savings and multi-holding accounts have
+     * none. Callers that need the symbol read it off this asset themselves ({@code getAsset().getSymbol()}) —
+     * Account exposes its own data (the FK), not a reach-through into FinancialAsset's.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "asset_id")
+    private FinancialAsset asset;
 
     /** Bank logo URL, captured from Enable Banking institution search. Null falls back to {@link #color}. */
     @Column(name = "logo_url", columnDefinition = "TEXT")

@@ -1,10 +1,10 @@
 package com.picsou.service;
 
-import com.picsou.adapter.price.CoinGeckoPriceProvider;
 import com.picsou.adapter.price.YahooFinancePriceProvider;
 import com.picsou.dto.EtfComposition;
 import com.picsou.dto.SecurityInsightResponse;
 import com.picsou.port.EtfCompositionProvider;
+import com.picsou.repository.FinancialAssetRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -32,15 +32,15 @@ public class SecurityInsightService {
 
     private final List<EtfCompositionProvider> compositionProviders;
     private final YahooFinancePriceProvider yahoo;
-    private final CoinGeckoPriceProvider coinGecko;
+    private final FinancialAssetRepository assetRepository;
     private final Map<String, CachedInsight> cache = new ConcurrentHashMap<>();
 
     public SecurityInsightService(List<EtfCompositionProvider> compositionProviders,
                                   YahooFinancePriceProvider yahoo,
-                                  CoinGeckoPriceProvider coinGecko) {
+                                  FinancialAssetRepository assetRepository) {
         this.compositionProviders = compositionProviders;
         this.yahoo = yahoo;
-        this.coinGecko = coinGecko;
+        this.assetRepository = assetRepository;
     }
 
     public SecurityInsightResponse getInsight(String ticker, String name) {
@@ -62,9 +62,11 @@ public class SecurityInsightService {
         return response;
     }
 
-    /** crypto via CoinGecko, else map Yahoo's instrumentType, else UNKNOWN. */
+    /** crypto when the registry has a CoinGecko id, else map Yahoo's instrumentType, else UNKNOWN. */
     private String classify(String upperTicker) {
-        if (coinGecko.canPrice(upperTicker)) {
+        boolean hasCoinGeckoId = assetRepository.findBySymbol(upperTicker)
+            .map(a -> a.getCoingeckoId() != null).orElse(false);
+        if (hasCoinGeckoId) {
             return "CRYPTO";
         }
         Optional<String> instrumentType = yahoo.getInstrumentType(upperTicker);

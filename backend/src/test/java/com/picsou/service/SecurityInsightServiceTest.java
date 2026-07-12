@@ -1,11 +1,12 @@
 package com.picsou.service;
 
-import com.picsou.adapter.price.CoinGeckoPriceProvider;
 import com.picsou.adapter.price.YahooFinancePriceProvider;
 import com.picsou.dto.EtfComposition;
 import com.picsou.dto.SecurityInsightResponse;
 import com.picsou.dto.WeightedSlice;
+import com.picsou.model.FinancialAsset;
 import com.picsou.port.EtfCompositionProvider;
+import com.picsou.repository.FinancialAssetRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -26,10 +27,21 @@ import static org.mockito.Mockito.when;
 class SecurityInsightServiceTest {
 
     @Mock YahooFinancePriceProvider yahoo;
-    @Mock CoinGeckoPriceProvider coinGecko;
+    @Mock FinancialAssetRepository assetRepository;
 
     private SecurityInsightService serviceWith(EtfCompositionProvider... providers) {
-        return new SecurityInsightService(List.of(providers), yahoo, coinGecko);
+        return new SecurityInsightService(List.of(providers), yahoo, assetRepository);
+    }
+
+    /** Stub the registry so {@code symbol} classifies as crypto (has a CoinGecko id). */
+    private void stubCrypto(String symbol, String coingeckoId) {
+        when(assetRepository.findBySymbol(symbol))
+            .thenReturn(Optional.of(FinancialAsset.builder().symbol(symbol).coingeckoId(coingeckoId).build()));
+    }
+
+    /** Stub the registry so {@code symbol} is not crypto (no row / no CoinGecko id). */
+    private void stubNotCrypto(String symbol) {
+        when(assetRepository.findBySymbol(symbol)).thenReturn(Optional.empty());
     }
 
     private static EtfCompositionProvider fakeProvider(boolean supports, EtfComposition comp) {
@@ -49,7 +61,7 @@ class SecurityInsightServiceTest {
 
     @Test
     void crypto_isDetectedFromCoinGecko_andHasNoComposition() {
-        when(coinGecko.canPrice("BTC")).thenReturn(true);
+        stubCrypto("BTC", "bitcoin");
         var service = serviceWith();
 
         SecurityInsightResponse r = service.getInsight("BTC", "Bitcoin");
@@ -61,7 +73,7 @@ class SecurityInsightServiceTest {
 
     @Test
     void equity_mapsToStock_withNoComposition() {
-        when(coinGecko.canPrice("MC.PA")).thenReturn(false);
+        stubNotCrypto("MC.PA");
         when(yahoo.getInstrumentType("MC.PA")).thenReturn(Optional.of("EQUITY"));
         var service = serviceWith();
 
@@ -73,7 +85,7 @@ class SecurityInsightServiceTest {
 
     @Test
     void unknown_whenInstrumentTypeMissing() {
-        when(coinGecko.canPrice("XYZ")).thenReturn(false);
+        stubNotCrypto("XYZ");
         when(yahoo.getInstrumentType("XYZ")).thenReturn(Optional.empty());
         var service = serviceWith();
 
@@ -82,7 +94,7 @@ class SecurityInsightServiceTest {
 
     @Test
     void etf_returnsCompositionFromFirstResolvingProvider() {
-        when(coinGecko.canPrice("NQSE")).thenReturn(false);
+        stubNotCrypto("NQSE");
         when(yahoo.getInstrumentType("NQSE")).thenReturn(Optional.of("ETF"));
 
         var comp = composition(
@@ -104,7 +116,7 @@ class SecurityInsightServiceTest {
 
     @Test
     void etf_withCountriesAndSectorsButNoCompanies_stillReturnsComposition() {
-        when(coinGecko.canPrice("PUST")).thenReturn(false);
+        stubNotCrypto("PUST");
         when(yahoo.getInstrumentType("PUST")).thenReturn(Optional.of("ETF"));
 
         var comp = composition(
@@ -123,7 +135,7 @@ class SecurityInsightServiceTest {
 
     @Test
     void etf_withProviderReturningAllEmptyBars_hasNullComposition() {
-        when(coinGecko.canPrice("EMPT")).thenReturn(false);
+        stubNotCrypto("EMPT");
         when(yahoo.getInstrumentType("EMPT")).thenReturn(Optional.of("ETF"));
         var emptyComp = composition(List.of(), List.of(), List.of());
         var service = serviceWith(fakeProvider(true, emptyComp));
@@ -133,7 +145,7 @@ class SecurityInsightServiceTest {
 
     @Test
     void etf_withNoResolvingProvider_hasNullComposition() {
-        when(coinGecko.canPrice("CW8")).thenReturn(false);
+        stubNotCrypto("CW8");
         when(yahoo.getInstrumentType("CW8")).thenReturn(Optional.of("ETF"));
         var service = serviceWith(fakeProvider(false, null));
 
@@ -145,7 +157,7 @@ class SecurityInsightServiceTest {
 
     @Test
     void etf_withFirstProviderReturningEmpty_fallsThroughToSecond() {
-        when(coinGecko.canPrice("IWDA")).thenReturn(false);
+        stubNotCrypto("IWDA");
         when(yahoo.getInstrumentType("IWDA")).thenReturn(Optional.of("ETF"));
 
         var emptyProvider = fakeProvider(true, null); // Optional.empty()
@@ -162,7 +174,7 @@ class SecurityInsightServiceTest {
 
     @Test
     void result_isCached_acrossCalls() {
-        when(coinGecko.canPrice("MC.PA")).thenReturn(false);
+        stubNotCrypto("MC.PA");
         when(yahoo.getInstrumentType("MC.PA")).thenReturn(Optional.of("EQUITY"));
         var service = serviceWith();
 

@@ -1,5 +1,7 @@
 package com.picsou.service;
 
+import com.picsou.model.AssetStatus;
+import com.picsou.model.AssetType;
 import com.picsou.model.FinancialAsset;
 import com.picsou.model.PriceSnapshot;
 import com.picsou.repository.FinancialAssetRepository;
@@ -15,6 +17,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @Service
 public class PriceService {
@@ -37,25 +40,50 @@ public class PriceService {
         this.assetRepository = assetRepository;
     }
 
-    /** A ticker the operator marked WORTHLESS (delisted): priced at a fixed zero, never fetched. */
-    private boolean isWorthless(String upperTicker) {
-        return assetRepository.findBySymbol(upperTicker).map(FinancialAsset::isWorthless).orElse(false);
+    /**
+     * Resolve every symbol in the set with a single batched read, instead of a {@code findBySymbol}
+     * per ticker. {@link #refreshPrices} and {@link #backfillHistoricalPrices} each need the asset
+     * both for the WORTHLESS check and for the eventual snapshot/price write — this lets both passes
+     * share the one lookup rather than querying the same symbol twice.
+     */
+    private Map<String, FinancialAsset> assetsForSymbols(Set<String> upperSymbols) {
+        if (upperSymbols.isEmpty()) return Map.of();
+        return assetRepository.findBySymbolIn(upperSymbols).stream()
+            .collect(Collectors.toMap(FinancialAsset::getSymbol, a -> a));
     }
 
     /**
-     * Returns EUR price for the given ticker.
-     * Returns BigDecimal.ONE if ticker is "EUR" (no conversion needed).
-     * Returns null if price unavailable.
+     * Mint a bare PENDING/UNKNOWN passthrough row for a symbol not yet in the registry (a wallet's
+     * first sync can price a coin before it's registered). Mirrors
+     * {@link com.picsou.service.FinancialAssetService#getOrCreate} but stays on the repository to
+     * avoid the FinancialAssetService ↔ PriceService dependency cycle. Only called for a symbol
+     * already known absent from {@link #assetsForSymbols} — never re-queries before inserting.
      */
-    public BigDecimal getPriceEur(String ticker) {
-        if (ticker == null || ticker.isBlank() || "EUR".equalsIgnoreCase(ticker)) {
-            return BigDecimal.ONE;
-        }
+    private FinancialAsset mintAsset(String upperSymbol) {
+        return assetRepository.save(FinancialAsset.builder()
+            .symbol(upperSymbol)
+            .type(AssetType.UNKNOWN)
+            .status(AssetStatus.PENDING)
+            .build());
+    }
 
-        String upper = ticker.toUpperCase();
+    /**
+     * Returns EUR price for an asset, or {@code null} when there's no asset (account with no dedicated
+     * holding) or the price is unavailable. The primary entry point: any caller that already holds a
+     * {@link FinancialAsset} routes straight through here. {@link #getPriceEur(String)} stays for the
+     * two sites that only ever have a bare ticker string (a bank-account currency code, or an MCP
+     * tool's caller-supplied ticker argument).
+     *
+     * <p>Returns {@link BigDecimal#ONE} for EUR (no conversion) and {@link BigDecimal#ZERO} for a
+     * WORTHLESS asset (fixed zero, never fetched).
+     */
+    public BigDecimal getPriceEur(FinancialAsset asset) {
+        if (asset == null) return null;
+        String upper = asset.getSymbol().toUpperCase();
+        if ("EUR".equals(upper)) return BigDecimal.ONE;
 
-        // A ticker marked WORTHLESS is valued at a known zero — no cache, no provider call.
-        if (isWorthless(upper)) return BigDecimal.ZERO;
+        // A WORTHLESS asset is valued at a known zero — no cache, no provider call.
+        if (asset.isWorthless()) return BigDecimal.ZERO;
 
         // Check cache
         CachedPrice cached = priceCache.get(upper);
@@ -63,8 +91,8 @@ public class PriceService {
             return cached.price();
         }
 
-        // Fetch from whichever provider the router routes this ticker to.
-        BigDecimal price = priceRouter.getPricesEur(Set.of(upper)).get(upper);
+        // Fetch from whichever provider the router routes this asset to.
+        BigDecimal price = priceRouter.getPricesEur(List.of(asset)).get(upper);
         if (price != null) {
             priceCache.put(upper, new CachedPrice(price, Instant.now()));
             // Opportunistic persistence only: callers like DashboardService run in a read-only
@@ -75,8 +103,24 @@ public class PriceService {
             }
             return price;
         }
-
         return null;
+    }
+
+    /**
+     * Returns EUR price for a bare ticker string — the seam for the two callers with no asset in hand
+     * (a bank-account currency code, an MCP tool's ticker argument). Resolves the symbol to its
+     * registered asset, or a transient (non-persisted) one carrying just the symbol when unregistered,
+     * then prices it exactly like {@link #getPriceEur(FinancialAsset)}. Returns {@link BigDecimal#ONE}
+     * for EUR/blank, {@code null} when unavailable.
+     */
+    public BigDecimal getPriceEur(String ticker) {
+        if (ticker == null || ticker.isBlank() || "EUR".equalsIgnoreCase(ticker)) {
+            return BigDecimal.ONE;
+        }
+        String upper = ticker.toUpperCase();
+        FinancialAsset asset = assetRepository.findBySymbol(upper)
+            .orElseGet(() -> FinancialAsset.builder().symbol(upper).build());
+        return getPriceEur(asset);
     }
 
     /** Bulk fetch and refresh cache for all provided tickers. */
@@ -87,12 +131,24 @@ public class PriceService {
 
         Set<String> toFetch = new HashSet<>();
         Set<String> worthlessTickers = new HashSet<>();
+        Set<String> nonEurTickers = new HashSet<>();
 
         for (String ticker : tickers) {
             String upper = ticker.toUpperCase();
             if ("EUR".equals(upper)) {
                 result.put(upper, BigDecimal.ONE);
-            } else if (isWorthless(upper)) {
+            } else {
+                nonEurTickers.add(upper);
+            }
+        }
+
+        // One batched read resolves every ticker's asset row up front; reused below for the
+        // WORTHLESS check and the snapshot write, instead of a findBySymbol per ticker in each pass.
+        Map<String, FinancialAsset> assets = assetsForSymbols(nonEurTickers);
+
+        for (String upper : nonEurTickers) {
+            FinancialAsset asset = assets.get(upper);
+            if (asset != null && asset.isWorthless()) {
                 // Known-zero: prices the holding at 0 without hitting any provider, and (below)
                 // without writing a phantom 0 snapshot into the price history.
                 worthlessTickers.add(upper);
@@ -105,7 +161,12 @@ public class PriceService {
         // The router partitions the set across providers (crypto → CoinGecko, else Yahoo) and batches
         // each provider into a single call.
         if (!toFetch.isEmpty()) {
-            priceRouter.getPricesEur(toFetch).forEach((k, v) -> {
+            // Hand the router the assets themselves (already loaded above); a symbol with no registry
+            // row rides a transient asset so it still routes to Yahoo verbatim, as before.
+            List<FinancialAsset> toFetchAssets = toFetch.stream()
+                .map(upper -> assets.getOrDefault(upper, FinancialAsset.builder().symbol(upper).build()))
+                .toList();
+            priceRouter.getPricesEur(toFetchAssets).forEach((k, v) -> {
                 priceCache.put(k, new CachedPrice(v, Instant.now()));
                 result.put(k, v);
             });
@@ -119,14 +180,15 @@ public class PriceService {
             if ("EUR".equals(entry.getKey())) continue;
             if (worthlessTickers.contains(entry.getKey())) continue; // don't snapshot a fixed zero
             if (entry.getValue() == null) continue;
+            FinancialAsset asset = assets.computeIfAbsent(entry.getKey(), this::mintAsset);
             assetRepository.updateLastPrice(entry.getKey(), entry.getValue(), Instant.now());
-            Optional<PriceSnapshot> existing = priceSnapshotRepository.findByTickerAndDate(entry.getKey(), today);
+            Optional<PriceSnapshot> existing = priceSnapshotRepository.findByAssetIdAndDate(asset.getId(), today);
             if (existing.isPresent()) {
                 existing.get().setPriceEur(entry.getValue());
                 priceSnapshotRepository.save(existing.get());
             } else {
                 priceSnapshotRepository.save(PriceSnapshot.builder()
-                    .ticker(entry.getKey())
+                    .asset(asset)
                     .date(today)
                     .priceEur(entry.getValue())
                     .build());
@@ -136,21 +198,20 @@ public class PriceService {
         return result;
     }
 
-    /** Convert an account's balance to EUR using its currency/ticker. */
-    public BigDecimal toEur(BigDecimal balance, String currency, String ticker) {
+    /** Convert an account's balance to EUR using its currency, or its asset's price when it has one. */
+    public BigDecimal toEur(BigDecimal balance, String currency, FinancialAsset asset) {
         if (balance == null) return BigDecimal.ZERO;
 
         // Already in EUR
-        if ("EUR".equalsIgnoreCase(currency) && (ticker == null || ticker.isBlank())) {
+        if ("EUR".equalsIgnoreCase(currency) && asset == null) {
             return balance;
         }
 
-        // Use ticker if available (more specific), else use currency
-        String symbol = (ticker != null && !ticker.isBlank()) ? ticker : currency;
-        BigDecimal price = getPriceEur(symbol);
+        // Use the asset if there is one (more specific — a single-asset account), else the currency.
+        BigDecimal price = asset != null ? getPriceEur(asset) : getPriceEur(currency);
 
         if (price == null) {
-            log.warn("No price available for symbol: {}, returning raw balance", symbol);
+            log.warn("No price available for {}, returning raw balance", asset != null ? asset.getSymbol() : currency);
             return balance;
         }
 
@@ -181,10 +242,19 @@ public class PriceService {
         List<String> noData = new ArrayList<>();
         List<String> upToDate = new ArrayList<>();
 
+        // One batched read up front (see refreshPrices) instead of isWorthless + assetForSnapshot
+        // separately querying the same symbol back to back for every ticker in the loop below.
+        Set<String> upperTickers = firstDateByTicker.keySet().stream()
+            .map(String::toUpperCase)
+            .filter(t -> !"EUR".equals(t))
+            .collect(Collectors.toSet());
+        Map<String, FinancialAsset> assets = assetsForSymbols(upperTickers);
+
         for (Map.Entry<String, LocalDate> e : firstDateByTicker.entrySet()) {
             String upper = e.getKey().toUpperCase();
             if ("EUR".equals(upper)) continue;
-            if (isWorthless(upper)) continue;   // fixed-zero: no history to fetch, no provider call
+            FinancialAsset asset = assets.computeIfAbsent(upper, this::mintAsset);
+            if (asset.isWorthless()) continue;   // fixed-zero: no history to fetch, no provider call
             LocalDate from = e.getValue();
 
             // Gap-aware: only fetch what's missing. If the latest stored snapshot already reaches
@@ -192,7 +262,7 @@ public class PriceService {
             // Otherwise fetch just the missing tail. This makes a warm restart's PriceBackfillRunner
             // a no-op instead of re-downloading the whole window and burning the rate limit.
             LocalDate effectiveFrom = from;
-            Optional<PriceSnapshot> latest = priceSnapshotRepository.findLatestByTickerBeforeOrOnDate(upper, to);
+            Optional<PriceSnapshot> latest = priceSnapshotRepository.findLatestByAssetIdBeforeOrOnDate(asset.getId(), to);
             if (latest.isPresent()) {
                 LocalDate nextMissing = latest.get().getDate().plusDays(1);
                 if (!nextMissing.isBefore(to)) {   // covered up to (at least) yesterday
@@ -206,7 +276,7 @@ public class PriceService {
 
             // The router picks the history-capable provider for this ticker (CoinGecko's breaker
             // absorbs the free tier's 429s), so this loop just walks the tickers.
-            Map<LocalDate, BigDecimal> prices = priceRouter.getHistoricalPricesEur(upper, effectiveFrom, to);
+            Map<LocalDate, BigDecimal> prices = priceRouter.getHistoricalPricesEur(asset, effectiveFrom, to);
 
             if (prices.isEmpty()) {
                 noData.add(upper);
@@ -215,9 +285,9 @@ public class PriceService {
 
             int added = 0;
             for (var entry : prices.entrySet()) {
-                if (priceSnapshotRepository.findByTickerAndDate(upper, entry.getKey()).isEmpty()) {
+                if (priceSnapshotRepository.findByAssetIdAndDate(asset.getId(), entry.getKey()).isEmpty()) {
                     priceSnapshotRepository.save(PriceSnapshot.builder()
-                        .ticker(upper)
+                        .asset(asset)
                         .date(entry.getKey())
                         .priceEur(entry.getValue())
                         .build());
@@ -258,6 +328,17 @@ public class PriceService {
         priceCache.clear();
     }
 
+    /**
+     * Daily snapshots for a symbol over {@code [from, to]} — resolves the symbol to its asset once,
+     * then queries the history by asset id. Empty when the symbol isn't registered.
+     */
+    public List<PriceSnapshot> priceHistory(String ticker, LocalDate from, LocalDate to) {
+        if (ticker == null || ticker.isBlank()) return List.of();
+        return assetRepository.findBySymbol(ticker.toUpperCase())
+            .map(a -> priceSnapshotRepository.findByAssetIdInAndDateBetween(List.of(a.getId()), from, to))
+            .orElseGet(List::of);
+    }
+
     /** Evict one ticker from the in-memory cache — used when its asset mapping changes. */
     public void evictFromCache(String ticker) {
         if (ticker != null) priceCache.remove(ticker.toUpperCase());
@@ -271,7 +352,9 @@ public class PriceService {
         if (ticker == null || ticker.isBlank() || "EUR".equalsIgnoreCase(ticker)) {
             return Map.of();
         }
-
-        return priceRouter.getIntradayPricesEur(ticker.toUpperCase(), from, to);
+        String upper = ticker.toUpperCase();
+        FinancialAsset asset = assetRepository.findBySymbol(upper)
+            .orElseGet(() -> FinancialAsset.builder().symbol(upper).build());
+        return priceRouter.getIntradayPricesEur(asset, from, to);
     }
 }

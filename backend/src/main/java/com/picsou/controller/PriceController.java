@@ -1,7 +1,6 @@
 package com.picsou.controller;
 
 import com.picsou.model.PriceSnapshot;
-import com.picsou.repository.PriceSnapshotRepository;
 import com.picsou.service.PriceService;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,11 +16,9 @@ import java.util.stream.Collectors;
 public class PriceController {
 
     private final PriceService priceService;
-    private final PriceSnapshotRepository priceSnapshotRepository;
 
-    public PriceController(PriceService priceService, PriceSnapshotRepository priceSnapshotRepository) {
+    public PriceController(PriceService priceService) {
         this.priceService = priceService;
-        this.priceSnapshotRepository = priceSnapshotRepository;
     }
 
     @GetMapping
@@ -44,8 +41,7 @@ public class PriceController {
     ) {
         LocalDate to = LocalDate.now();
         LocalDate from = to.minusMonths(months);
-        List<PriceSnapshot> snapshots = priceSnapshotRepository
-            .findByTickerInAndDateBetween(Set.of(ticker.toUpperCase()), from, to);
+        List<PriceSnapshot> snapshots = priceService.priceHistory(ticker, from, to);
 
         List<Map<String, Object>> result = new ArrayList<>();
         for (PriceSnapshot ps : snapshots) {

@@ -1,5 +1,6 @@
 package com.picsou.adapter.price;
 
+import com.picsou.model.FinancialAsset;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -14,7 +15,6 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -22,6 +22,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 class YahooFinancePriceProviderTest {
+
+    /** A bare asset carrying just its symbol; Yahoo queries it verbatim (no yahoo_symbol set). */
+    private static FinancialAsset asset(String symbol) {
+        return FinancialAsset.builder().symbol(symbol).build();
+    }
 
     private static final String AAPL_USD = """
             {"chart":{"result":[{"meta":{"regularMarketPrice":100.0,"currency":"USD"},
@@ -87,7 +92,7 @@ class YahooFinancePriceProviderTest {
             return null;
         }, calls);
 
-        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("ASML.AS"));
+        Map<String, BigDecimal> result = provider.getPricesEur(List.of(asset("ASML.AS")));
 
         assertThat(result).containsEntry("ASML.AS", BigDecimal.valueOf(700.0));
         assertThat(calls.get()).isEqualTo(1); // no FX call needed for EUR
@@ -101,7 +106,7 @@ class YahooFinancePriceProviderTest {
             return null;
         }, null);
 
-        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("AAPL"));
+        Map<String, BigDecimal> result = provider.getPricesEur(List.of(asset("AAPL")));
 
         // 100 USD × 0.92 = 92 EUR
         assertThat(result.get("AAPL").doubleValue()).isCloseTo(92.0, within(0.001));
@@ -115,7 +120,7 @@ class YahooFinancePriceProviderTest {
             return null;
         }, null);
 
-        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("8729.T"));
+        Map<String, BigDecimal> result = provider.getPricesEur(List.of(asset("8729.T")));
 
         // 3000 JPY × 0.0060 = 18 EUR
         assertThat(result.get("8729.T").doubleValue()).isCloseTo(18.0, within(0.01));
@@ -129,7 +134,7 @@ class YahooFinancePriceProviderTest {
             return null;
         }, null);
 
-        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("LLOY.L"));
+        Map<String, BigDecimal> result = provider.getPricesEur(List.of(asset("LLOY.L")));
 
         // 5000 GBp = 50 GBP × 1.18 = 59 EUR
         assertThat(result.get("LLOY.L").doubleValue()).isCloseTo(59.0, within(0.01));
@@ -143,7 +148,7 @@ class YahooFinancePriceProviderTest {
             return null;
         }, null);
 
-        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("AAPL"));
+        Map<String, BigDecimal> result = provider.getPricesEur(List.of(asset("AAPL")));
 
         assertThat(result).doesNotContainKey("AAPL"); // no fabricated EUR value
     }
@@ -155,7 +160,7 @@ class YahooFinancePriceProviderTest {
             return null;
         }, null);
 
-        Map<String, BigDecimal> result = provider.getPricesEur(Set.of("WEIRD"));
+        Map<String, BigDecimal> result = provider.getPricesEur(List.of(asset("WEIRD")));
 
         // Currency null → treat as EUR (preserves pre-fix behavior for broken payloads)
         assertThat(result.get("WEIRD")).isEqualTo(BigDecimal.valueOf(42.0));
@@ -184,8 +189,8 @@ class YahooFinancePriceProviderTest {
         var provider = new YahooFinancePriceProvider(
             WebClient.builder().exchangeFunction(exchange).build());
 
-        provider.getPricesEur(Set.of("AAPL"));
-        provider.getPricesEur(Set.of("MSFT"));
+        provider.getPricesEur(List.of(asset("AAPL")));
+        provider.getPricesEur(List.of(asset("MSFT")));
 
         // First USD ticker triggers FX fetch and caches; second USD ticker
         // must reuse the cached rate.
@@ -212,7 +217,7 @@ class YahooFinancePriceProviderTest {
         }, null);
 
         Map<LocalDate, BigDecimal> prices = provider.getHistoricalPricesEur(
-            "AAPL", LocalDate.of(2023, 11, 1), LocalDate.of(2023, 12, 1));
+            asset("AAPL"), LocalDate.of(2023, 11, 1), LocalDate.of(2023, 12, 1));
 
         // All closes × 0.92, scaled to 8 decimals
         assertThat(prices).isNotEmpty();
@@ -230,7 +235,7 @@ class YahooFinancePriceProviderTest {
 
         var from = java.time.LocalDateTime.of(2023, 1, 1, 0, 0);
         var to = java.time.LocalDateTime.of(2030, 1, 1, 0, 0);
-        Map<java.time.LocalDateTime, BigDecimal> prices = provider.getIntradayPricesEur("8729.T", from, to);
+        Map<java.time.LocalDateTime, BigDecimal> prices = provider.getIntradayPricesEur(asset("8729.T"), from, to);
 
         // 3000 JPY × 0.006 = 18; 3100 JPY × 0.006 = 18.6 — both must be present
         assertThat(prices.values().stream().map(BigDecimal::doubleValue).toList())

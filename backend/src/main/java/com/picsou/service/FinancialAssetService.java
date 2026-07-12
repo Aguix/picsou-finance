@@ -294,7 +294,7 @@ public class FinancialAssetService {
         // purge the symbol's history and refetch it under the corrected coin. Re-pinning to the
         // same coin keeps the history — it was fetched from the right source.
         if (previousId != null && !previousId.equals(coinId)) {
-            purgeAndRefetchPrices(upper);
+            purgeAndRefetchPrices(saved);
         }
         return saved;
     }
@@ -320,7 +320,7 @@ public class FinancialAssetService {
         asset.setStatus(AssetStatus.PENDING);
         FinancialAsset saved = assetRepository.save(asset);
 
-        priceSnapshotRepository.deleteByTicker(upper);
+        priceSnapshotRepository.deleteByAssetId(saved.getId());
         priceService.evictFromCache(upper);
         log.info("Cleared mapping for {} — reverted to PENDING and purged its price history", upper);
         return saved;
@@ -349,7 +349,7 @@ public class FinancialAssetService {
         }
 
         assetRepository.delete(asset);
-        priceSnapshotRepository.deleteByTicker(upper);
+        priceSnapshotRepository.deleteByAssetId(asset.getId());
         priceService.evictFromCache(upper);
         log.info("Deleted asset {} (was CoinGecko id '{}') and purged its price history",
             upper, asset.getCoingeckoId());
@@ -377,7 +377,7 @@ public class FinancialAssetService {
         asset.setStatus(AssetStatus.WORTHLESS);
         FinancialAsset saved = assetRepository.save(asset);
 
-        priceSnapshotRepository.deleteByTicker(upper);
+        priceSnapshotRepository.deleteByAssetId(saved.getId());
         priceService.evictFromCache(upper);
         zeroHoldings(upper);
         log.info("Marked symbol {} as worthless — purged price history and zeroed its holdings", upper);
@@ -399,8 +399,9 @@ public class FinancialAssetService {
      * has none). Backfill failures are non-fatal — the mapping is already corrected, and the
      * boot-time runner or a later import fills the gap.
      */
-    private void purgeAndRefetchPrices(String upperTicker) {
-        int purged = priceSnapshotRepository.deleteByTicker(upperTicker);
+    private void purgeAndRefetchPrices(FinancialAsset asset) {
+        String upperTicker = asset.getSymbol();
+        int purged = priceSnapshotRepository.deleteByAssetId(asset.getId());
         priceService.evictFromCache(upperTicker);
         log.info("Mapping for {} changed — purged {} price snapshots fetched under the old id",
             upperTicker, purged);

@@ -35,7 +35,7 @@ public record AccountResponse(
             a.getLastSyncedAt(),
             a.isManual(),
             a.getColor(),
-            a.getTicker(),
+            a.getAsset() == null ? null : a.getAsset().getSymbol(),
             a.getLogoUrl(),
             a.getCreatedAt(),
             null,

@@ -46,7 +46,7 @@ class AccountsExporter implements EntityExporter {
                 nullSafe(a.getProvider()),
                 nullSafe(a.getCurrency()),
                 nullSafe(a.getCurrentBalance() == null ? null : a.getCurrentBalance().toPlainString()),
-                nullSafe(a.getTicker()),
+                nullSafe(a.getAsset() == null ? null : a.getAsset().getSymbol()),
                 String.valueOf(a.isManual()),
                 nullSafe(a.getColor()),
                 nullSafe(a.getExternalAccountId()),
@@ -68,7 +68,7 @@ class AccountsExporter implements EntityExporter {
             json.writeStringField("provider", a.getProvider());
             json.writeStringField("currency", a.getCurrency());
             writeBigDecimal(json, "current_balance", a.getCurrentBalance());
-            json.writeStringField("ticker", a.getTicker());
+            json.writeStringField("ticker", a.getAsset() == null ? null : a.getAsset().getSymbol());
             json.writeBooleanField("is_manual", a.isManual());
             json.writeStringField("color", a.getColor());
             json.writeStringField("external_account_id", a.getExternalAccountId());
