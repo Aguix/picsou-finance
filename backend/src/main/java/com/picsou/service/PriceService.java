@@ -68,6 +68,19 @@ public class PriceService {
     }
 
     /**
+     * A throwaway asset for a symbol with no registry row, used by the bare-ticker seams below
+     * (currency code, MCP ticker argument, an unregistered symbol in a bulk refresh). Carries
+     * {@code yahoo_symbol = symbol} so it still routes to Yahoo verbatim: unlike a registry row —
+     * which is deliberately left un-priceable by Yahoo until its {@code yahoo_symbol} is resolved,
+     * so an unresolved coin no longer wastes a Yahoo call — these seams take a ticker the caller has
+     * explicitly handed us to price, exactly as before {@code canPrice} was gated on {@code
+     * yahoo_symbol}. A bare fiat code still gets no Yahoo quote and returns null, as it always did.
+     */
+    private static FinancialAsset transientAsset(String upperSymbol) {
+        return FinancialAsset.builder().symbol(upperSymbol).yahooSymbol(upperSymbol).build();
+    }
+
+    /**
      * Returns EUR price for an asset, or {@code null} when there's no asset (account with no dedicated
      * holding) or the price is unavailable. The primary entry point: any caller that already holds a
      * {@link FinancialAsset} routes straight through here. {@link #getPriceEur(String)} stays for the
@@ -119,7 +132,7 @@ public class PriceService {
         }
         String upper = ticker.toUpperCase();
         FinancialAsset asset = assetRepository.findBySymbol(upper)
-            .orElseGet(() -> FinancialAsset.builder().symbol(upper).build());
+            .orElseGet(() -> transientAsset(upper));
         return getPriceEur(asset);
     }
 
@@ -164,7 +177,7 @@ public class PriceService {
             // Hand the router the assets themselves (already loaded above); a symbol with no registry
             // row rides a transient asset so it still routes to Yahoo verbatim, as before.
             List<FinancialAsset> toFetchAssets = toFetch.stream()
-                .map(upper -> assets.getOrDefault(upper, FinancialAsset.builder().symbol(upper).build()))
+                .map(upper -> assets.getOrDefault(upper, transientAsset(upper)))
                 .toList();
             priceRouter.getPricesEur(toFetchAssets).forEach((k, v) -> {
                 priceCache.put(k, new CachedPrice(v, Instant.now()));
@@ -354,7 +367,7 @@ public class PriceService {
         }
         String upper = ticker.toUpperCase();
         FinancialAsset asset = assetRepository.findBySymbol(upper)
-            .orElseGet(() -> FinancialAsset.builder().symbol(upper).build());
+            .orElseGet(() -> transientAsset(upper));
         return priceRouter.getIntradayPricesEur(asset, from, to);
     }
 }

@@ -24,6 +24,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Fetches stock/ETF prices from Yahoo Finance (unofficial, no API key needed).
  * Used for PEA/Compte-Titres positions with tickers like "IWDA.AS", "MC.PA", etc.
  *
+ * Only prices assets carrying a {@code yahoo_symbol} (see {@code canPrice}) — an unresolved
+ * asset is rejected rather than queried on its raw internal symbol.
+ *
  * Prices are converted to EUR using Yahoo's own FX endpoint ({CURRENCY}EUR=X)
  * when the security is quoted in a non-EUR currency. Rates are cached for 15
  * minutes to limit API calls. London pence (GBp/GBX) is handled as GBP/100.
@@ -65,9 +68,11 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
     }
 
     /**
-     * Yahoo is the catch-all quote source: it accepts any asset whose Yahoo symbol
-     * ({@code yahoo_symbol}, falling back to the internal symbol) isn't a plain ISIN. The router only
-     * reaches Yahoo for an asset CoinGecko couldn't price (no {@code coingecko_id}).
+     * Yahoo is the catch-all quote source: it accepts any asset carrying a {@code yahoo_symbol}
+     * (populated at discovery — see {@code FinancialAssetService.getOrCreateStock}) that isn't a
+     * plain ISIN. An asset with no {@code yahoo_symbol} (an unresolved crypto, e.g.) is rejected
+     * outright — it no longer falls through to a wasted Yahoo call on the raw internal symbol.
+     * The router only reaches Yahoo for an asset CoinGecko couldn't price (no {@code coingecko_id}).
      */
     @Override
     public boolean canPrice(FinancialAsset asset) {
@@ -87,9 +92,9 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
         return true;
     }
 
-    /** The symbol Yahoo is queried with: the asset's {@code yahoo_symbol} when set, else its symbol. */
+    /** The symbol Yahoo is queried with: the asset's {@code yahoo_symbol}. */
     private static String yahooSymbol(FinancialAsset asset) {
-        return asset.getYahooSymbol() != null ? asset.getYahooSymbol() : asset.getSymbol();
+        return asset.getYahooSymbol();
     }
 
     @Override

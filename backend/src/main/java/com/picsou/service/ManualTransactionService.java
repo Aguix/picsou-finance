@@ -27,6 +27,7 @@ public class ManualTransactionService {
     private final HoldingComputeService holdingComputeService;
     private final FinaryPersistenceHelper finaryPersistenceHelper;
     private final OpenFigiIsinConverter openFigiIsinConverter;
+    private final FinancialAssetService financialAssetService;
 
     private static final Set<AccountType> INVESTMENT_TYPES =
         Set.of(AccountType.PEA, AccountType.COMPTE_TITRES, AccountType.CRYPTO);
@@ -137,6 +138,13 @@ public class ManualTransactionService {
             OpenFigiIsinConverter.TickerResult r = openFigiIsinConverter.resolve(input);
             resolvedTicker = r.ticker();   // already falls back to the ISIN itself on failure
             resolvedName = r.name();
+            // A real market ISIN (not TR's internal XF000... crypto prefix, which resolveCrypto
+            // already owns) means the ticker just came back from OpenFIGI — register it as a
+            // stock with its Yahoo symbol now, since HoldingComputeService's later getOrCreate()
+            // only sees the bare ticker string and can't tell it apart from a manual crypto entry.
+            if (!OpenFigiIsinConverter.isTrCryptoIsin(input)) {
+                financialAssetService.getOrCreateStock(resolvedTicker);
+            }
         } else {
             resolvedTicker = input.trim().toUpperCase();
             resolvedName = null;

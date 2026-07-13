@@ -251,16 +251,23 @@ public class BoursoSyncService {
             holdingRepository.flush();
 
             Map<String, HoldingDedup.HoldingAgg> deduped = new HashMap<>();
+            // A ticker is stock-context (OpenFIGI-resolved Yahoo symbol) only when it came from
+            // an ISIN lookup; a raw broker symbol (no ISIN) is unvalidated and stays ambiguous.
+            Map<String, Boolean> stockTicker = new HashMap<>();
             for (BoursoPosition p : data.positions()) {
                 String ticker;
                 String name = p.label();
+                boolean isStock;
                 if (p.isin() != null && !p.isin().isBlank()) {
                     var resolved = isinConverter.resolve(p.isin());
                     ticker = resolved.ticker();
                     if (resolved.name() != null) name = resolved.name();
+                    isStock = !OpenFigiIsinConverter.isTrCryptoIsin(p.isin());
                 } else {
                     ticker = p.symbol();
+                    isStock = false;
                 }
+                stockTicker.put(ticker, isStock);
                 deduped.merge(
                     ticker,
                     new HoldingDedup.HoldingAgg(p.quantity(), p.buyingPrice(), p.currentPrice(), name),
@@ -269,7 +276,9 @@ public class BoursoSyncService {
 
             for (Map.Entry<String, HoldingDedup.HoldingAgg> entry : deduped.entrySet()) {
                 HoldingDedup.HoldingAgg agg = entry.getValue();
-                FinancialAsset asset = financialAssetService.getOrCreate(entry.getKey());
+                FinancialAsset asset = Boolean.TRUE.equals(stockTicker.get(entry.getKey()))
+                    ? financialAssetService.getOrCreateStock(entry.getKey())
+                    : financialAssetService.getOrCreate(entry.getKey());
                 financialAssetService.fillNameIfAbsent(asset, agg.name());
                 holdingRepository.save(AccountHolding.builder()
                     .account(account)

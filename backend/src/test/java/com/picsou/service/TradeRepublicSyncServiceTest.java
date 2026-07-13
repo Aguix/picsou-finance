@@ -79,8 +79,8 @@ class TradeRepublicSyncServiceTest {
 
         when(isinConverter.resolve("IE00ISIN_A")).thenReturn(new TickerResult("RKLB", "Rocket Lab"));
         when(isinConverter.resolve("IE00ISIN_B")).thenReturn(new TickerResult("RKLB", "Rocket Lab"));
-        when(financialAssetService.getOrCreate("RKLB"))
-            .thenReturn(FinancialAsset.builder().symbol("RKLB").build());
+        when(financialAssetService.getOrCreateStock("RKLB"))
+            .thenReturn(FinancialAsset.builder().symbol("RKLB").yahooSymbol("RKLB").build());
 
         when(accountRepository.findByExternalAccountIdAndMemberId("tr_cto", memberId))
             .thenReturn(Optional.empty());
@@ -105,6 +105,51 @@ class TradeRepublicSyncServiceTest {
         assertThat(saved.getQuantity()).isEqualByComparingTo("5");
         // VWAP: (2*10 + 3*20) / 5 = 16  -- scale-8 representation 16.00000000
         assertThat(saved.getAverageBuyIn()).isEqualByComparingTo("16.00000000");
+    }
+
+    @Test
+    void sync_trNativeCryptoIsin_routesThroughGetOrCreateNotGetOrCreateStock() {
+        // A TR-internal crypto ISIN (XF000...) is already resolveCrypto-owned by the time it
+        // reaches here (OpenFigiIsinConverter's short-circuit); it must never be minted as a
+        // stock with a spurious yahoo_symbol, or an unresolved coin would wrongly become
+        // Yahoo-priceable.
+        Long memberId = 7L;
+        FamilyMember member = FamilyMember.builder().id(memberId).displayName("Owner").build();
+
+        TradeRepublicSession storedSession = TradeRepublicSession.builder()
+            .member(member)
+            .sessionToken("enc-session")
+            .expiresAt(java.time.Instant.now().plusSeconds(3600))
+            .build();
+        when(sessionRepository.findByMemberId(memberId)).thenReturn(Optional.of(storedSession));
+        when(encryption.decrypt("enc-session")).thenReturn("plain-session");
+
+        TrPosition pos = new TrPosition("XF000BTC0017", bd("1"), bd("30000"), bd("31000"));
+        TrAccountData accountData = new TrAccountData(
+            "tr_cto", "TR Titres", AccountType.COMPTE_TITRES, bd("31000"), List.of(pos));
+        when(trPort.fetchAccounts("plain-session")).thenReturn(List.of(accountData));
+
+        when(isinConverter.resolve("XF000BTC0017")).thenReturn(new TickerResult("BTC", "Bitcoin"));
+        when(financialAssetService.getOrCreate("BTC"))
+            .thenReturn(FinancialAsset.builder().symbol("BTC").build());
+
+        when(accountRepository.findByExternalAccountIdAndMemberId("tr_cto", memberId))
+            .thenReturn(Optional.empty());
+        lenient().when(accountRepository.existsSoftDeletedByExternalAccountIdAndMemberId("tr_cto", memberId))
+            .thenReturn(false);
+        when(familyMemberRepository.findById(memberId)).thenReturn(Optional.of(member));
+        when(accountRepository.save(any(Account.class))).thenAnswer(inv -> {
+            Account a = inv.getArgument(0);
+            a.setId(1L);
+            return a;
+        });
+        lenient().when(accountService.toResponse(any(Account.class)))
+            .thenAnswer(inv -> com.picsou.dto.AccountResponse.from(inv.getArgument(0), bd("31000")));
+
+        service.sync(memberId);
+
+        verify(financialAssetService).getOrCreate("BTC");
+        verify(financialAssetService, never()).getOrCreateStock(any());
     }
 
     @Test

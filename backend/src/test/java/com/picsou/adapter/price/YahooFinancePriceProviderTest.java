@@ -23,9 +23,9 @@ import static org.assertj.core.api.Assertions.within;
 
 class YahooFinancePriceProviderTest {
 
-    /** A bare asset carrying just its symbol; Yahoo queries it verbatim (no yahoo_symbol set). */
+    /** An asset resolved to a Yahoo symbol (mirrors what getOrCreateStock persists at discovery). */
     private static FinancialAsset asset(String symbol) {
-        return FinancialAsset.builder().symbol(symbol).build();
+        return FinancialAsset.builder().symbol(symbol).yahooSymbol(symbol).build();
     }
 
     private static final String AAPL_USD = """
@@ -82,6 +82,35 @@ class YahooFinancePriceProviderTest {
         };
         WebClient client = WebClient.builder().exchangeFunction(exchange).build();
         return new YahooFinancePriceProvider(client);
+    }
+
+    @Test
+    void canPrice_isFalse_whenYahooSymbolIsNotSet() {
+        var provider = providerWith(url -> null, null);
+
+        // An unresolved asset (e.g. a PENDING crypto with no coingecko_id) must not fall through
+        // to a wasted Yahoo call on its raw internal symbol anymore.
+        FinancialAsset unresolved = FinancialAsset.builder().symbol("SHIB").build();
+
+        assertThat(provider.canPrice(unresolved)).isFalse();
+    }
+
+    @Test
+    void canPrice_isTrue_whenYahooSymbolIsSet_evenIfDifferentFromInternalSymbol() {
+        var provider = providerWith(url -> null, null);
+
+        FinancialAsset asset = FinancialAsset.builder().symbol("RKLB").yahooSymbol("RKLB").build();
+
+        assertThat(provider.canPrice(asset)).isTrue();
+    }
+
+    @Test
+    void canPrice_isFalse_whenYahooSymbolIsIsinShaped() {
+        var provider = providerWith(url -> null, null);
+
+        FinancialAsset asset = FinancialAsset.builder().symbol("IE00B4L5Y983").yahooSymbol("IE00B4L5Y983").build();
+
+        assertThat(provider.canPrice(asset)).isFalse();
     }
 
     @Test

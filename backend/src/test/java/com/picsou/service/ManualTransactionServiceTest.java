@@ -34,6 +34,7 @@ class ManualTransactionServiceTest {
     @Mock HoldingComputeService holdingComputeService;
     @Mock FinaryPersistenceHelper finaryPersistenceHelper;
     @Mock OpenFigiIsinConverter openFigiIsinConverter;
+    @Mock FinancialAssetService financialAssetService;
 
     @InjectMocks ManualTransactionService manualTransactionService;
 
@@ -219,6 +220,10 @@ class ManualTransactionServiceTest {
         // The raw ISIN must never surface in the transaction row.
         assertThat(result.description()).isEqualTo("iShares Core MSCI World UCITS ETF");
         verify(holdingComputeService).recomputeHoldings(account);
+        // OpenFIGI just resolved a real Yahoo ticker — register it as a stock right away, since
+        // the later recompute only sees the bare ticker string and can't tell it apart from a
+        // manually-typed crypto symbol.
+        verify(financialAssetService).getOrCreateStock("IWDA.AS");
     }
 
     @Test
@@ -248,5 +253,7 @@ class ManualTransactionServiceTest {
         // The row description is the chosen name, not the placeholder.
         assertThat(result.description()).isEqualTo("My World ETF");
         verify(openFigiIsinConverter, never()).resolve(any());
+        // A plain (non-ISIN) ticker is ambiguous crypto-vs-stock — left untouched, same as before.
+        verify(financialAssetService, never()).getOrCreateStock(any());
     }
 }

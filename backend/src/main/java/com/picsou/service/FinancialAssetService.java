@@ -51,7 +51,11 @@ import java.util.regex.Pattern;
  *
  * <p>{@link #resolveCrypto} is called at crypto-discovery time (import, TR sync), where the
  * context guarantees the symbol really is a crypto — so a symbol that also exists as a stock
- * ticker can't be mis-resolved by the general price path.
+ * ticker can't be mis-resolved by the general price path. {@link #getOrCreateStock} is its
+ * stock-side counterpart, called wherever a ticker has just come back from an OpenFIGI ISIN
+ * resolution (TR/Bourso sync, manual-transaction ISIN entry) — again a context-guaranteed
+ * non-crypto symbol, populating {@code yahoo_symbol} the same way {@code resolveCrypto}
+ * populates {@code coingecko_id}.
  */
 @Service
 @RequiredArgsConstructor
@@ -224,6 +228,43 @@ public class FinancialAssetService {
                 .type(AssetType.UNKNOWN)
                 .status(AssetStatus.PENDING)
                 .build()));
+    }
+
+    /**
+     * Return the asset for a Yahoo ticker already resolved via OpenFIGI at ISIN-discovery time
+     * (TR/Bourso sync, manual-transaction ISIN entry) — the stock-side counterpart of
+     * {@link #resolveCrypto}. Mints a {@code STOCK} row with {@code yahoo_symbol} set to the
+     * ticker the first time it's seen: for these sources the internal {@code symbol} already
+     * <em>is</em> the Yahoo ticker (OpenFIGI resolved it — not a guess). On an existing row it
+     * only fills in what's missing, and never touches one already typed {@code CRYPTO} — a
+     * stock-context ticker colliding with an existing crypto symbol must not clobber a working
+     * coin mapping.
+     */
+    @Transactional
+    public FinancialAsset getOrCreateStock(String yahooTicker) {
+        String upper = yahooTicker.trim().toUpperCase();
+        FinancialAsset asset = assetRepository.findBySymbol(upper).orElse(null);
+        if (asset == null) {
+            return assetRepository.save(FinancialAsset.builder()
+                .symbol(upper)
+                .type(AssetType.STOCK)
+                .status(AssetStatus.PENDING)
+                .yahooSymbol(upper)
+                .build());
+        }
+        if (asset.getType() == AssetType.CRYPTO) {
+            return asset;
+        }
+        boolean changed = false;
+        if (asset.getType() == AssetType.UNKNOWN) {
+            asset.setType(AssetType.STOCK);
+            changed = true;
+        }
+        if (asset.getYahooSymbol() == null) {
+            asset.setYahooSymbol(upper);
+            changed = true;
+        }
+        return changed ? assetRepository.save(asset) : asset;
     }
 
     /**

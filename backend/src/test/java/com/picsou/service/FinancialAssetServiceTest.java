@@ -560,6 +560,62 @@ class FinancialAssetServiceTest {
     }
 
     @Test
+    void getOrCreateStockMintsAStockWithYahooSymbolWhenSymbolIsUnseen() {
+        when(repository.findBySymbol("IWDA.AS")).thenReturn(Optional.empty());
+        expectSaveEcho();
+
+        FinancialAsset result = service.getOrCreateStock("iwda.as");
+
+        assertThat(result.getSymbol()).isEqualTo("IWDA.AS");
+        assertThat(result.getType()).isEqualTo(AssetType.STOCK);
+        assertThat(result.getStatus()).isEqualTo(AssetStatus.PENDING);
+        assertThat(result.getYahooSymbol()).isEqualTo("IWDA.AS");
+    }
+
+    @Test
+    void getOrCreateStockFillsInMissingYahooSymbolAndUpgradesUnknownType() {
+        // A row minted earlier by the generic getOrCreate() (e.g. a prior recompute) has no
+        // yahoo_symbol yet; a later OpenFIGI-backed discovery of the same ticker fills it in.
+        FinancialAsset existing = FinancialAsset.builder()
+            .symbol("RKLB").type(AssetType.UNKNOWN).status(AssetStatus.PENDING).build();
+        when(repository.findBySymbol("RKLB")).thenReturn(Optional.of(existing));
+        expectSaveEcho();
+
+        FinancialAsset result = service.getOrCreateStock("RKLB");
+
+        assertThat(result.getType()).isEqualTo(AssetType.STOCK);
+        assertThat(result.getYahooSymbol()).isEqualTo("RKLB");
+        verify(repository).save(existing);
+    }
+
+    @Test
+    void getOrCreateStockNeverTouchesAnExistingCryptoRow() {
+        // A stock-context ticker colliding with an already-resolved crypto symbol must not
+        // clobber the working coin mapping.
+        FinancialAsset crypto = FinancialAsset.builder()
+            .symbol("SOL").coingeckoId("solana").type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
+        when(repository.findBySymbol("SOL")).thenReturn(Optional.of(crypto));
+
+        FinancialAsset result = service.getOrCreateStock("SOL");
+
+        assertThat(result).isSameAs(crypto);
+        assertThat(result.getYahooSymbol()).isNull();
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void getOrCreateStockReturnsExistingAssetWithoutSavingWhenAlreadyComplete() {
+        FinancialAsset existing = FinancialAsset.builder()
+            .symbol("RKLB").type(AssetType.STOCK).status(AssetStatus.PENDING).yahooSymbol("RKLB").build();
+        when(repository.findBySymbol("RKLB")).thenReturn(Optional.of(existing));
+
+        FinancialAsset result = service.getOrCreateStock("RKLB");
+
+        assertThat(result).isSameAs(existing);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
     void fillNameIfAbsentSetsTheNameWhenAssetHasNone() {
         FinancialAsset asset = FinancialAsset.builder().symbol("IWDA.AS").build();
         expectSaveEcho();

@@ -359,10 +359,14 @@ public class TradeRepublicSyncService {
             // aggregate them via VWAP to avoid unique constraint violations and
             // preserve a meaningful weighted average buy-in.
             Map<String, HoldingDedup.HoldingAgg> deduped = new HashMap<>();
+            // A ticker is stock-context (OpenFIGI-resolved Yahoo symbol) unless it came from a
+            // TR-native crypto ISIN (XF000...), which resolveCrypto already owns.
+            Map<String, Boolean> stockTicker = new HashMap<>();
             for (TrPosition p : data.positions()) {
                 var result = isinConverter.resolve(p.isin());
                 String ticker = result.ticker();
                 String name = result.name();
+                stockTicker.put(ticker, !OpenFigiIsinConverter.isTrCryptoIsin(p.isin()));
                 deduped.merge(
                     ticker,
                     new HoldingDedup.HoldingAgg(p.quantity(), p.averageBuyIn(), p.currentPrice(), name),
@@ -370,7 +374,9 @@ public class TradeRepublicSyncService {
             }
             for (Map.Entry<String, HoldingDedup.HoldingAgg> entry : deduped.entrySet()) {
                 HoldingDedup.HoldingAgg agg = entry.getValue();
-                FinancialAsset asset = financialAssetService.getOrCreate(entry.getKey());
+                FinancialAsset asset = Boolean.TRUE.equals(stockTicker.get(entry.getKey()))
+                    ? financialAssetService.getOrCreateStock(entry.getKey())
+                    : financialAssetService.getOrCreate(entry.getKey());
                 financialAssetService.fillNameIfAbsent(asset, agg.name());
                 holdingRepository.save(AccountHolding.builder()
                     .account(account)
