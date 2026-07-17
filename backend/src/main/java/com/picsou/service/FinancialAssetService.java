@@ -1,11 +1,11 @@
 package com.picsou.service;
 
-import com.picsou.adapter.price.CoinGeckoPriceProvider;
-import com.picsou.adapter.price.CoinGeckoPriceProvider.CoinCandidate;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AssetStatus;
 import com.picsou.model.AssetType;
 import com.picsou.model.FinancialAsset;
+import com.picsou.port.AssetCandidate;
+import com.picsou.port.AssetResolverPort;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.FinancialAssetRepository;
 import com.picsou.repository.PriceSnapshotRepository;
@@ -22,40 +22,43 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Resolves and maintains the {@code financial_asset} registry — symbol → aggregator refs — the
  * dynamic replacement for the hardcoded maps the price providers used to carry.
  *
- * <p>Crypto resolution order for a symbol:
- * <ol>
- *   <li>registered asset with a CoinGecko id (or marked WORTHLESS) → done;</li>
- *   <li>CoinGecko {@code /search} for coins whose symbol equals the ticker;</li>
- *   <li>if exactly one symbol match, or one that <em>dominates</em> the others by market-cap rank,
- *       persist it as {@code AUTO};</li>
- *   <li>otherwise keep a {@code PENDING} row — visible and linkable in the management UI, retried
- *       on the next resolve — the operator disambiguates by supplying the CoinGecko link
- *       ({@link #setManualMapping}); we never guess between comparable coins.</li>
- * </ol>
+ * <p><b>The registry is what makes an aggregator able to price an asset.</b> Each aggregator owns one
+ * nullable ref column ({@code coingecko_id}, {@code yahoo_symbol}, {@code coinmarketcap_id}, …) and a
+ * null ref means that aggregator can't quote that asset — there is no notion of a "crypto aggregator"
+ * or an asset-type gate anywhere. Resolution is simply what fills those columns, and this service
+ * drives it through {@link AssetResolverPort}, never naming a concrete adapter: it loops over the
+ * injected resolvers, each contributing candidates from its own API and reading/writing only its own
+ * column. Adding an aggregator is one adapter + one column + one entity field; nothing here changes.
  *
- * <p>Mappings can also be listed, corrected, and forgotten after the fact (management UI): a
- * correction that changes the coin id purges the symbol's price history — fetched under the wrong
- * coin — and refetches it under the right one.</p>
+ * <p>Filling <em>several</em> refs for one asset is the point: an asset both CoinGecko and
+ * CoinMarketCap can quote keeps a live price when either one is rate-limited or turned off — the
+ * router falls through to the next aggregator holding a ref (see {@link PriceRouter}).
  *
- * <p>{@link #resolveCrypto} is called at crypto-discovery time (import, TR sync), where the
- * context guarantees the symbol really is a crypto — so a symbol that also exists as a stock
- * ticker can't be mis-resolved by the general price path. {@link #getOrCreateStock} is its
- * stock-side counterpart, called wherever a ticker has just come back from an OpenFIGI ISIN
- * resolution (TR/Bourso sync, manual-transaction ISIN entry) — again a context-guaranteed
- * non-crypto symbol, populating {@code yahoo_symbol} the same way {@code resolveCrypto}
- * populates {@code coingecko_id}.
+ * <p>Two ways a ref gets filled:
+ * <ul>
+ *   <li><b>Auto</b>, at discovery time from a context that guarantees what the symbol is —
+ *       {@link #resolveCrypto} (CSV import, TR sync) and {@link #getOrCreateStock} (a ticker back
+ *       from an OpenFIGI ISIN lookup). Auto-resolution only accepts a <em>dominant</em>
+ *       market-cap match ({@link #pickDominant}) and leaves anything ambiguous {@code PENDING}: we
+ *       never guess between comparable coins.</li>
+ *   <li><b>Confirmed by the operator</b>, from the import preview or the standing mapping UI —
+ *       {@link #previewResolutions} offers each aggregator's candidates without persisting anything,
+ *       and {@link #applyMappings} pins the picked id per aggregator as {@code USER}.</li>
+ * </ul>
+ *
+ * <p>A correction that changes an id the price history was fetched under purges that history and
+ * refetches it under the corrected id.
  */
 @Service
 @RequiredArgsConstructor
@@ -64,16 +67,20 @@ public class FinancialAssetService {
     private static final Logger log = LoggerFactory.getLogger(FinancialAssetService.class);
 
     /**
-     * When several coins share a symbol, the top-ranked one is accepted only if it dominates the
+     * When several candidates share a symbol, the top-ranked one is accepted only if it dominates the
      * runner-up by this factor (rank is 1-based, smaller = bigger cap). E.g. a coin ranked #5 beats
      * one ranked #300 (5×5=25 ≤ 300) but not one ranked #12 (5×5=25 > 12) — those stay ambiguous.
      */
     private static final int DOMINANCE_FACTOR = 5;
 
-    /** Grabs the coin-id slug from a CoinGecko coin URL, e.g. {@code .../en/coins/loaded-lions}. */
-    private static final Pattern COINGECKO_COIN_URL = Pattern.compile("/coins/([^/?#]+)");
+    /** The aggregator that auto-resolves a crypto symbol at discovery time (see {@link #resolveCrypto}). */
+    private static final String CRYPTO_DISCOVERY_AGGREGATOR = "coingecko";
 
-    private final CoinGeckoPriceProvider coinGecko;
+    /** The aggregator whose ref a Yahoo-ticker discovery fills (see {@link #getOrCreateStock}). */
+    private static final String STOCK_DISCOVERY_AGGREGATOR = "yahoo";
+
+    /** Every aggregator's resolution side, in bean order (@Order) — never a concrete adapter. */
+    private final List<AssetResolverPort> resolvers;
     private final FinancialAssetRepository assetRepository;
     private final PriceSnapshotRepository priceSnapshotRepository;
     private final TransactionRepository transactionRepository;
@@ -86,10 +93,20 @@ public class FinancialAssetService {
         return assetRepository.findAll(Sort.by("symbol"));
     }
 
+    /** The resolver for an aggregator key, or empty when no such aggregator is deployed. */
+    private Optional<AssetResolverPort> resolver(String aggregatorKey) {
+        return resolvers.stream()
+            .filter(r -> r.aggregatorKey().equals(aggregatorKey))
+            .findFirst();
+    }
+
     /**
-     * Resolve a single crypto symbol, persisting the asset if a confident match is found.
-     * Empty means unresolved — a {@code PENDING} row is kept so the symbol shows up in the
-     * management UI and is retried on the next resolve.
+     * Resolve a single crypto symbol against the crypto-discovery aggregator, persisting the asset if
+     * a confident match is found. Called where the context guarantees the symbol really is a coin
+     * (CSV import, TR sync) — so a symbol that also exists as a stock ticker can't be mis-resolved.
+     * Empty means unresolved: a {@code PENDING} row is kept so the symbol shows up in the management
+     * UI and is retried on the next resolve. Other aggregators' refs are filled by the operator from
+     * the preview, not guessed here.
      */
     @Transactional
     public Optional<FinancialAsset> resolveCrypto(String ticker) {
@@ -101,7 +118,8 @@ public class FinancialAssetService {
             return existing;
         }
 
-        CoinCandidate chosen = pickDominant(coinGecko.searchBySymbol(upper));
+        AssetResolverPort discovery = resolver(CRYPTO_DISCOVERY_AGGREGATOR).orElse(null);
+        AssetCandidate chosen = discovery == null ? null : pickDominant(discovery.searchBySymbol(upper));
         if (chosen == null) {
             if (existing.isEmpty()) {
                 assetRepository.save(FinancialAsset.builder()
@@ -110,38 +128,48 @@ public class FinancialAssetService {
                     .status(AssetStatus.PENDING)
                     .build());
             }
-            log.info("Crypto symbol {} could not be auto-resolved to a CoinGecko id (ambiguous or unknown)", upper);
+            log.info("Crypto symbol {} could not be auto-resolved (ambiguous or unknown)", upper);
             return Optional.empty();
         }
 
         FinancialAsset asset = existing.orElseGet(() -> FinancialAsset.builder().symbol(upper).build());
         asset.setType(AssetType.CRYPTO);
-        asset.setCoingeckoId(chosen.id());
+        discovery.setRef(asset, chosen.id());
         asset.setName(chosen.name());
         asset.setStatus(AssetStatus.AUTO);
         FinancialAsset saved = assetRepository.save(asset);
-        log.info("Resolved crypto symbol {} → CoinGecko id '{}' ({})", upper, chosen.id(), chosen.name());
+        log.info("Resolved crypto symbol {} → {} id '{}' ({})",
+            upper, discovery.aggregatorKey(), chosen.id(), chosen.name());
         return Optional.of(saved);
     }
 
-    /** Provisional resolution of one imported symbol, shown in the preview and persisted by nothing. */
+    /**
+     * One aggregator's offer for a symbol: everything it found, plus the match it would pick on its
+     * own. {@code suggested} is null when the aggregator ranks nothing dominant — the operator picks,
+     * or leaves this aggregator's ref unset (and it then simply doesn't price the asset).
+     */
+    public record AggregatorResolution(
+        String aggregatorKey,
+        AssetCandidate suggested,
+        List<AssetCandidate> candidates
+    ) {}
+
+    /** Provisional resolution of one symbol across every available aggregator; persisted by nothing. */
     public record AssetResolutionPreview(
         String symbol,
         AssetStatus currentStatus,
-        CoinCandidate suggested,
-        List<CoinCandidate> candidates
+        List<AggregatorResolution> aggregators
     ) {}
 
     /**
      * Provisional, <b>non-persisting</b> resolution for the crypto import preview. For every imported
      * symbol that isn't already settled ({@code USER}/{@code WORTHLESS}) it returns the current
-     * registry status, the best market-cap match ({@link #pickDominant}, possibly null), and the full
-     * candidate list from CoinGecko {@code /search} — the candidates {@link #resolveCrypto} discards
-     * after picking. Nothing is written: the operator confirms or corrects the choice in the preview
-     * and the import applies it as {@code USER} via {@link #applyUserMapping}. This is what stops a
-     * silent {@code AUTO} mis-match (a dominant-by-market-cap guess onto the wrong coin) from being
-     * frozen in the registry before the operator has seen it. A per-symbol search failure degrades to
-     * an empty candidate list rather than failing the batch.
+     * registry status and one block per available aggregator: that aggregator's candidates plus its
+     * dominant guess. Nothing is written — the operator confirms or corrects, and the import applies
+     * the result as {@code USER} via {@link #applyMappings}. This is what stops a silent {@code AUTO}
+     * mis-match (a dominant-by-market-cap guess onto the wrong coin) from being frozen in the registry
+     * before the operator has seen it, and it's where the second and third refs get filled — the ones
+     * that make price fallback possible at all.
      */
     @Transactional(readOnly = true)
     public List<AssetResolutionPreview> previewResolutions(Set<String> tickers) {
@@ -152,26 +180,17 @@ public class FinancialAssetService {
             AssetStatus status = assetRepository.findBySymbol(upper)
                 .map(FinancialAsset::getStatus).orElse(null);
             if (status == AssetStatus.USER || status == AssetStatus.WORTHLESS) continue;
-            List<CoinCandidate> candidates;
-            try {
-                candidates = coinGecko.searchBySymbol(upper);
-            } catch (Exception e) {
-                log.warn("Candidate search failed for {}: {}", upper, e.getMessage());
-                candidates = List.of();
-            }
-            out.add(new AssetResolutionPreview(upper, status, pickDominant(candidates), candidates));
+            out.add(new AssetResolutionPreview(upper, status, offersFor(upper)));
         }
         return out;
     }
 
     /**
      * Candidate lookup for the <b>standing</b> mapping/verification UI (holding detail), as opposed to
-     * {@link #previewResolutions} which serves the import preview. Unlike that method this never skips a
-     * symbol: it returns the current registry status plus every CoinGecko candidate even for a coin
-     * already settled as {@code USER}/{@code WORTHLESS}, so the operator can re-verify or correct a
-     * standing mapping at any time. Nothing is persisted — the choice is applied via
-     * {@link #applyUserMapping}/{@link #setManualMapping}/{@link #markWorthless}. A search failure
-     * degrades to an empty candidate list.
+     * {@link #previewResolutions} which serves the import preview. Unlike that method this never skips
+     * a symbol: it returns every aggregator's candidates even for a coin already settled as
+     * {@code USER}/{@code WORTHLESS}, so a standing mapping can be re-verified or corrected at any
+     * time. Nothing is persisted.
      */
     @Transactional(readOnly = true)
     public AssetResolutionPreview previewResolution(String ticker) {
@@ -181,14 +200,31 @@ public class FinancialAssetService {
         String upper = ticker.trim().toUpperCase();
         AssetStatus status = assetRepository.findBySymbol(upper)
             .map(FinancialAsset::getStatus).orElse(null);
-        List<CoinCandidate> candidates;
-        try {
-            candidates = coinGecko.searchBySymbol(upper);
-        } catch (Exception e) {
-            log.warn("Candidate search failed for {}: {}", upper, e.getMessage());
-            candidates = List.of();
+        return new AssetResolutionPreview(upper, status, offersFor(upper));
+    }
+
+    /**
+     * Ask every aggregator that can resolve right now what it has for this symbol. An aggregator with
+     * nothing to offer still gets a block (with an empty candidate list): "this aggregator doesn't
+     * know your symbol" is information the operator needs, and it's also just the honest answer —
+     * their ref stays null and they don't price the asset. A per-aggregator failure degrades to an
+     * empty list rather than failing the whole preview.
+     */
+    private List<AggregatorResolution> offersFor(String upperSymbol) {
+        List<AggregatorResolution> blocks = new ArrayList<>();
+        for (AssetResolverPort r : resolvers) {
+            if (!r.isResolutionAvailable()) continue;
+            List<AssetCandidate> candidates;
+            try {
+                candidates = r.searchBySymbol(upperSymbol);
+            } catch (Exception e) {
+                log.warn("Candidate search failed for {} on {}: {}",
+                    upperSymbol, r.aggregatorKey(), e.getMessage());
+                candidates = List.of();
+            }
+            blocks.add(new AggregatorResolution(r.aggregatorKey(), pickDominant(candidates), candidates));
         }
-        return new AssetResolutionPreview(upper, status, pickDominant(candidates), candidates);
+        return blocks;
     }
 
     /**
@@ -215,9 +251,8 @@ public class FinancialAssetService {
      * the first time a symbol is seen. This is the runtime counterpart of the V52 backfill: a
      * holding must always point at an asset, so the write paths (TR/Bourso/wallet sync,
      * {@link HoldingComputeService}, {@link AccountService#upsertHolding}) resolve their symbol
-     * through here. It never calls an external API — real aggregator resolution (CoinGecko search,
-     * Yahoo identity) happens later via {@link #resolveCrypto} or the management UI; until then the
-     * PENDING row is simply unpriced.
+     * through here. It never calls an external API — real resolution happens later via
+     * {@link #resolveCrypto} or the management UI; until then the PENDING row is simply unpriced.
      */
     @Transactional
     public FinancialAsset getOrCreate(String symbol) {
@@ -233,24 +268,26 @@ public class FinancialAssetService {
     /**
      * Return the asset for a Yahoo ticker already resolved via OpenFIGI at ISIN-discovery time
      * (TR/Bourso sync, manual-transaction ISIN entry) — the stock-side counterpart of
-     * {@link #resolveCrypto}. Mints a {@code STOCK} row with {@code yahoo_symbol} set to the
-     * ticker the first time it's seen: for these sources the internal {@code symbol} already
-     * <em>is</em> the Yahoo ticker (OpenFIGI resolved it — not a guess). On an existing row it
-     * only fills in what's missing, and never touches one already typed {@code CRYPTO} — a
-     * stock-context ticker colliding with an existing crypto symbol must not clobber a working
-     * coin mapping.
+     * {@link #resolveCrypto}. Mints a {@code STOCK} row with the Yahoo ref set to the ticker the
+     * first time it's seen: for these sources the internal {@code symbol} already <em>is</em> the
+     * Yahoo ticker (OpenFIGI resolved it — not a guess), so no search is needed. On an existing row
+     * it only fills in what's missing, and never touches one already typed {@code CRYPTO} — a
+     * stock-context ticker colliding with an existing crypto symbol must not clobber a working coin
+     * mapping.
      */
     @Transactional
     public FinancialAsset getOrCreateStock(String yahooTicker) {
         String upper = yahooTicker.trim().toUpperCase();
+        AssetResolverPort yahoo = resolver(STOCK_DISCOVERY_AGGREGATOR).orElse(null);
         FinancialAsset asset = assetRepository.findBySymbol(upper).orElse(null);
         if (asset == null) {
-            return assetRepository.save(FinancialAsset.builder()
+            FinancialAsset minted = FinancialAsset.builder()
                 .symbol(upper)
                 .type(AssetType.STOCK)
                 .status(AssetStatus.PENDING)
-                .yahooSymbol(upper)
-                .build());
+                .build();
+            if (yahoo != null) yahoo.setRef(minted, upper);
+            return assetRepository.save(minted);
         }
         if (asset.getType() == AssetType.CRYPTO) {
             return asset;
@@ -260,8 +297,8 @@ public class FinancialAssetService {
             asset.setType(AssetType.STOCK);
             changed = true;
         }
-        if (asset.getYahooSymbol() == null) {
-            asset.setYahooSymbol(upper);
+        if (yahoo != null && yahoo.getRef(asset) == null) {
+            yahoo.setRef(asset, upper);
             changed = true;
         }
         return changed ? assetRepository.save(asset) : asset;
@@ -270,8 +307,9 @@ public class FinancialAssetService {
     /**
      * Opportunistically label an asset that has no name yet (e.g. minted bare by
      * {@link #getOrCreate} from a wallet sync using the symbol as a placeholder). Never overwrites
-     * an existing name — a shaky broker/wallet label must not clobber a canonical one (CoinGecko,
-     * a prior manual mapping, or another account's earlier, better label for the same symbol).
+     * an existing name — a shaky broker/wallet label must not clobber a canonical one (an
+     * aggregator's, a prior manual mapping's, or another account's earlier, better label for the
+     * same symbol).
      */
     @Transactional
     public void fillNameIfAbsent(FinancialAsset asset, String name) {
@@ -281,60 +319,120 @@ public class FinancialAssetService {
         assetRepository.save(asset);
     }
 
+    /** A pasted link resolved to the one aggregator that claims it, with its validated candidate. */
+    public record LinkResolution(String aggregatorKey, AssetCandidate candidate) {}
+
     /**
-     * Pin a symbol to the coin behind an operator-supplied CoinGecko link, overriding any prior
-     * mapping. The coin id is read from the URL slug (e.g. {@code .../coins/loaded-lions}) and
-     * validated against CoinGecko before it's persisted as {@code USER} — a link to a non-existent
-     * coin is rejected rather than cached.
+     * Resolve an operator-pasted aggregator link: the link is offered to each resolver in turn, the
+     * one that recognises it owns the id (a CoinGecko coin URL → the CoinGecko ref), and the id is
+     * validated against that aggregator before anything trusts it — a link to a non-existent asset
+     * is rejected rather than cached. Shared by the standing "paste a link" path
+     * ({@link #setManualMapping}) and the import wizard's per-coin link field.
      *
-     * @throws IllegalArgumentException if the link isn't a CoinGecko coin URL or the coin is unknown.
+     * @throws IllegalArgumentException if no aggregator recognises the link, or the id is unknown.
      */
-    @Transactional
-    public FinancialAsset setManualMapping(String ticker, String coingeckoUrl) {
-        if (ticker == null || ticker.isBlank()) {
-            throw new IllegalArgumentException("Ticker is required.");
+    public LinkResolution resolveLink(String url) {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("An aggregator link is required.");
         }
-        String coinId = extractCoinId(coingeckoUrl);
-        CoinCandidate coin = coinGecko.fetchCoinById(coinId).orElseThrow(() ->
-            new IllegalArgumentException("No CoinGecko coin found for id '" + coinId
-                + "' — check the link points to a coin page."));
-        return applyUserMapping(ticker, coin.id(), coin.name());
+        for (AssetResolverPort r : resolvers) {
+            String id = r.extractIdFromUrl(url).orElse(null);
+            if (id == null) continue;
+            AssetCandidate found = r.fetchById(id).orElseThrow(() ->
+                new IllegalArgumentException("No " + r.aggregatorKey() + " asset found for id '" + id
+                    + "' — check the link points to an asset page."));
+            return new LinkResolution(r.aggregatorKey(), found);
+        }
+        throw new IllegalArgumentException(
+            "Not a link any aggregator recognises — expected something like "
+                + "https://www.coingecko.com/en/coins/<id>.");
     }
 
     /**
-     * Pin a symbol to a known CoinGecko coin id as {@code USER}, overriding any prior mapping. The
-     * id/name are trusted from the caller — a coin the operator picked from the import-preview
-     * candidates, or one already fetched and validated by {@link #setManualMapping} — so this makes
-     * no extra CoinGecko round-trip. Re-pinning to a <em>different</em> coin purges the symbol's
-     * price history (fetched under the old, wrong id) and refetches it; re-pinning to the same coin
-     * keeps it.
+     * Pin a symbol to the asset behind an operator-supplied aggregator link ({@link #resolveLink}),
+     * overriding that aggregator's prior mapping, as {@code USER}.
+     *
+     * @throws IllegalArgumentException if no aggregator recognises the link, or the id is unknown.
      */
     @Transactional
-    public FinancialAsset applyUserMapping(String ticker, String coingeckoId, String name) {
+    public FinancialAsset setManualMapping(String ticker, String url) {
         if (ticker == null || ticker.isBlank()) {
             throw new IllegalArgumentException("Ticker is required.");
         }
+        LinkResolution link = resolveLink(url);
+        return applyMappings(ticker, Map.of(link.aggregatorKey(), link.candidate().id()),
+            link.candidate().name());
+    }
+
+    /**
+     * Pin a symbol to one CoinGecko coin id as {@code USER} — the single-aggregator entry point the
+     * standing mapping UI still speaks; {@link #applyMappings} is the general form.
+     */
+    @Transactional
+    public FinancialAsset applyUserMapping(String ticker, String coingeckoId, String name) {
         if (coingeckoId == null || coingeckoId.isBlank()) {
             throw new IllegalArgumentException("A CoinGecko coin id is required.");
         }
+        return applyMappings(ticker, Map.of(CRYPTO_DISCOVERY_AGGREGATOR, coingeckoId), name);
+    }
+
+    /**
+     * Pin a symbol to one id <b>per aggregator</b> as {@code USER}, overriding any prior mapping —
+     * the confirmed outcome of a preview. Each id is written by its own aggregator's resolver into
+     * its own column ({@code idsByAggregator} is keyed by {@code aggregatorKey}), so the asset ends
+     * up quotable by every aggregator the operator gave an id for, and the router can fall through
+     * between them. An unknown key is ignored rather than fatal — a stale client mustn't fail an
+     * import.
+     *
+     * <p>The ids are trusted from the caller (picked from preview candidates, or already validated by
+     * {@link #setManualMapping}), so no round-trip is made here. Re-pinning an aggregator to a
+     * <em>different</em> id purges the symbol's price history — some of it was fetched under the old,
+     * wrong id — and refetches it; filling a ref that was empty, or re-pinning the same id, keeps it.
+     */
+    @Transactional
+    public FinancialAsset applyMappings(String ticker, Map<String, String> idsByAggregator, String name) {
+        if (ticker == null || ticker.isBlank()) {
+            throw new IllegalArgumentException("Ticker is required.");
+        }
+        if (idsByAggregator == null || idsByAggregator.isEmpty()) {
+            throw new IllegalArgumentException("At least one aggregator id is required.");
+        }
         String upper = ticker.trim().toUpperCase();
-        String coinId = coingeckoId.trim();
 
         FinancialAsset asset = assetRepository.findBySymbol(upper)
             .orElseGet(() -> FinancialAsset.builder().symbol(upper).build());
-        String previousId = asset.getCoingeckoId();
         if (asset.getType() == AssetType.UNKNOWN) asset.setType(AssetType.CRYPTO);
-        asset.setCoingeckoId(coinId);
-        asset.setName(name);
+
+        boolean replacedAnId = false;
+        Map<String, String> applied = new LinkedHashMap<>();
+        for (Map.Entry<String, String> e : idsByAggregator.entrySet()) {
+            String id = e.getValue() == null ? null : e.getValue().trim();
+            if (id == null || id.isEmpty()) continue;
+            AssetResolverPort r = resolver(e.getKey()).orElse(null);
+            if (r == null) {
+                log.warn("Ignoring mapping for {} on unknown aggregator '{}'", upper, e.getKey());
+                continue;
+            }
+            String previous = r.getRef(asset);
+            if (previous != null && !previous.equals(id)) replacedAnId = true;
+            r.setRef(asset, id);
+            applied.put(r.aggregatorKey(), id);
+        }
+        if (applied.isEmpty()) {
+            throw new IllegalArgumentException("None of the supplied aggregator ids could be applied.");
+        }
+        // Only overwrite the name when a real one is supplied — a re-map from a source without a name
+        // (a Yahoo candidate has no longname, e.g.) must not wipe an existing label to null. On a
+        // fresh asset with no name given, it simply stays null until something labels it.
+        if (name != null && !name.isBlank()) {
+            asset.setName(name.trim());
+        }
         asset.setStatus(AssetStatus.USER);
 
         FinancialAsset saved = assetRepository.save(asset);
-        log.info("User-mapped crypto symbol {} → CoinGecko id '{}' ({})", upper, coinId, name);
+        log.info("User-mapped symbol {} → {} ({})", upper, applied, name);
 
-        // Re-pinning to a *different* coin means every price fetched under the old id is wrong:
-        // purge the symbol's history and refetch it under the corrected coin. Re-pinning to the
-        // same coin keeps the history — it was fetched from the right source.
-        if (previousId != null && !previousId.equals(coinId)) {
+        if (replacedAnId) {
             purgeAndRefetchPrices(saved);
         }
         return saved;
@@ -343,10 +441,10 @@ public class FinancialAssetService {
     /**
      * Un-link a symbol — revert it to {@code PENDING} <b>keeping the registry row</b>, so a holding's
      * {@code account_holding.asset_id} FK stays valid. This is what the standing "forget the link"
-     * action does: the coin id (and the name it carried) is dropped, the symbol's price history is
-     * purged (it was fetched under the now-removed coin id) and the live cache evicted, and the next
-     * resolve/import re-runs auto-resolution. Contrast with {@link #delete}, which removes the row
-     * entirely and therefore fails for any symbol a holding still references (the common case).
+     * action does: every aggregator's ref (and the name they carried) is dropped, the symbol's price
+     * history is purged and the live cache evicted, and the next resolve/import re-runs
+     * auto-resolution. Contrast with {@link #delete}, which removes the row entirely and therefore
+     * fails for any symbol a holding still references (the common case).
      */
     @Transactional
     public FinancialAsset clearMapping(String ticker) {
@@ -356,7 +454,7 @@ public class FinancialAssetService {
         String upper = ticker.trim().toUpperCase();
         FinancialAsset asset = assetRepository.findBySymbol(upper).orElseThrow(() ->
             new IllegalArgumentException("No asset exists for symbol '" + upper + "'."));
-        asset.setCoingeckoId(null);
+        clearAllRefs(asset);
         asset.setName(null);
         asset.setStatus(AssetStatus.PENDING);
         FinancialAsset saved = assetRepository.save(asset);
@@ -368,11 +466,21 @@ public class FinancialAssetService {
     }
 
     /**
+     * Drop every aggregator's ref. Each resolver clears its own column, so a newly added aggregator
+     * is un-linked here without this method knowing it exists.
+     */
+    private void clearAllRefs(FinancialAsset asset) {
+        for (AssetResolverPort r : resolvers) {
+            r.setRef(asset, null);
+        }
+    }
+
+    /**
      * Forget an asset entirely — remove the registry row. Only safe for an <b>orphan</b> symbol (no
      * {@code account_holding} references it), so this is <em>not</em> what the standing "forget the
      * link" button calls — that uses {@link #clearMapping}. The symbol's price history is purged too
-     * (it was fetched under the now-disowned coin id); the symbol goes back to unregistered and the
-     * next import preview re-runs auto-resolution.
+     * (it was fetched under the now-disowned ids); the symbol goes back to unregistered and the next
+     * import preview re-runs auto-resolution.
      */
     @Transactional
     public void delete(String ticker) {
@@ -383,7 +491,7 @@ public class FinancialAssetService {
         // The account_holding.asset_id FK has no cascade, so deleting a held asset would fail at the
         // DB with a raw DataIntegrityViolation (→ generic 500). Guard it up front with a clear 400:
         // a held symbol must be un-linked ({@link #clearMapping}), not removed.
-        int held = accountHoldingRepository.findByTickerIgnoreCase(upper).size();
+        int held = accountHoldingRepository.findByAsset_Id(asset.getId()).size();
         if (held > 0) {
             throw new IllegalArgumentException("Asset '" + upper + "' is still held by " + held
                 + " holding(s) — clear its mapping instead of deleting it.");
@@ -392,16 +500,15 @@ public class FinancialAssetService {
         assetRepository.delete(asset);
         priceSnapshotRepository.deleteByAssetId(asset.getId());
         priceService.evictFromCache(upper);
-        log.info("Deleted asset {} (was CoinGecko id '{}') and purged its price history",
-            upper, asset.getCoingeckoId());
+        log.info("Deleted asset {} and purged its price history", upper);
     }
 
     /**
-     * Mark a symbol as <b>worthless</b> — a delisted coin CoinGecko can neither auto-resolve nor
-     * price via a link. The symbol is pinned to a known-zero value instead of left silently
-     * unpriced: any price fetched while it was still listed is purged, the live cache evicted, and
-     * every holding of the symbol re-valued to zero. Idempotent, and reversible — re-pinning a
-     * CoinGecko link ({@link #setManualMapping}) or forgetting it ({@link #delete}) undoes it.
+     * Mark a symbol as <b>worthless</b> — a delisted coin no aggregator can resolve or price. The
+     * symbol is pinned to a known-zero value instead of left silently unpriced: every aggregator ref
+     * is dropped, any price fetched while it was still listed is purged, the live cache evicted, and
+     * every holding of the symbol re-valued to zero. Idempotent, and reversible — pinning a link
+     * ({@link #setManualMapping}) or forgetting it ({@link #delete}) undoes it.
      */
     @Transactional
     public FinancialAsset markWorthless(String ticker) {
@@ -413,21 +520,21 @@ public class FinancialAssetService {
         FinancialAsset asset = assetRepository.findBySymbol(upper)
             .orElseGet(() -> FinancialAsset.builder().symbol(upper).build());
         if (asset.getType() == AssetType.UNKNOWN) asset.setType(AssetType.CRYPTO);
-        asset.setCoingeckoId(null);
+        clearAllRefs(asset);
         asset.setName(null);
         asset.setStatus(AssetStatus.WORTHLESS);
         FinancialAsset saved = assetRepository.save(asset);
 
         priceSnapshotRepository.deleteByAssetId(saved.getId());
         priceService.evictFromCache(upper);
-        zeroHoldings(upper);
+        zeroHoldings(saved);
         log.info("Marked symbol {} as worthless — purged price history and zeroed its holdings", upper);
         return saved;
     }
 
-    /** Force every holding of a ticker to a known-zero current price (assumed worthless). */
-    private void zeroHoldings(String upperTicker) {
-        List<AccountHolding> holdings = accountHoldingRepository.findByTickerIgnoreCase(upperTicker);
+    /** Force every holding of an asset to a known-zero current price (assumed worthless). */
+    private void zeroHoldings(FinancialAsset asset) {
+        List<AccountHolding> holdings = accountHoldingRepository.findByAsset_Id(asset.getId());
         for (AccountHolding h : holdings) {
             h.setCurrentPrice(BigDecimal.ZERO);
         }
@@ -435,10 +542,10 @@ public class FinancialAssetService {
     }
 
     /**
-     * Drop everything priced under the old coin id (snapshots + live cache) and backfill the
-     * history under the new one, anchored to the ticker's earliest transaction (12 months when it
-     * has none). Backfill failures are non-fatal — the mapping is already corrected, and the
-     * boot-time runner or a later import fills the gap.
+     * Drop everything priced under the old id (snapshots + live cache) and backfill the history under
+     * the new one, anchored to the ticker's earliest transaction (12 months when it has none).
+     * Backfill failures are non-fatal — the mapping is already corrected, and the boot-time runner or
+     * a later import fills the gap.
      */
     private void purgeAndRefetchPrices(FinancialAsset asset) {
         String upperTicker = asset.getSymbol();
@@ -459,42 +566,26 @@ public class FinancialAssetService {
         }
     }
 
-    /** Extract the CoinGecko coin-id slug from a coin-page URL, rejecting anything that isn't one. */
-    private String extractCoinId(String coingeckoUrl) {
-        if (coingeckoUrl == null || coingeckoUrl.isBlank()) {
-            throw new IllegalArgumentException("A CoinGecko coin link is required.");
-        }
-        Matcher m = COINGECKO_COIN_URL.matcher(coingeckoUrl.trim());
-        if (!m.find()) {
-            throw new IllegalArgumentException(
-                "Not a CoinGecko coin link — expected a URL like https://www.coingecko.com/en/coins/<id>.");
-        }
-        String id = m.group(1).trim().toLowerCase();
-        if (id.isEmpty()) {
-            throw new IllegalArgumentException("Could not read the coin id from the link.");
-        }
-        return id;
-    }
-
     /**
-     * Pick the single dominant coin among symbol matches, or null if the choice is ambiguous.
-     * A candidate must have a market-cap rank to win; among ranked candidates the best one wins
-     * only if it clearly outranks the runner-up (see {@link #DOMINANCE_FACTOR}).
+     * Pick the single dominant candidate among an aggregator's symbol matches, or null if the choice
+     * is ambiguous. A candidate must carry a market-cap rank to win: ranking is the only evidence we
+     * have that a symbol collision has an obvious winner, so an aggregator that doesn't rank its
+     * results (Yahoo — where the "candidates" are the same security on different exchanges, and the
+     * wrong pick means quoting the wrong market) never auto-suggests anything and its ref stays null
+     * until an operator chooses. Among ranked candidates the best one wins only if it clearly
+     * outranks the runner-up (see {@link #DOMINANCE_FACTOR}).
      */
-    private CoinCandidate pickDominant(List<CoinCandidate> candidates) {
-        if (candidates.isEmpty()) return null;
-        if (candidates.size() == 1) return candidates.get(0);
-
-        List<CoinCandidate> ranked = candidates.stream()
+    private AssetCandidate pickDominant(List<AssetCandidate> candidates) {
+        List<AssetCandidate> ranked = candidates.stream()
             .filter(c -> c.marketCapRank() != null)
-            .sorted(Comparator.comparingInt(CoinCandidate::marketCapRank))
+            .sorted(Comparator.comparingInt(AssetCandidate::marketCapRank))
             .toList();
 
         if (ranked.isEmpty()) return null;            // nobody ranked → don't guess
         if (ranked.size() == 1) return ranked.get(0); // only one ranked → it's the one
 
-        CoinCandidate top = ranked.get(0);
-        CoinCandidate second = ranked.get(1);
+        AssetCandidate top = ranked.get(0);
+        AssetCandidate second = ranked.get(1);
         boolean dominates = (long) top.marketCapRank() * DOMINANCE_FACTOR <= second.marketCapRank();
         return dominates ? top : null;
     }

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.picsou.model.FinancialAsset;
+import com.picsou.port.AssetCandidate;
+import com.picsou.port.AssetResolverPort;
 import com.picsou.port.PriceProviderPort;
 import com.picsou.service.AggregatorService;
 import com.picsou.service.AggregatorService.SessionCredentials;
@@ -26,16 +28,19 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Fetches crypto prices and logos from the CoinGecko API.
+ * Fetches crypto prices and logos from the CoinGecko API, and resolves symbols to CoinGecko coin ids
+ * ({@link AssetResolverPort}) — the two sides of one aggregator: {@link #searchBySymbol} finds the
+ * ids, {@link #getPricesEur} spends them.
  *
- * <p>An asset is priceable here once it carries a CoinGecko id — which
- * {@link com.picsou.service.FinancialAssetService} resolves from CoinGecko at crypto-discovery time
- * and persists on the {@code financial_asset} row. The caller hands the asset in, so this adapter
- * reads {@code getCoingeckoId()} off it directly and carries no registry dependency of its own. It
- * stays the low-level HTTP client: it also exposes {@link #searchBySymbol(String)} so the resolver
- * can look candidates up, but never decides or persists a mapping itself.
+ * <p>An asset is priceable here once it carries a CoinGecko id, which resolution persists in
+ * {@code financial_asset.coingecko_id} — this adapter's own ref column, the only one it reads or
+ * writes ({@link #getRef}/{@link #setRef}). The caller hands the asset in, so this adapter reads the
+ * id off it directly and carries no registry dependency of its own, and it decides no mapping itself:
+ * {@link com.picsou.service.FinancialAssetService} does, from the candidates offered here.
  *
  * <p>API credentials live in the {@code aggregator_session} table, not in config: at call time the
  * provider asks {@link AggregatorService#enabledCredentials(String) enabledCredentials("coingecko")}
@@ -56,12 +61,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * cache and the hourly scheduler cover the gap, and configuring more Demo keys spreads the limit.
  */
 @Component
-@Order(10)   // primary crypto aggregator — tried before Yahoo when both can price a ticker
-public class CoinGeckoPriceProvider implements PriceProviderPort {
+@Order(10)   // first choice — tried before the other aggregators when several can price an asset
+public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverPort {
 
     private static final Logger log = LoggerFactory.getLogger(CoinGeckoPriceProvider.class);
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private static final String AGGREGATOR_KEY = "coingecko";
+
+    /** Grabs the coin-id slug from a CoinGecko coin URL, e.g. {@code .../en/coins/loaded-lions}. */
+    private static final Pattern COIN_URL = Pattern.compile("/coins/([^/?#]+)");
 
     // Circuit breaker: how long to pause a session after a 429 when the response carries no usable
     // Retry-After (CoinGecko's free-tier window is ~1 minute).
@@ -279,12 +287,38 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
         }
     }
 
+    /** This adapter's own ref column — the CoinGecko coin id. */
+    @Override
+    public String getRef(FinancialAsset asset) {
+        return asset.getCoingeckoId();
+    }
+
+    @Override
+    public void setRef(FinancialAsset asset, String id) {
+        asset.setCoingeckoId(id);
+    }
+
+    /**
+     * Read the coin id out of a CoinGecko coin-page URL slug (e.g. {@code .../en/coins/loaded-lions}),
+     * the "paste a link" path to disambiguating a symbol. Empty when the link isn't a coin URL — the
+     * caller then reports it rather than resolving something wrong.
+     */
+    @Override
+    public Optional<String> extractIdFromUrl(String url) {
+        if (url == null || url.isBlank()) return Optional.empty();
+        Matcher m = COIN_URL.matcher(url.trim());
+        if (!m.find()) return Optional.empty();
+        String id = m.group(1).trim().toLowerCase();
+        return id.isEmpty() ? Optional.empty() : Optional.of(id);
+    }
+
     /**
      * Look up candidate coins whose CoinGecko symbol matches {@code ticker}, via {@code /search}.
      * Returns them with their market-cap rank so {@link com.picsou.service.FinancialAssetService}
      * can pick a dominant match. Empty on miss or error — the resolver treats that as "unresolved".
      */
-    public List<CoinCandidate> searchBySymbol(String ticker) {
+    @Override
+    public List<AssetCandidate> searchBySymbol(String ticker) {
         String symbol = ticker.trim().toLowerCase();
         if (symbol.isEmpty()) return List.of();
         SessionCredentials session = pickSession().orElse(null);
@@ -304,7 +338,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             if (response == null || response.coins == null) return List.of();
             return response.coins.stream()
                 .filter(c -> c.id != null && c.symbol != null && c.symbol.equalsIgnoreCase(symbol))
-                .map(c -> new CoinCandidate(c.id, c.name, c.symbol, c.marketCapRank))
+                .map(c -> new AssetCandidate(c.id, c.name, c.symbol, c.marketCapRank))
                 .toList();
         } catch (Exception ex) {
             if (isRateLimited(ex)) pause(session, ex);
@@ -315,10 +349,11 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
 
     /**
      * Fetch a single coin by its CoinGecko id (via {@code /coins/{id}}), narrowed to
-     * {@link CoinCandidate}. Used to validate an operator-supplied disambiguation link and read the
+     * {@link AssetCandidate}. Used to validate an operator-supplied disambiguation link and read the
      * coin's canonical name. Empty when the id is unknown or the call fails.
      */
-    public Optional<CoinCandidate> fetchCoinById(String id) {
+    @Override
+    public Optional<AssetCandidate> fetchById(String id) {
         String coinId = id == null ? "" : id.trim().toLowerCase();
         if (coinId.isEmpty()) return Optional.empty();
         SessionCredentials session = pickSession().orElse(null);
@@ -341,7 +376,7 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
                 .block();
 
             if (detail == null || detail.id == null) return Optional.empty();
-            return Optional.of(new CoinCandidate(detail.id, detail.name, detail.symbol, detail.marketCapRank));
+            return Optional.of(new AssetCandidate(detail.id, detail.name, detail.symbol, detail.marketCapRank));
         } catch (Exception ex) {
             if (isRateLimited(ex)) pause(session, ex);
             log.warn("CoinGecko coin lookup failed for id {}: {}", coinId, ex.getMessage());
@@ -462,9 +497,6 @@ public class CoinGeckoPriceProvider implements PriceProviderPort {
             return Map.of();
         }
     }
-
-    /** A coin returned by CoinGecko's {@code /search}, narrowed to what the resolver needs. */
-    public record CoinCandidate(String id, String name, String symbol, Integer marketCapRank) {}
 
     static class PriceData {
         private BigDecimal eur;

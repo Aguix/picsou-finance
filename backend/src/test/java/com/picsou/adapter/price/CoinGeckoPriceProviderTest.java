@@ -1,6 +1,7 @@
 package com.picsou.adapter.price;
 
 import com.picsou.model.FinancialAsset;
+import com.picsou.port.AssetCandidate;
 import com.picsou.service.AggregatorService;
 import com.picsou.service.AggregatorService.SessionCredentials;
 import org.junit.jupiter.api.Test;
@@ -59,6 +60,19 @@ class CoinGeckoPriceProviderTest {
             return Mono.just(ClientResponse.create(HttpStatus.OK)
                 .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
                 .body("{\"bitcoin\":{\"eur\":50000}}").build());
+        };
+        return new CoinGeckoPriceProvider(aggregatorService,
+            WebClient.builder().exchangeFunction(exchange).build());
+    }
+
+    /** A never-rate-limited provider answering every call with {@code body}. */
+    private CoinGeckoPriceProvider providerReturning(String body) {
+        ExchangeFunction exchange = request -> {
+            httpCalls.incrementAndGet();
+            sentKeys.add(request.headers().getFirst("x-cg-demo-api-key"));
+            return Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .body(body).build());
         };
         return new CoinGeckoPriceProvider(aggregatorService,
             WebClient.builder().exchangeFunction(exchange).build());
@@ -143,6 +157,91 @@ class CoinGeckoPriceProviderTest {
 
         assertThat(second).isEmpty();
         assertThat(httpCalls.get()).isEqualTo(1);
+    }
+
+    // --- Resolution side (AssetResolverPort) -------------------------------------------------
+    // The coin-URL parsing lives here, in the aggregator that owns the URL form — the engine offers
+    // a pasted link to every resolver and the one that recognises it owns the id. These tests are
+    // the real regex's only coverage: FinancialAssetServiceTest drives fakes on purpose.
+
+    @Test
+    void extractIdFromUrl_readsTheCoinSlug_fromEveryShapeOfCoinLink() {
+        var provider = providerReturning("{}");
+
+        assertThat(provider.extractIdFromUrl("https://www.coingecko.com/en/coins/loaded-lions"))
+            .contains("loaded-lions");
+        // Localised path, query string and fragment all still carry the same slug.
+        assertThat(provider.extractIdFromUrl("https://www.coingecko.com/fr/coins/capybara-nation?utm=share#markets"))
+            .contains("capybara-nation");
+        assertThat(provider.extractIdFromUrl("  https://www.coingecko.com/en/coins/MATIC-Network  "))
+            .contains("matic-network");   // ids are lowercase
+    }
+
+    @Test
+    void extractIdFromUrl_claimsNothingThatIsNotACoinLink() {
+        var provider = providerReturning("{}");
+
+        // Not claiming it is what makes the engine report "no aggregator recognises this link"
+        // instead of resolving something wrong.
+        assertThat(provider.extractIdFromUrl("https://www.coingecko.com/en/categories")).isEmpty();
+        assertThat(provider.extractIdFromUrl("https://coinmarketcap.com/currencies/bitcoin/")).isEmpty();
+        assertThat(provider.extractIdFromUrl("https://www.coingecko.com/en/coins/")).isEmpty();
+        assertThat(provider.extractIdFromUrl("not a url")).isEmpty();
+        assertThat(provider.extractIdFromUrl(null)).isEmpty();
+        assertThat(httpCalls.get()).isZero();   // pure parsing, no call
+    }
+
+    @Test
+    void searchBySymbol_keepsOnlyExactSymbolMatches_withTheirRank() {
+        stubSessions(new SessionCredentials(1L, "key-A", null));
+        var provider = providerReturning("""
+            {"coins":[
+              {"id":"metabeat","name":"MetaBeat","symbol":"beat","market_cap_rank":300},
+              {"id":"beat-inu","name":"Beat Inu","symbol":"beat","market_cap_rank":5000},
+              {"id":"beatcoin","name":"BeatCoin","symbol":"beatx","market_cap_rank":2}
+            ]}""");
+
+        List<AssetCandidate> candidates = provider.searchBySymbol("BEAT");
+
+        // CoinGecko's /search matches names too; only the coins actually calling themselves BEAT
+        // are candidates for the symbol.
+        assertThat(candidates).extracting(AssetCandidate::id).containsExactly("metabeat", "beat-inu");
+        assertThat(candidates.get(0).marketCapRank()).isEqualTo(300);
+        assertThat(candidates.get(0).name()).isEqualTo("MetaBeat");
+    }
+
+    @Test
+    void searchBySymbol_degradesToEmpty_whenTheAggregatorIsOff() {
+        stubAggregatorDisabled();
+        var provider = providerReturning("{}");
+
+        assertThat(provider.searchBySymbol("BTC")).isEmpty();
+        assertThat(httpCalls.get()).isZero();
+    }
+
+    @Test
+    void fetchById_narrowsTheCoinDetailToACandidate() {
+        stubSessions(new SessionCredentials(1L, "key-A", null));
+        var provider = providerReturning(
+            "{\"id\":\"loaded-lions\",\"name\":\"Loaded Lions\",\"symbol\":\"lion\",\"market_cap_rank\":3500}");
+
+        var found = provider.fetchById("loaded-lions");
+
+        assertThat(found).isPresent();
+        assertThat(found.get().id()).isEqualTo("loaded-lions");
+        assertThat(found.get().name()).isEqualTo("Loaded Lions");
+    }
+
+    @Test
+    void getRefAndSetRef_touchOnlyTheCoinGeckoColumn() {
+        var provider = providerReturning("{}");
+        FinancialAsset asset = FinancialAsset.builder().symbol("BTC").yahooSymbol("BTC-EUR").build();
+
+        provider.setRef(asset, "bitcoin");
+
+        assertThat(provider.getRef(asset)).isEqualTo("bitcoin");
+        assertThat(asset.getCoingeckoId()).isEqualTo("bitcoin");
+        assertThat(asset.getYahooSymbol()).isEqualTo("BTC-EUR");   // a sibling's column is untouched
     }
 
     @Test

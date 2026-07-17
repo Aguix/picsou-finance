@@ -1,23 +1,28 @@
 package com.picsou.service;
 
-import com.picsou.adapter.price.CoinGeckoPriceProvider;
-import com.picsou.adapter.price.CoinGeckoPriceProvider.CoinCandidate;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AssetStatus;
 import com.picsou.model.AssetType;
 import com.picsou.model.FinancialAsset;
+import com.picsou.port.AssetCandidate;
+import com.picsou.port.AssetResolverPort;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.FinancialAssetRepository;
 import com.picsou.repository.PriceSnapshotRepository;
 import com.picsou.repository.TransactionRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -27,24 +32,90 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+/**
+ * The resolution engine is exercised against <b>fake aggregators</b> rather than the real adapters:
+ * the service must not know one aggregator from another, so the tests hand it interchangeable
+ * resolvers that differ only in which column they own and what they answer. Each fake is spied so a
+ * test can still assert what the engine did (or didn't) ask of it.
+ */
 @ExtendWith(MockitoExtension.class)
 class FinancialAssetServiceTest {
 
-    @Mock private CoinGeckoPriceProvider coinGecko;
+    /** Recognises a CoinGecko-style coin link, like the real adapter's own URL form. */
+    private static final Pattern COIN_URL = Pattern.compile("/coins/([^/?#]+)");
+
     @Mock private FinancialAssetRepository repository;
     @Mock private PriceSnapshotRepository priceSnapshotRepository;
     @Mock private TransactionRepository transactionRepository;
     @Mock private AccountHoldingRepository accountHoldingRepository;
     @Mock private PriceService priceService;
 
-    @InjectMocks private FinancialAssetService service;
+    private FakeResolver coinGecko;
+    private FakeResolver yahoo;
+    private FinancialAssetService service;
 
-    private static CoinCandidate coin(String id, String symbol, Integer rank) {
-        return new CoinCandidate(id, id, symbol, rank);
+    @BeforeEach
+    void setUp() {
+        coinGecko = spy(new FakeResolver("coingecko",
+            FinancialAsset::getCoingeckoId, FinancialAsset::setCoingeckoId, COIN_URL));
+        yahoo = spy(new FakeResolver("yahoo",
+            FinancialAsset::getYahooSymbol, FinancialAsset::setYahooSymbol, null));
+        service = new FinancialAssetService(
+            List.of(coinGecko, yahoo),
+            repository, priceSnapshotRepository, transactionRepository, accountHoldingRepository,
+            priceService);
+    }
+
+    /**
+     * A stand-in aggregator. It really reads and writes its own ref column (that's the behaviour the
+     * engine leans on) and answers lookups with whatever the test stubs — no aggregator is special.
+     */
+    static class FakeResolver implements AssetResolverPort {
+        private final String key;
+        private final Function<FinancialAsset, String> getter;
+        private final BiConsumer<FinancialAsset, String> setter;
+        private final Pattern urlPattern;   // null = this aggregator has no link form
+        boolean resolutionAvailable = true;
+
+        FakeResolver(String key, Function<FinancialAsset, String> getter,
+                     BiConsumer<FinancialAsset, String> setter, Pattern urlPattern) {
+            this.key = key;
+            this.getter = getter;
+            this.setter = setter;
+            this.urlPattern = urlPattern;
+        }
+
+        @Override public String aggregatorKey() { return key; }
+        @Override public boolean isResolutionAvailable() { return resolutionAvailable; }
+        @Override public List<AssetCandidate> searchBySymbol(String symbol) { return List.of(); }
+        @Override public Optional<AssetCandidate> fetchById(String id) { return Optional.empty(); }
+        @Override public String getRef(FinancialAsset asset) { return getter.apply(asset); }
+        @Override public void setRef(FinancialAsset asset, String id) { setter.accept(asset, id); }
+
+        @Override
+        public Optional<String> extractIdFromUrl(String url) {
+            if (urlPattern == null) return Optional.empty();
+            Matcher m = urlPattern.matcher(url);
+            return m.find() ? Optional.of(m.group(1)) : Optional.empty();
+        }
+    }
+
+    private static AssetCandidate coin(String id, String symbol, Integer rank) {
+        return new AssetCandidate(id, id, symbol, rank);
+    }
+
+    /** One aggregator's block in a preview. */
+    private static FinancialAssetService.AggregatorResolution block(
+        FinancialAssetService.AssetResolutionPreview preview, String aggregatorKey) {
+        return preview.aggregators().stream()
+            .filter(a -> a.aggregatorKey().equals(aggregatorKey))
+            .findFirst().orElseThrow(() ->
+                new AssertionError("no block for " + aggregatorKey + " in " + preview.aggregators()));
     }
 
     private void expectSaveEcho() {
@@ -70,10 +141,27 @@ class FinancialAssetServiceTest {
     }
 
     @Test
+    void clearMapping_dropsEveryAggregatorsRefNotJustTheFirst() {
+        // Un-linking has to leave nothing behind: a ref left on a second aggregator would keep the
+        // symbol silently priced by it after the operator asked to forget the link.
+        FinancialAsset mapped = FinancialAsset.builder()
+            .symbol("BTC").coingeckoId("bitcoin").yahooSymbol("BTC-EUR")
+            .name("Bitcoin").type(AssetType.CRYPTO).status(AssetStatus.USER).build();
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.of(mapped));
+        expectSaveEcho();
+
+        FinancialAsset result = service.clearMapping("BTC");
+
+        assertThat(result.getCoingeckoId()).isNull();
+        assertThat(result.getYahooSymbol()).isNull();
+        assertThat(result.getStatus()).isEqualTo(AssetStatus.PENDING);
+    }
+
+    @Test
     void delete_refusesWhenSymbolIsStillHeld() {
         FinancialAsset asset = FinancialAsset.builder().symbol("BTC").coingeckoId("bitcoin").build();
         when(repository.findBySymbol("BTC")).thenReturn(Optional.of(asset));
-        when(accountHoldingRepository.findByTickerIgnoreCase("BTC"))
+        when(accountHoldingRepository.findByAsset_Id(any()))
             .thenReturn(List.of(mock(AccountHolding.class)));
 
         assertThatThrownBy(() -> service.delete("btc"))
@@ -88,7 +176,7 @@ class FinancialAssetServiceTest {
     void delete_removesOrphanAssetAndPurgesHistory() {
         FinancialAsset asset = FinancialAsset.builder().symbol("BTC").coingeckoId("bitcoin").build();
         when(repository.findBySymbol("BTC")).thenReturn(Optional.of(asset));
-        when(accountHoldingRepository.findByTickerIgnoreCase("BTC")).thenReturn(List.of());
+        when(accountHoldingRepository.findByAsset_Id(any())).thenReturn(List.of());
 
         service.delete("btc");
 
@@ -123,6 +211,20 @@ class FinancialAssetServiceTest {
         assertThat(result.get().getStatus()).isEqualTo(AssetStatus.AUTO);
         assertThat(result.get().getType()).isEqualTo(AssetType.CRYPTO);
         verify(repository).save(any(FinancialAsset.class));
+    }
+
+    @Test
+    void autoResolutionOnlyAsksTheCryptoDiscoveryAggregator() {
+        // Discovery-time resolution is a single-aggregator shortcut on a context-guaranteed symbol,
+        // not the multi-aggregator preview: it must not fan out a search to every aggregator on
+        // every imported coin.
+        when(repository.findBySymbol("SOL")).thenReturn(Optional.empty());
+        when(coinGecko.searchBySymbol("SOL")).thenReturn(List.of(coin("solana", "sol", 5)));
+        expectSaveEcho();
+
+        service.resolveCrypto("SOL");
+
+        verify(yahoo, never()).searchBySymbol(anyString());
     }
 
     @Test
@@ -182,6 +284,21 @@ class FinancialAssetServiceTest {
 
         assertThat(result).isEmpty();
         verify(repository).save(argThat(a -> a.getStatus() == AssetStatus.PENDING));
+    }
+
+    @Test
+    void keepsAPendingRowWhenTheOnlyMatchIsUnranked() {
+        // A rank is the only evidence a symbol collision has an obvious winner. Without one we don't
+        // auto-resolve even a lone match — it stays PENDING and the preview asks the operator. This
+        // is also what keeps an aggregator that never ranks (Yahoo) from auto-suggesting anything.
+        when(repository.findBySymbol("SOLO")).thenReturn(Optional.empty());
+        when(coinGecko.searchBySymbol("SOLO")).thenReturn(List.of(coin("solo-coin", "solo", null)));
+
+        Optional<FinancialAsset> result = service.resolveCrypto("SOLO");
+
+        assertThat(result).isEmpty();
+        verify(repository).save(argThat(a ->
+            a.getStatus() == AssetStatus.PENDING && a.getCoingeckoId() == null));
     }
 
     @Test
@@ -248,31 +365,83 @@ class FinancialAssetServiceTest {
 
         assertThat(previews).extracting(FinancialAssetService.AssetResolutionPreview::symbol)
             .containsExactly("META", "AMBI");
-        assertThat(previews.get(0).suggested().id()).isEqualTo("metabeat"); // #300 dominates #5000
-        assertThat(previews.get(0).candidates()).hasSize(2);
-        assertThat(previews.get(0).currentStatus()).isNull();               // never seen
-        assertThat(previews.get(1).suggested()).isNull();                   // #10 vs #14 comparable
+        assertThat(block(previews.get(0), "coingecko").suggested().id())
+            .isEqualTo("metabeat");                                          // #300 dominates #5000
+        assertThat(block(previews.get(0), "coingecko").candidates()).hasSize(2);
+        assertThat(previews.get(0).currentStatus()).isNull();                // never seen
+        assertThat(block(previews.get(1), "coingecko").suggested()).isNull(); // #10 vs #14 comparable
         assertThat(previews.get(1).currentStatus()).isEqualTo(AssetStatus.PENDING);
         verify(repository, never()).save(any());
+    }
+
+    @Test
+    void previewOffersOneBlockPerAggregatorEachWithItsOwnCandidatesAndGuess() {
+        // The whole point of the preview: every aggregator gets to offer its own id for the symbol,
+        // so the operator can map the coin on more than one and the price survives one being down.
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.empty());
+        when(coinGecko.searchBySymbol("BTC")).thenReturn(List.of(coin("bitcoin", "btc", 1)));
+        when(yahoo.searchBySymbol("BTC")).thenReturn(List.of(coin("BTC-EUR", "btc", 1)));
+
+        var preview = service.previewResolution("btc");
+
+        assertThat(preview.aggregators()).extracting(
+                FinancialAssetService.AggregatorResolution::aggregatorKey)
+            .containsExactly("coingecko", "yahoo");
+        assertThat(block(preview, "coingecko").suggested().id()).isEqualTo("bitcoin");
+        assertThat(block(preview, "yahoo").suggested().id()).isEqualTo("BTC-EUR");
+    }
+
+    @Test
+    void previewOmitsAnAggregatorThatCannotResolveRightNow() {
+        // An aggregator that can't search right now (a keyless CoinMarketCap, e.g.) isn't offered
+        // rather than shown as an empty picker.
+        yahoo.resolutionAvailable = false;
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.empty());
+        when(coinGecko.searchBySymbol("BTC")).thenReturn(List.of(coin("bitcoin", "btc", 1)));
+
+        var preview = service.previewResolution("BTC");
+
+        assertThat(preview.aggregators()).extracting(
+                FinancialAssetService.AggregatorResolution::aggregatorKey)
+            .containsExactly("coingecko");
+        verify(yahoo, never()).searchBySymbol(anyString());
+    }
+
+    @Test
+    void previewNeverSuggestsAnUnrankedCandidate() {
+        // Yahoo's "candidates" are the same security on different exchanges and carry no rank —
+        // pre-selecting one would silently quote the wrong market.
+        when(repository.findBySymbol("IWDA")).thenReturn(Optional.empty());
+        when(yahoo.searchBySymbol("IWDA")).thenReturn(List.of(
+            new AssetCandidate("IWDA.AS", "iShares Core MSCI World", "IWDA.AS", null),
+            new AssetCandidate("IWDA.L", "iShares Core MSCI World", "IWDA.L", null)));
+
+        var preview = service.previewResolution("iwda");
+
+        assertThat(block(preview, "yahoo").candidates()).hasSize(2);
+        assertThat(block(preview, "yahoo").suggested()).isNull();
     }
 
     @Test
     void previewResolutionsDegradesToNoCandidatesWhenTheSearchFails() {
         when(repository.findBySymbol("BOOM")).thenReturn(Optional.empty());
         when(coinGecko.searchBySymbol("BOOM")).thenThrow(new RuntimeException("rate limit"));
+        when(yahoo.searchBySymbol("BOOM")).thenReturn(List.of(coin("42", "boom", 900)));
 
         var previews = service.previewResolutions(new java.util.LinkedHashSet<>(List.of("boom")));
 
+        // One aggregator blowing up must not cost the operator the others' offers.
         assertThat(previews).hasSize(1);
         assertThat(previews.get(0).symbol()).isEqualTo("BOOM");
-        assertThat(previews.get(0).candidates()).isEmpty();
-        assertThat(previews.get(0).suggested()).isNull();
+        assertThat(block(previews.get(0), "coingecko").candidates()).isEmpty();
+        assertThat(block(previews.get(0), "coingecko").suggested()).isNull();
+        assertThat(block(previews.get(0), "yahoo").suggested().id()).isEqualTo("42");
     }
 
     @Test
-    void applyUserMappingPinsACandidateIdAsUserWithoutCallingCoinGecko() {
+    void applyUserMappingPinsACandidateIdAsUserWithoutCallingTheAggregator() {
         // The import path pins a coin the operator picked from preview candidates — the id/name are
-        // trusted, so no extra /coins/{id} round-trip.
+        // trusted, so no extra lookup round-trip.
         when(repository.findBySymbol("META")).thenReturn(Optional.empty());
         expectSaveEcho();
 
@@ -283,7 +452,102 @@ class FinancialAssetServiceTest {
         assertThat(result.getName()).isEqualTo("MetaBeat");
         assertThat(result.getStatus()).isEqualTo(AssetStatus.USER);
         assertThat(result.getType()).isEqualTo(AssetType.CRYPTO);
-        verify(coinGecko, never()).fetchCoinById(anyString());
+        verify(coinGecko, never()).fetchById(anyString());
+    }
+
+    @Test
+    void applyMappingsWritesEachAggregatorsIdIntoItsOwnColumn() {
+        // The multi-aggregator confirm: one coin, one id per aggregator, each landing in the column
+        // its own adapter owns — this is what gives the asset a price fallback.
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.empty());
+        expectSaveEcho();
+
+        FinancialAsset result = service.applyMappings("btc",
+            Map.of("coingecko", "bitcoin", "yahoo", "BTC-EUR"), "Bitcoin");
+
+        assertThat(result.getCoingeckoId()).isEqualTo("bitcoin");
+        assertThat(result.getYahooSymbol()).isEqualTo("BTC-EUR");
+        assertThat(result.getStatus()).isEqualTo(AssetStatus.USER);
+    }
+
+    @Test
+    void applyMappingsIgnoresAnUnknownAggregatorRatherThanFailingTheImport() {
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.empty());
+        expectSaveEcho();
+
+        Map<String, String> ids = new java.util.LinkedHashMap<>();
+        ids.put("coingecko", "bitcoin");
+        ids.put("retired-aggregator", "whatever");   // a client that outlived an aggregator
+
+        FinancialAsset result = service.applyMappings("BTC", ids, "Bitcoin");
+
+        assertThat(result.getCoingeckoId()).isEqualTo("bitcoin");
+        assertThat(result.getStatus()).isEqualTo(AssetStatus.USER);
+    }
+
+    @Test
+    void applyMappingsKeepsAnExistingNameWhenTheNewMappingCarriesNone() {
+        // Re-mapping from a source without a name (a Yahoo candidate has no longname) must not wipe
+        // the label the coin already had. The operator can still rename it via the editable field.
+        FinancialAsset existing = FinancialAsset.builder()
+            .symbol("BTC").coingeckoId("bitcoin").name("Bitcoin")
+            .type(AssetType.CRYPTO).status(AssetStatus.USER).build();
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.of(existing));
+        expectSaveEcho();
+
+        FinancialAsset result = service.applyMappings("BTC", Map.of("yahoo", "BTC-EUR"), null);
+
+        assertThat(result.getName()).isEqualTo("Bitcoin");            // not nulled
+        assertThat(result.getYahooSymbol()).isEqualTo("BTC-EUR");     // the new ref still applied
+    }
+
+    @Test
+    void applyMappingsTrimsAndAppliesASuppliedName() {
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.empty());
+        expectSaveEcho();
+
+        FinancialAsset result = service.applyMappings("BTC", Map.of("coingecko", "bitcoin"), "  Bitcoin  ");
+
+        assertThat(result.getName()).isEqualTo("Bitcoin");
+    }
+
+    @Test
+    void applyMappingsRejectsAMappingThatWouldWriteNothing() {
+        assertThatThrownBy(() -> service.applyMappings("BTC", Map.of("nobody", "x"), "Bitcoin"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void applyMappingsFillingAnEmptyRefKeepsThePriceHistory() {
+        // Adding a second aggregator alongside a working CoinGecko id doesn't invalidate anything
+        // already priced — nothing was ever fetched under a wrong id.
+        FinancialAsset existing = FinancialAsset.builder()
+            .symbol("BTC").coingeckoId("bitcoin").type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
+        when(repository.findBySymbol("BTC")).thenReturn(Optional.of(existing));
+        expectSaveEcho();
+
+        FinancialAsset result = service.applyMappings("BTC",
+            Map.of("coingecko", "bitcoin", "yahoo", "BTC-EUR"), "Bitcoin");
+
+        assertThat(result.getYahooSymbol()).isEqualTo("BTC-EUR");
+        verifyNoInteractions(priceSnapshotRepository, priceService);
+    }
+
+    @Test
+    void applyMappingsReplacingAnExistingIdPurgesAndRefetches() {
+        FinancialAsset existing = FinancialAsset.builder()
+            .symbol("META").coingeckoId("wrong-meta")
+            .type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
+        when(repository.findBySymbol("META")).thenReturn(Optional.of(existing));
+        expectSaveEcho();
+
+        service.applyMappings("META", Map.of("coingecko", "metabeat"), "MetaBeat");
+
+        verify(priceSnapshotRepository).deleteByAssetId(any());
+        verify(priceService).evictFromCache("META");
+        verify(priceService).backfillHistoricalPrices(anyMap());
     }
 
     @Test
@@ -302,8 +566,8 @@ class FinancialAssetServiceTest {
 
     @Test
     void setManualMappingExtractsIdFromLinkAndPersistsAsUser() {
-        when(coinGecko.fetchCoinById("loaded-lions"))
-            .thenReturn(Optional.of(new CoinCandidate("loaded-lions", "Loaded Lions", "lion", 3500)));
+        when(coinGecko.fetchById("loaded-lions"))
+            .thenReturn(Optional.of(new AssetCandidate("loaded-lions", "Loaded Lions", "lion", 3500)));
         when(repository.findBySymbol("LION")).thenReturn(Optional.empty());
         expectSaveEcho();
 
@@ -318,9 +582,51 @@ class FinancialAssetServiceTest {
     }
 
     @Test
+    void resolveLink_returnsTheClaimingAggregatorAndItsValidatedCandidate() {
+        // The import wizard's per-coin link field goes through this without applying anything yet —
+        // the same routing setManualMapping uses, exposed for callers that merge the id themselves.
+        when(coinGecko.fetchById("loaded-lions"))
+            .thenReturn(Optional.of(new AssetCandidate("loaded-lions", "Loaded Lions", "lion", 3500)));
+
+        var link = service.resolveLink("https://www.coingecko.com/en/coins/loaded-lions");
+
+        assertThat(link.aggregatorKey()).isEqualTo("coingecko");
+        assertThat(link.candidate().id()).isEqualTo("loaded-lions");
+        assertThat(link.candidate().name()).isEqualTo("Loaded Lions");
+        verify(repository, never()).save(any());   // resolves only — nothing persisted
+    }
+
+    @Test
+    void resolveLink_rejectsALinkNoAggregatorClaims_andAnUnknownId() {
+        assertThatThrownBy(() -> service.resolveLink("https://example.com/whatever"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        when(coinGecko.fetchById("ghost")).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.resolveLink("https://www.coingecko.com/en/coins/ghost"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void setManualMappingRoutesTheLinkToTheAggregatorThatRecognisesIt() {
+        // The engine doesn't parse links itself — each aggregator claims its own URL form, and the
+        // id lands in that aggregator's column. Ones with no link form simply don't claim it.
+        when(coinGecko.fetchById("loaded-lions"))
+            .thenReturn(Optional.of(new AssetCandidate("loaded-lions", "Loaded Lions", "lion", 3500)));
+        when(repository.findBySymbol("LION")).thenReturn(Optional.empty());
+        expectSaveEcho();
+
+        FinancialAsset result = service.setManualMapping("LION",
+            "https://www.coingecko.com/en/coins/loaded-lions");
+
+        assertThat(result.getCoingeckoId()).isEqualTo("loaded-lions");
+        assertThat(result.getYahooSymbol()).isNull();
+        verify(yahoo, never()).fetchById(anyString());
+    }
+
+    @Test
     void setManualMappingReadsSlugFromLocalizedUrlWithQuery() {
-        when(coinGecko.fetchCoinById("capybara-nation"))
-            .thenReturn(Optional.of(new CoinCandidate("capybara-nation", "Capybara Nation", "bara", null)));
+        when(coinGecko.fetchById("capybara-nation"))
+            .thenReturn(Optional.of(new AssetCandidate("capybara-nation", "Capybara Nation", "bara", null)));
         when(repository.findBySymbol("BARA")).thenReturn(Optional.empty());
         expectSaveEcho();
 
@@ -328,7 +634,7 @@ class FinancialAssetServiceTest {
             "https://www.coingecko.com/fr/coins/capybara-nation?utm=share#markets");
 
         assertThat(result.getCoingeckoId()).isEqualTo("capybara-nation");
-        verify(coinGecko).fetchCoinById("capybara-nation");
+        verify(coinGecko).fetchById("capybara-nation");
     }
 
     @Test
@@ -336,8 +642,8 @@ class FinancialAssetServiceTest {
         FinancialAsset existing = FinancialAsset.builder()
             .symbol("MATIC").coingeckoId("wrong-clone").name("Clone")
             .type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
-        when(coinGecko.fetchCoinById("matic-network"))
-            .thenReturn(Optional.of(new CoinCandidate("matic-network", "Polygon", "matic", 12)));
+        when(coinGecko.fetchById("matic-network"))
+            .thenReturn(Optional.of(new AssetCandidate("matic-network", "Polygon", "matic", 12)));
         when(repository.findBySymbol("MATIC")).thenReturn(Optional.of(existing));
         expectSaveEcho();
 
@@ -353,8 +659,8 @@ class FinancialAssetServiceTest {
         FinancialAsset existing = FinancialAsset.builder()
             .symbol("MATIC").coingeckoId("wrong-clone")
             .type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
-        when(coinGecko.fetchCoinById("matic-network"))
-            .thenReturn(Optional.of(new CoinCandidate("matic-network", "Polygon", "matic", 12)));
+        when(coinGecko.fetchById("matic-network"))
+            .thenReturn(Optional.of(new AssetCandidate("matic-network", "Polygon", "matic", 12)));
         when(repository.findBySymbol("MATIC")).thenReturn(Optional.of(existing));
         expectSaveEcho();
 
@@ -371,8 +677,8 @@ class FinancialAssetServiceTest {
         FinancialAsset existing = FinancialAsset.builder()
             .symbol("MATIC").coingeckoId("matic-network")
             .type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
-        when(coinGecko.fetchCoinById("matic-network"))
-            .thenReturn(Optional.of(new CoinCandidate("matic-network", "Polygon", "matic", 12)));
+        when(coinGecko.fetchById("matic-network"))
+            .thenReturn(Optional.of(new AssetCandidate("matic-network", "Polygon", "matic", 12)));
         when(repository.findBySymbol("MATIC")).thenReturn(Optional.of(existing));
         expectSaveEcho();
 
@@ -386,8 +692,8 @@ class FinancialAssetServiceTest {
 
     @Test
     void firstManualMappingDoesNotPurgeAnything() {
-        when(coinGecko.fetchCoinById("loaded-lions"))
-            .thenReturn(Optional.of(new CoinCandidate("loaded-lions", "Loaded Lions", "lion", 3500)));
+        when(coinGecko.fetchById("loaded-lions"))
+            .thenReturn(Optional.of(new AssetCandidate("loaded-lions", "Loaded Lions", "lion", 3500)));
         when(repository.findBySymbol("LION")).thenReturn(Optional.empty());
         expectSaveEcho();
 
@@ -401,8 +707,8 @@ class FinancialAssetServiceTest {
         FinancialAsset existing = FinancialAsset.builder()
             .symbol("MATIC").coingeckoId("wrong-clone")
             .type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
-        when(coinGecko.fetchCoinById("matic-network"))
-            .thenReturn(Optional.of(new CoinCandidate("matic-network", "Polygon", "matic", 12)));
+        when(coinGecko.fetchById("matic-network"))
+            .thenReturn(Optional.of(new AssetCandidate("matic-network", "Polygon", "matic", 12)));
         when(repository.findBySymbol("MATIC")).thenReturn(Optional.of(existing));
         when(priceService.backfillHistoricalPrices(anyMap())).thenThrow(new RuntimeException("rate limit"));
         expectSaveEcho();
@@ -443,7 +749,7 @@ class FinancialAssetServiceTest {
     @Test
     void markWorthlessPinsAZeroValueAndPurgesTheTickersPrices() {
         when(repository.findBySymbol("METABEAT")).thenReturn(Optional.empty());
-        when(accountHoldingRepository.findByTickerIgnoreCase("METABEAT")).thenReturn(List.of());
+        when(accountHoldingRepository.findByAsset_Id(any())).thenReturn(List.of());
         expectSaveEcho();
 
         FinancialAsset result = service.markWorthless("metabeat");
@@ -455,8 +761,8 @@ class FinancialAssetServiceTest {
         // Any price fetched while it was still listed is dropped, live cache evicted, holdings re-valued.
         verify(priceSnapshotRepository).deleteByAssetId(any());
         verify(priceService).evictFromCache("METABEAT");
-        verify(accountHoldingRepository).findByTickerIgnoreCase("METABEAT");
-        verify(coinGecko, never()).fetchCoinById(anyString());
+        verify(accountHoldingRepository).findByAsset_Id(any());
+        verify(coinGecko, never()).fetchById(anyString());
     }
 
     @Test
@@ -469,7 +775,7 @@ class FinancialAssetServiceTest {
             .asset(FinancialAsset.builder().symbol("METABEAT").build())
             .quantity(new java.math.BigDecimal("50")).build();
         when(repository.findBySymbol("METABEAT")).thenReturn(Optional.empty());
-        when(accountHoldingRepository.findByTickerIgnoreCase("METABEAT"))
+        when(accountHoldingRepository.findByAsset_Id(any()))
             .thenReturn(List.of(holdingA, holdingB));
         expectSaveEcho();
 
@@ -481,18 +787,20 @@ class FinancialAssetServiceTest {
     }
 
     @Test
-    void markWorthlessOverExistingAssetClearsTheCoinId() {
+    void markWorthlessOverExistingAssetClearsEveryAggregatorRef() {
         FinancialAsset existing = FinancialAsset.builder()
-            .symbol("METABEAT").coingeckoId("metabeat").name("MetaBeat")
+            .symbol("METABEAT").coingeckoId("metabeat").yahooSymbol("METABEAT").name("MetaBeat")
             .type(AssetType.CRYPTO).status(AssetStatus.USER).build();
         when(repository.findBySymbol("METABEAT")).thenReturn(Optional.of(existing));
-        when(accountHoldingRepository.findByTickerIgnoreCase("METABEAT")).thenReturn(List.of());
+        when(accountHoldingRepository.findByAsset_Id(any())).thenReturn(List.of());
         expectSaveEcho();
 
         FinancialAsset result = service.markWorthless("METABEAT");
 
+        // Worthless means no aggregator prices it — a ref left behind would keep one quoting it.
         assertThat(result.getStatus()).isEqualTo(AssetStatus.WORTHLESS);
         assertThat(result.getCoingeckoId()).isNull();
+        assertThat(result.getYahooSymbol()).isNull();
         assertThat(result.getName()).isNull();
     }
 
@@ -501,8 +809,8 @@ class FinancialAssetServiceTest {
         FinancialAsset worthless = FinancialAsset.builder()
             .symbol("METABEAT").coingeckoId(null)
             .type(AssetType.CRYPTO).status(AssetStatus.WORTHLESS).build();
-        when(coinGecko.fetchCoinById("metabeat"))
-            .thenReturn(Optional.of(new CoinCandidate("metabeat", "MetaBeat", "metabeat", 4200)));
+        when(coinGecko.fetchById("metabeat"))
+            .thenReturn(Optional.of(new AssetCandidate("metabeat", "MetaBeat", "metabeat", 4200)));
         when(repository.findBySymbol("METABEAT")).thenReturn(Optional.of(worthless));
         expectSaveEcho();
 
@@ -516,17 +824,17 @@ class FinancialAssetServiceTest {
     }
 
     @Test
-    void setManualMappingRejectsALinkThatIsNotACoinUrl() {
+    void setManualMappingRejectsALinkNoAggregatorRecognises() {
         assertThatThrownBy(() -> service.setManualMapping("BTC", "https://www.coingecko.com/en/categories"))
             .isInstanceOf(IllegalArgumentException.class);
 
-        verifyNoInteractions(coinGecko);
+        verify(coinGecko, never()).fetchById(anyString());
         verify(repository, never()).save(any());
     }
 
     @Test
     void setManualMappingRejectsAnUnknownCoinId() {
-        when(coinGecko.fetchCoinById("does-not-exist")).thenReturn(Optional.empty());
+        when(coinGecko.fetchById("does-not-exist")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.setManualMapping("XYZ",
             "https://www.coingecko.com/en/coins/does-not-exist"))
@@ -628,7 +936,7 @@ class FinancialAssetServiceTest {
 
     @Test
     void fillNameIfAbsentNeverOverwritesAnExistingName() {
-        // A canonical name (CoinGecko, a prior sync) must survive a later, possibly worse label.
+        // A canonical name (an aggregator's, a prior sync's) must survive a later, possibly worse label.
         FinancialAsset asset = FinancialAsset.builder().symbol("BTC").name("Bitcoin").build();
 
         service.fillNameIfAbsent(asset, "some broker's label for BTC");

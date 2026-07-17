@@ -6,8 +6,12 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
- * A {@code financial_asset} registry row, for the standing mapping/verification UI (holding detail).
- * Returned after applying a mapping so the client can reflect the new status/link without a reload.
+ * A {@code financial_asset} registry row, for the standing mapping/verification UI (holding detail)
+ * and the registry table. Returned after applying a mapping so the client can reflect the new
+ * status/link without a reload.
+ *
+ * <p>One field per aggregator ref, mirroring the table: the registry column shows at a glance which
+ * aggregators can quote the asset — and therefore whether it has a fallback if one of them is down.
  */
 public record AssetResponse(
     String symbol,

@@ -71,6 +71,33 @@ class PriceServiceTest {
     }
 
     @Test
+    void getPriceEur_persistsLastPriceByAssetId_forARegisteredAsset() {
+        FinancialAsset registered = FinancialAsset.builder().id(42L).symbol("BTC")
+            .coingeckoId("bitcoin").build();
+        when(priceRouter.getPricesEur(any())).thenReturn(Map.of("BTC", new BigDecimal("84500")));
+
+        BigDecimal price = service.getPriceEur(registered);
+
+        assertThat(price).isEqualByComparingTo("84500");
+        org.mockito.Mockito.verify(assetRepository)
+            .updateLastPrice(org.mockito.ArgumentMatchers.eq(42L), any(), any());
+    }
+
+    @Test
+    void getPriceEur_transientAsset_neverWritesLastPrice() {
+        // A bare currency code / unregistered MCP ticker has no registry row, hence no id — there is
+        // nothing to persist the price to, so the update must be skipped, not fired at a null id.
+        when(assetRepository.findBySymbol("USD")).thenReturn(Optional.empty());
+        when(priceRouter.getPricesEur(any())).thenReturn(Map.of("USD", new BigDecimal("0.92")));
+
+        BigDecimal price = service.getPriceEur("USD");
+
+        assertThat(price).isEqualByComparingTo("0.92");
+        org.mockito.Mockito.verify(assetRepository, org.mockito.Mockito.never())
+            .updateLastPrice(any(), any(), any());
+    }
+
+    @Test
     void getPriceEur_eurOrBlank_returnsOneWithoutTouchingProviders() {
         assertThat(service.getPriceEur("EUR")).isEqualByComparingTo(BigDecimal.ONE);
         assertThat(service.getPriceEur("eur")).isEqualByComparingTo(BigDecimal.ONE);

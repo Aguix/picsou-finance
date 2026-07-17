@@ -1,6 +1,7 @@
 package com.picsou.adapter.price;
 
 import com.picsou.model.FinancialAsset;
+import com.picsou.port.AssetCandidate;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -34,6 +35,12 @@ class YahooFinancePriceProviderTest {
 
     private static final String ASML_EUR = """
             {"chart":{"result":[{"meta":{"regularMarketPrice":700.0,"currency":"EUR"},
+              "timestamp":[1700000000],"indicators":{"quote":[{"close":[700.0]}]}}]}}""";
+
+    /** Same chart payload, with the name metadata fetchById reads back. */
+    private static final String ASML_EUR_NAMED = """
+            {"chart":{"result":[{"meta":{"regularMarketPrice":700.0,"currency":"EUR",
+              "longName":"ASML Holding NV","shortName":"ASML HOLDING"},
               "timestamp":[1700000000],"indicators":{"quote":[{"close":[700.0]}]}}]}}""";
 
     private static final String SONY_JPY = """
@@ -111,6 +118,87 @@ class YahooFinancePriceProviderTest {
         FinancialAsset asset = FinancialAsset.builder().symbol("IE00B4L5Y983").yahooSymbol("IE00B4L5Y983").build();
 
         assertThat(provider.canPrice(asset)).isFalse();
+    }
+
+    /** A `/v1/finance/search` hit list: the ticker's listings plus the fuzzy noise Yahoo throws in. */
+    private static final String SEARCH_IWDA = """
+            {"quotes":[
+              {"symbol":"IWDA.AS","shortname":"ISHARES CORE MSCI WORLD","longname":"iShares Core MSCI World UCITS ETF USD (Acc)","quoteType":"ETF"},
+              {"symbol":"IWDA.L","shortname":"iShares Core MSCI World UCITS ETF","quoteType":"ETF"},
+              {"symbol":"IWDAX","shortname":"Something Unrelated","quoteType":"EQUITY"},
+              {"symbol":"SWDA.MI","shortname":"Name match, different ticker","quoteType":"ETF"}
+            ]}""";
+
+    @Test
+    void searchBySymbol_returnsTheTickersListings_andDropsFuzzyNoise() {
+        // Yahoo's search is fuzzy: it also answers on name matches (SWDA.MI) and longer tickers
+        // (IWDAX). A symbol picker must only offer the ticker itself and its exchange listings.
+        var provider = providerWith(url -> url.contains("/v1/finance/search") ? SEARCH_IWDA : null, null);
+
+        List<AssetCandidate> candidates = provider.searchBySymbol("iwda");
+
+        assertThat(candidates).extracting(AssetCandidate::id).containsExactly("IWDA.AS", "IWDA.L");
+        // For Yahoo the id IS the symbol it quotes — the two listings are two different refs.
+        assertThat(candidates.get(0).symbol()).isEqualTo("IWDA.AS");
+        assertThat(candidates.get(0).name()).isEqualTo("iShares Core MSCI World UCITS ETF USD (Acc)");
+        assertThat(candidates.get(1).name()).isEqualTo("iShares Core MSCI World UCITS ETF"); // no longname
+    }
+
+    @Test
+    void searchBySymbol_candidatesCarryNoRank_soTheResolverNeverAutoPicksAnExchange() {
+        // The anti-footgun: without a rank, pickDominant can't suggest one — yahoo_symbol stays null
+        // until an operator chooses, rather than silently quoting the wrong market.
+        var provider = providerWith(url -> url.contains("/v1/finance/search") ? SEARCH_IWDA : null, null);
+
+        assertThat(provider.searchBySymbol("IWDA"))
+            .isNotEmpty()
+            .allSatisfy(c -> assertThat(c.marketCapRank()).isNull());
+    }
+
+    @Test
+    void searchBySymbol_degradesToEmpty_onFailureOrBlankQuery() {
+        var provider = providerWith(url -> null, null);   // every call 404s
+
+        assertThat(provider.searchBySymbol("IWDA")).isEmpty();
+        assertThat(provider.searchBySymbol("  ")).isEmpty();
+    }
+
+    @Test
+    void fetchById_validatesASymbolYahooQuotes_andReadsItsName() {
+        var provider = providerWith(url -> url.contains("/ASML.AS") ? ASML_EUR_NAMED : null, null);
+
+        var found = provider.fetchById("ASML.AS");
+
+        assertThat(found).isPresent();
+        assertThat(found.get().id()).isEqualTo("ASML.AS");
+        assertThat(found.get().name()).isEqualTo("ASML Holding NV");
+    }
+
+    @Test
+    void fetchById_isEmpty_forASymbolYahooCannotQuote() {
+        var provider = providerWith(url -> null, null);
+
+        assertThat(provider.fetchById("NOPE.XX")).isEmpty();
+        assertThat(provider.fetchById(null)).isEmpty();
+    }
+
+    @Test
+    void getRefAndSetRef_touchOnlyTheYahooColumn() {
+        var provider = providerWith(url -> null, null);
+        FinancialAsset asset = FinancialAsset.builder().symbol("IWDA").coingeckoId("not-a-coin").build();
+
+        provider.setRef(asset, "IWDA.AS");
+
+        assertThat(provider.getRef(asset)).isEqualTo("IWDA.AS");
+        assertThat(asset.getYahooSymbol()).isEqualTo("IWDA.AS");
+        assertThat(asset.getCoingeckoId()).isEqualTo("not-a-coin");   // a sibling's column is untouched
+    }
+
+    @Test
+    void extractIdFromUrl_isNotSupported_soTheIdComesFromAPickedCandidate() {
+        var provider = providerWith(url -> null, null);
+
+        assertThat(provider.extractIdFromUrl("https://finance.yahoo.com/quote/IWDA.AS")).isEmpty();
     }
 
     @Test

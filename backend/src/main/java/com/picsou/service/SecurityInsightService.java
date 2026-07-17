@@ -1,6 +1,7 @@
 package com.picsou.service;
 
 import com.picsou.adapter.price.YahooFinancePriceProvider;
+import com.picsou.model.AssetType;
 import com.picsou.dto.EtfComposition;
 import com.picsou.dto.SecurityInsightResponse;
 import com.picsou.port.EtfCompositionProvider;
@@ -62,11 +63,17 @@ public class SecurityInsightService {
         return response;
     }
 
-    /** crypto when the registry has a CoinGecko id, else map Yahoo's instrumentType, else UNKNOWN. */
+    /**
+     * Crypto when the registry types the asset {@code CRYPTO} — the asset's own state, not a peek at
+     * one aggregator's ref column (a coin mapped only on CoinMarketCap has no {@code coingecko_id},
+     * and a {@code PENDING} coin has none at all — both are still crypto). The registry can't tell a
+     * stock from an ETF ({@code getOrCreateStock} types both {@code STOCK}), so for everything else
+     * Yahoo's {@code instrumentType} stays the discriminator.
+     */
     private String classify(String upperTicker) {
-        boolean hasCoinGeckoId = assetRepository.findBySymbol(upperTicker)
-            .map(a -> a.getCoingeckoId() != null).orElse(false);
-        if (hasCoinGeckoId) {
+        boolean isRegisteredCrypto = assetRepository.findBySymbol(upperTicker)
+            .map(a -> a.getType() == AssetType.CRYPTO).orElse(false);
+        if (isRegisteredCrypto) {
             return "CRYPTO";
         }
         Optional<String> instrumentType = yahoo.getInstrumentType(upperTicker);

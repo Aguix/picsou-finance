@@ -6,6 +6,7 @@ import com.picsou.dto.DashboardResponse.NetWorthPoint;
 import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
+import com.picsou.model.FinancialAsset;
 import com.picsou.model.PriceSnapshot;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.AccountRepository;
@@ -207,7 +208,9 @@ public class HistoryService {
         Map<Long, List<HoldingData>> accountHoldings = new HashMap<>();
         Map<Long, BigDecimal> accountHoldingsInvested = new HashMap<>();
         Map<Long, BigDecimal> accountBankBalance = new HashMap<>(); // non-investment account balances
-        Set<String> allTickers = new HashSet<>();
+        // Keyed by symbol for the per-hour lookups below, but the VALUE is the asset itself — the
+        // holding already carries it, so the price fetch never round-trips a symbol to the registry.
+        Map<String, FinancialAsset> assetsByTicker = new HashMap<>();
         Set<Long> loanIds = new HashSet<>();
 
         LocalDate today = LocalDate.now();
@@ -241,7 +244,7 @@ public class HistoryService {
                     String ticker = h.getAsset().getSymbol();
                     holdingDataList.add(new HoldingData(ticker, qty, avgBuyEur));
                     invested = invested.add(qty.multiply(avgBuyEur));
-                    allTickers.add(ticker);
+                    assetsByTicker.putIfAbsent(ticker, h.getAsset());
                 }
 
                 accountHoldings.put(accId, holdingDataList);
@@ -249,12 +252,12 @@ public class HistoryService {
             }
         }
 
-        // Fetch intraday prices for all tickers
+        // Fetch intraday prices for all held assets
         Map<String, NavigableMap<LocalDateTime, BigDecimal>> intradayPricesByTicker = new HashMap<>();
-        for (String ticker : allTickers) {
-            Map<LocalDateTime, BigDecimal> prices = priceService.getIntradayPricesEur(ticker, from, now);
+        for (var entry : assetsByTicker.entrySet()) {
+            Map<LocalDateTime, BigDecimal> prices = priceService.getIntradayPricesEur(entry.getValue(), from, now);
             if (!prices.isEmpty()) {
-                intradayPricesByTicker.put(ticker, new TreeMap<>(prices));
+                intradayPricesByTicker.put(entry.getKey(), new TreeMap<>(prices));
             }
         }
 
@@ -306,7 +309,7 @@ public class HistoryService {
         }
 
         log.info("buildIntradayHistory: {} hourly points, {} accounts, {} tickers",
-            result.size(), accounts.size(), allTickers.size());
+            result.size(), accounts.size(), assetsByTicker.size());
 
         return result;
     }

@@ -1,13 +1,14 @@
 package com.picsou.controller;
 
-import com.picsou.adapter.price.CoinGeckoPriceProvider.CoinCandidate;
 import com.picsou.dto.AssetCandidatesResponse;
 import com.picsou.dto.AssetMappingRequest;
 import com.picsou.dto.AssetResponse;
 import com.picsou.model.AssetStatus;
 import com.picsou.model.AssetType;
 import com.picsou.model.FinancialAsset;
+import com.picsou.port.AssetCandidate;
 import com.picsou.service.FinancialAssetService;
+import com.picsou.service.FinancialAssetService.AggregatorResolution;
 import com.picsou.service.FinancialAssetService.AssetResolutionPreview;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -59,11 +60,18 @@ class AssetControllerTest {
     }
 
     @Test
-    void candidates_mapsPreviewIncludingSuggestionAndStatus() {
+    void candidates_narrowsTheMultiAggregatorPreviewToCoinGecko() {
+        // The service resolves across every aggregator now; this standing surface still speaks
+        // CoinGecko only, so it picks that block out and ignores the rest (see AssetController).
         when(assetService.previewResolution("BTC")).thenReturn(new AssetResolutionPreview(
-            "BTC", AssetStatus.USER, new CoinCandidate("bitcoin", "Bitcoin", "btc", 1),
-            List.of(new CoinCandidate("bitcoin", "Bitcoin", "btc", 1),
-                    new CoinCandidate("bitcoin-bep2", "Bitcoin BEP2", "btc", 950))));
+            "BTC", AssetStatus.USER, List.of(
+                new AggregatorResolution("coingecko",
+                    new AssetCandidate("bitcoin", "Bitcoin", "btc", 1),
+                    List.of(new AssetCandidate("bitcoin", "Bitcoin", "btc", 1),
+                            new AssetCandidate("bitcoin-bep2", "Bitcoin BEP2", "btc", 950))),
+                new AggregatorResolution("coinmarketcap",
+                    new AssetCandidate("1", "Bitcoin", "BTC", 1),
+                    List.of(new AssetCandidate("1", "Bitcoin", "BTC", 1))))));
 
         AssetCandidatesResponse res = controller().candidates("BTC");
 
@@ -76,12 +84,28 @@ class AssetControllerTest {
 
     @Test
     void candidates_nullStatusAndNoSuggestionSurviveMapping() {
-        when(assetService.previewResolution("XYZ")).thenReturn(
-            new AssetResolutionPreview("XYZ", null, null, List.of()));
+        when(assetService.previewResolution("XYZ")).thenReturn(new AssetResolutionPreview(
+            "XYZ", null, List.of(new AggregatorResolution("coingecko", null, List.of()))));
 
         AssetCandidatesResponse res = controller().candidates("XYZ");
 
         assertThat(res.currentStatus()).isNull();
+        assertThat(res.suggestedId()).isNull();
+        assertThat(res.candidates()).isEmpty();
+    }
+
+    @Test
+    void candidates_degradesToAnEmptyListWhenCoinGeckoOffersNoBlock() {
+        // CoinGecko could be turned off entirely; the standing editor then has nothing to show
+        // rather than blowing up on a missing block.
+        when(assetService.previewResolution("XYZ")).thenReturn(new AssetResolutionPreview(
+            "XYZ", AssetStatus.PENDING,
+            List.of(new AggregatorResolution("yahoo", null, List.of()))));
+
+        AssetCandidatesResponse res = controller().candidates("XYZ");
+
+        assertThat(res.symbol()).isEqualTo("XYZ");
+        assertThat(res.currentStatus()).isEqualTo("PENDING");
         assertThat(res.suggestedId()).isNull();
         assertThat(res.candidates()).isEmpty();
     }

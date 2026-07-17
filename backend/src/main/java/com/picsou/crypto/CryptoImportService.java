@@ -36,6 +36,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -146,18 +147,24 @@ public class CryptoImportService {
         cache.put(fileToken, new Parsed(parser.sourceId(), txs, nativeCurrency, Instant.now()));
 
         // Resolve tickers *provisionally* (nothing persisted) and hand the UI a confirm/correct
-        // choice per coin that isn't already settled — the best market-cap guess plus every
-        // CoinGecko candidate that shares the symbol. This is what lets the operator catch a silent
-        // AUTO mis-match before the import commits; the confirmed choices come back on the import
-        // request and are applied as USER by execute() before the price backfill.
+        // choice per coin that isn't already settled — one block per available aggregator, each with
+        // its own guess and candidates. This is what lets the operator catch a silent AUTO mis-match
+        // before the import commits, and pick an id on more than one aggregator so the price survives
+        // one of them being down. The confirmed choices come back on the import request and are
+        // applied as USER by execute() before the price backfill.
         List<ImportAssetChoice> assetChoices = financialAssetService
             .previewResolutions(importedTickers(txs)).stream()
             .map(p -> new ImportAssetChoice(
                 p.symbol(),
                 p.currentStatus() != null ? p.currentStatus().name() : null,
-                p.suggested() != null ? p.suggested().id() : null,
-                p.candidates().stream()
-                    .map(c -> new ImportAssetChoice.Candidate(c.id(), c.name(), c.symbol(), c.marketCapRank()))
+                p.aggregators().stream()
+                    .map(a -> new ImportAssetChoice.AggregatorBlock(
+                        a.aggregatorKey(),
+                        a.suggested() != null ? a.suggested().id() : null,
+                        a.candidates().stream()
+                            .map(c -> new ImportAssetChoice.Candidate(
+                                c.id(), c.name(), c.symbol(), c.marketCapRank()))
+                            .toList()))
                     .toList()))
             .toList();
 
@@ -390,10 +397,10 @@ public class CryptoImportService {
     }
 
     /**
-     * Apply the operator's confirmed per-coin decisions from the import preview: {@code MAP} pins a
-     * CoinGecko id as a {@code USER} mapping, {@code WORTHLESS} pins a zero, anything else (incl.
-     * {@code IGNORE}) leaves the coin unresolved to import unpriced. Best-effort per coin — a single
-     * bad mapping is logged and skipped, never failing the import.
+     * Apply the operator's confirmed per-coin decisions from the import preview: {@code MAP} pins the
+     * picked id of every aggregator they chose one for as a {@code USER} mapping, {@code WORTHLESS}
+     * pins a zero, anything else (incl. {@code IGNORE}) leaves the coin unresolved to import unpriced.
+     * Best-effort per coin — a single bad mapping is logged and skipped, never failing the import.
      */
     private void applyConfirmedMappings(List<ImportAssetMapping> mappings) {
         if (mappings == null) return;
@@ -403,8 +410,20 @@ public class CryptoImportService {
             try {
                 switch (action) {
                     case "MAP" -> {
-                        if (m.coingeckoId() != null && !m.coingeckoId().isBlank()) {
-                            financialAssetService.applyUserMapping(m.symbol(), m.coingeckoId(), m.name());
+                        Map<String, String> ids = new LinkedHashMap<>();
+                        if (m.aggregatorIds() != null) ids.putAll(m.aggregatorIds());
+                        String name = m.name();
+                        // A pasted link is resolved by whichever aggregator recognises it, validated,
+                        // and outranks a picked candidate for that same aggregator — the explicit
+                        // paste is the stronger signal. A bad link throws and is caught below: that
+                        // coin is skipped (imports unpriced), never the whole import.
+                        if (m.url() != null && !m.url().isBlank()) {
+                            var link = financialAssetService.resolveLink(m.url());
+                            ids.put(link.aggregatorKey(), link.candidate().id());
+                            if (name == null || name.isBlank()) name = link.candidate().name();
+                        }
+                        if (!ids.isEmpty()) {
+                            financialAssetService.applyMappings(m.symbol(), ids, name);
                         }
                     }
                     case "WORTHLESS" -> financialAssetService.markWorthless(m.symbol());

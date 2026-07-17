@@ -26,10 +26,10 @@ public interface FinancialAssetRepository extends JpaRepository<FinancialAsset, 
 
     /**
      * Persist the latest known EUR price without touching the resolution fields (bypasses
-     * auditing on purpose — a price tick is not a mapping update). No-op for unknown symbols.
+     * auditing on purpose — a price tick is not a mapping update).
      */
     @Modifying
     @Transactional
-    @Query("UPDATE FinancialAsset a SET a.lastEurValue = :price, a.priceSyncedAt = :at WHERE a.symbol = :symbol")
-    int updateLastPrice(@Param("symbol") String symbol, @Param("price") BigDecimal price, @Param("at") Instant at);
+    @Query("UPDATE FinancialAsset a SET a.lastEurValue = :price, a.priceSyncedAt = :at WHERE a.id = :id")
+    int updateLastPrice(@Param("id") Long id, @Param("price") BigDecimal price, @Param("at") Instant at);
 }

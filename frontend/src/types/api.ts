@@ -384,31 +384,66 @@ export interface ImportCoinCandidate {
   marketCapRank: number | null
 }
 
-/** A coin the import preview asks the operator to confirm/correct before committing. */
+/** One asset an aggregator offers for a symbol (best-first by `marketCapRank`). */
+export interface ImportAssetCandidate {
+  /** That aggregator's own id — a CoinGecko slug, a CoinMarketCap number, a Yahoo symbol. */
+  id: string
+  name: string | null
+  symbol: string | null
+  marketCapRank: number | null
+}
+
+/**
+ * What one aggregator offers for a symbol. Empty `candidates` means it doesn't know the symbol —
+ * leave it unpicked and it simply won't price the asset.
+ */
+export interface ImportAggregatorBlock {
+  /** Stable aggregator key: `coingecko`, `coinmarketcap`, `yahoo`, … */
+  aggregatorKey: string
+  /** That aggregator's dominant match, pre-selected; `null` when ambiguous or unranked. */
+  suggestedId: string | null
+  candidates: ImportAssetCandidate[]
+}
+
+/**
+ * A coin the import preview asks the operator to confirm/correct before committing — one block per
+ * aggregator available to resolve. Picking an id on several is what lets a second aggregator quote
+ * the coin when the first is rate-limited or off; the UI loops over `aggregators`, so a new
+ * aggregator needs no frontend change.
+ */
 export interface ImportAssetChoice {
   symbol: string
   /** Registry status today: `AUTO` (a prior guess), `PENDING` (unresolved), or `null` (unseen). */
   currentStatus: AssetStatus | null
-  /** Best market-cap match, pre-selected; `null` when the match is ambiguous. */
-  suggestedId: string | null
-  candidates: ImportCoinCandidate[]
+  aggregators: ImportAggregatorBlock[]
 }
 
 /** The operator's decision for one previewed coin, sent with the import request. */
 export interface ImportAssetMapping {
   symbol: string
   action: 'MAP' | 'WORTHLESS' | 'IGNORE'
-  /** Required when `action === 'MAP'`. */
-  coingeckoId?: string
+  /** `aggregatorKey → picked id`, one entry per aggregator chosen. Used when `action === 'MAP'`. */
+  aggregatorIds?: Record<string, string>
+  /**
+   * A pasted aggregator link (the escape hatch when the searches offered nothing) — resolved
+   * server-side by whichever aggregator recognises it; outranks a picked id for that aggregator.
+   */
+  url?: string
   name?: string
 }
 
 /**
- * Candidates for one symbol from the standing mapping UI (holding detail). Same shape as
- * `ImportAssetChoice` — the backend `AssetCandidatesResponse` — but served for any symbol, even one
- * already settled, so a mapping can be re-verified outside an import.
+ * Candidates for one symbol from the standing mapping UI (holding detail) — the backend
+ * `AssetCandidatesResponse`. Served for any symbol, even one already settled, so a mapping can be
+ * re-verified outside an import. Still CoinGecko-only, unlike the import preview above.
  */
-export type AssetCandidatesResponse = ImportAssetChoice
+export interface AssetCandidatesResponse {
+  symbol: string
+  currentStatus: AssetStatus | null
+  /** Best market-cap match, pre-selected; `null` when the match is ambiguous. */
+  suggestedId: string | null
+  candidates: ImportCoinCandidate[]
+}
 
 /** A `financial_asset` registry row, returned after applying a standing mapping. */
 export interface AssetResponse {
@@ -416,6 +451,7 @@ export interface AssetResponse {
   name: string | null
   type: string | null
   status: AssetStatus | null
+  /** One field per aggregator ref — a non-null one means that aggregator can quote this asset. */
   coingeckoId: string | null
   yahooSymbol: string | null
   lastEurValue: number | null

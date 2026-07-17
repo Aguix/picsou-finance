@@ -4,6 +4,7 @@ import com.picsou.adapter.price.YahooFinancePriceProvider;
 import com.picsou.dto.EtfComposition;
 import com.picsou.dto.SecurityInsightResponse;
 import com.picsou.dto.WeightedSlice;
+import com.picsou.model.AssetType;
 import com.picsou.model.FinancialAsset;
 import com.picsou.port.EtfCompositionProvider;
 import com.picsou.repository.FinancialAssetRepository;
@@ -33,13 +34,17 @@ class SecurityInsightServiceTest {
         return new SecurityInsightService(List.of(providers), yahoo, assetRepository);
     }
 
-    /** Stub the registry so {@code symbol} classifies as crypto (has a CoinGecko id). */
-    private void stubCrypto(String symbol, String coingeckoId) {
+    /**
+     * Stub the registry so {@code symbol} classifies as crypto — via the asset's own {@code type},
+     * deliberately with NO aggregator ref: classification must not depend on which aggregator
+     * happens to hold an id for the coin (a CMC-only or still-PENDING coin is crypto all the same).
+     */
+    private void stubCrypto(String symbol) {
         when(assetRepository.findBySymbol(symbol))
-            .thenReturn(Optional.of(FinancialAsset.builder().symbol(symbol).coingeckoId(coingeckoId).build()));
+            .thenReturn(Optional.of(FinancialAsset.builder().symbol(symbol).type(AssetType.CRYPTO).build()));
     }
 
-    /** Stub the registry so {@code symbol} is not crypto (no row / no CoinGecko id). */
+    /** Stub the registry so {@code symbol} is not crypto (no row at all). */
     private void stubNotCrypto(String symbol) {
         when(assetRepository.findBySymbol(symbol)).thenReturn(Optional.empty());
     }
@@ -60,8 +65,8 @@ class SecurityInsightServiceTest {
     }
 
     @Test
-    void crypto_isDetectedFromCoinGecko_andHasNoComposition() {
-        stubCrypto("BTC", "bitcoin");
+    void crypto_isDetectedFromTheAssetsOwnType_andHasNoComposition() {
+        stubCrypto("BTC");
         var service = serviceWith();
 
         SecurityInsightResponse r = service.getInsight("BTC", "Bitcoin");

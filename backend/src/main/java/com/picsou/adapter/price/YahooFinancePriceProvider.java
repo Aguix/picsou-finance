@@ -2,6 +2,8 @@ package com.picsou.adapter.price;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.picsou.model.FinancialAsset;
+import com.picsou.port.AssetCandidate;
+import com.picsou.port.AssetResolverPort;
 import com.picsou.port.PriceProviderPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,11 +23,14 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Fetches stock/ETF prices from Yahoo Finance (unofficial, no API key needed).
+ * Fetches stock/ETF prices from Yahoo Finance (unofficial, no API key needed), and resolves symbols
+ * to Yahoo symbols ({@link AssetResolverPort}) — the two sides of one aggregator.
  * Used for PEA/Compte-Titres positions with tickers like "IWDA.AS", "MC.PA", etc.
  *
- * Only prices assets carrying a {@code yahoo_symbol} (see {@code canPrice}) — an unresolved
- * asset is rejected rather than queried on its raw internal symbol.
+ * Only prices assets carrying a {@code yahoo_symbol} (see {@code canPrice}) — this adapter's own ref
+ * column, the only one it reads or writes. An unresolved asset is rejected rather than queried on its
+ * raw internal symbol. Yahoo's "id" <em>is</em> the symbol it quotes, so {@link #getRef} and
+ * {@link #fetchById} deal in the same exchange-suffixed string ("IWDA.AS").
  *
  * Prices are converted to EUR using Yahoo's own FX endpoint ({CURRENCY}EUR=X)
  * when the security is quoted in a non-EUR currency. Rates are cached for 15
@@ -34,8 +39,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Note: This is an unofficial API. For production use consider Alpha Vantage or similar.
  */
 @Component
-@Order(20)   // catch-all for stocks/ETFs — tried after CoinGecko's crypto lookup
-public class YahooFinancePriceProvider implements PriceProviderPort {
+@Order(20)   // last resort — tried once the aggregators ahead of it have no ref for the asset
+public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolverPort {
 
     private static final Logger log = LoggerFactory.getLogger(YahooFinancePriceProvider.class);
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
@@ -95,6 +100,103 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
     /** The symbol Yahoo is queried with: the asset's {@code yahoo_symbol}. */
     private static String yahooSymbol(FinancialAsset asset) {
         return asset.getYahooSymbol();
+    }
+
+    /** This adapter's own ref column — for Yahoo the ref simply is the symbol it quotes. */
+    @Override
+    public String getRef(FinancialAsset asset) {
+        return asset.getYahooSymbol();
+    }
+
+    @Override
+    public void setRef(FinancialAsset asset, String id) {
+        asset.setYahooSymbol(id);
+    }
+
+    /**
+     * Look up the symbols Yahoo quotes for a ticker, via its {@code /v1/finance/search} endpoint —
+     * the ticker itself plus its exchange-suffixed listings ({@code IWDA} → {@code IWDA.AS},
+     * {@code IWDA.L}), which is what an operator has to choose between: the same security on two
+     * exchanges is two different Yahoo symbols, quoted in two different currencies.
+     *
+     * <p>Candidates carry no {@code marketCapRank} — Yahoo doesn't rank, and the ranking is what the
+     * resolver's dominant-match auto-suggestion needs. So a Yahoo candidate is never pre-selected:
+     * {@code yahoo_symbol} stays null until an operator picks a listing explicitly. That's deliberate
+     * — guessing an exchange would silently quote the security in the wrong market.
+     */
+    @Override
+    public List<AssetCandidate> searchBySymbol(String symbol) {
+        String query = symbol == null ? "" : symbol.trim();
+        if (query.isEmpty()) return List.of();
+        try {
+            SearchResponse response = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                    .path("/v1/finance/search")
+                    .queryParam("q", query)
+                    .queryParam("quotesCount", 10)
+                    .queryParam("newsCount", 0)
+                    .build())
+                .retrieve()
+                .bodyToMono(SearchResponse.class)
+                .timeout(TIMEOUT)
+                .block();
+
+            if (response == null || response.quotes() == null) return List.of();
+            return response.quotes().stream()
+                .filter(q -> q.symbol() != null && matchesTicker(q.symbol(), query))
+                .map(q -> new AssetCandidate(q.symbol(), quoteName(q), q.symbol(), null))
+                .toList();
+        } catch (Exception ex) {
+            log.warn("Yahoo symbol search failed for {}: {}", query, ex.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * A Yahoo hit is a match when it's the ticker itself or one of its exchange listings
+     * ({@code IWDA} matches {@code IWDA} and {@code IWDA.AS}, not {@code IWDAX}) — Yahoo's search is
+     * fuzzy and also returns name matches, which would be noise in a symbol picker.
+     */
+    private static boolean matchesTicker(String candidateSymbol, String query) {
+        String candidate = candidateSymbol.toUpperCase();
+        String upper = query.toUpperCase();
+        return candidate.equals(upper) || candidate.startsWith(upper + ".");
+    }
+
+    private static String quoteName(SearchQuote quote) {
+        if (quote.longname() != null && !quote.longname().isBlank()) return quote.longname();
+        return quote.shortname();
+    }
+
+    /**
+     * Validate one Yahoo symbol by asking the quote endpoint for it — a symbol Yahoo can't quote
+     * yields empty rather than a dead ref. The name comes from the chart metadata when it carries one.
+     */
+    @Override
+    public Optional<AssetCandidate> fetchById(String id) {
+        String ticker = id == null ? "" : id.trim();
+        if (ticker.isEmpty()) return Optional.empty();
+        try {
+            YahooResponse response = webClient.get()
+                .uri("/v8/finance/chart/{ticker}?range=1d&interval=1d", ticker)
+                .retrieve()
+                .bodyToMono(YahooResponse.class)
+                .timeout(TIMEOUT)
+                .block();
+
+            if (response == null || response.chart() == null || response.chart().result() == null
+                || response.chart().result().isEmpty()) {
+                return Optional.empty();
+            }
+            Meta meta = response.chart().result().get(0).meta();
+            if (meta == null || meta.regularMarketPrice() <= 0) return Optional.empty();
+            String name = meta.longName() != null && !meta.longName().isBlank()
+                ? meta.longName() : meta.shortName();
+            return Optional.of(new AssetCandidate(ticker, name, ticker, null));
+        } catch (Exception ex) {
+            log.warn("Yahoo symbol lookup failed for {}: {}", ticker, ex.getMessage());
+            return Optional.empty();
+        }
     }
 
     @Override
@@ -254,7 +356,16 @@ public class YahooFinancePriceProvider implements PriceProviderPort {
     record Quote(List<Double> close) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record Meta(double regularMarketPrice, String currency, String instrumentType) {}
+    record Meta(double regularMarketPrice, String currency, String instrumentType,
+                String longName, String shortName) {}
+
+    /** Yahoo {@code /v1/finance/search} response, narrowed to the quotes list. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record SearchResponse(List<SearchQuote> quotes) {}
+
+    /** One hit in a {@code /v1/finance/search} response. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record SearchQuote(String symbol, String shortname, String longname, String quoteType) {}
 
     private record CachedFx(BigDecimal rate, Instant cachedAt) {
         boolean isFresh() { return Instant.now().isBefore(cachedAt.plus(FX_CACHE_TTL)); }

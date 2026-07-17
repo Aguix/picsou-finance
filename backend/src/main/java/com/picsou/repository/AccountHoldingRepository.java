@@ -24,7 +24,6 @@ public interface AccountHoldingRepository extends JpaRepository<AccountHolding, 
     @Query("SELECT DISTINCT h.asset.symbol FROM AccountHolding h")
     Set<String> findDistinctTickers();
 
-    /** Every holding of a ticker across all accounts (case-insensitive) — used to re-value it. */
-    @Query("SELECT h FROM AccountHolding h WHERE h.asset.symbol = UPPER(:ticker)")
-    List<AccountHolding> findByTickerIgnoreCase(@Param("ticker") String ticker);
+    /** Every holding of an asset across all accounts — used to re-value it or guard its deletion. */
+    List<AccountHolding> findByAsset_Id(Long assetId);
 }

@@ -8,10 +8,8 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -24,12 +22,19 @@ import java.util.Optional;
  * {@link SecurityInsightService}) go through instead of naming concrete adapters: adding a new
  * aggregator is a new {@code PriceProviderPort} bean with an {@code @Order}, not an edit here.
  *
- * <p>For each asset the router picks the first provider (in priority order) that both declares the
- * needed {@link Capability} and {@link PriceProviderPort#canPrice(FinancialAsset) can price} the
- * asset. Spot requests are partitioned so each provider is still batched into a single call.
- * Availability ({@link PriceProviderPort#isAvailable()}) is surfaced on the port for the
- * cross-provider fallback that lands with the second crypto aggregator; today's routing preserves
- * the previous one-provider-per-ticker behaviour.
+ * <p>Routing is a <b>waterfall over the results</b>, not a one-shot assignment: providers are tried
+ * in priority order, each one batched into a single call with every still-unpriced asset it declares
+ * the needed {@link Capability} for, {@link PriceProviderPort#canPrice(FinancialAsset) can price}
+ * (holds a ref for), and is {@link PriceProviderPort#isAvailable() available} to serve — and
+ * whatever is <em>still missing from its answer</em> moves on to the next provider holding a ref.
+ *
+ * <p>That last clause is what makes a second ref a real fallback, in both failure modes: a provider
+ * that is <em>known</em> unusable up front (breaker open, switched off in the admin panel) is skipped
+ * before the call, and one that fails <em>during</em> the call — a 429 tripping mid-batch, a network
+ * error, an id its API didn't answer for — simply doesn't return those prices, so the router hands
+ * the leftovers to the next aggregator instead of stranding them until the next refresh. An asset
+ * mapped on only one aggregator still goes unpriced when that one fails; the fix for that is mapping
+ * it on a second aggregator (the import preview offers exactly that), not routing.
  */
 @Component
 public class PriceRouter {
@@ -40,54 +45,71 @@ public class PriceRouter {
         this.providers = providers;
     }
 
-    /** The provider that would price this asset (first that can, in priority order), if any. */
+    /**
+     * The provider that would be asked <em>first</em> for this asset's spot price, if any. With the
+     * waterfall this is a starting point, not a guarantee — a mid-call failure hands the asset to the
+     * next provider holding a ref.
+     */
     public Optional<PriceProviderPort> providerFor(FinancialAsset asset) {
         return providers.stream()
-            .filter(p -> p.capabilities().contains(Capability.SPOT) && p.canPrice(asset))
+            .filter(p -> serves(p, asset, Capability.SPOT))
             .findFirst();
     }
 
     /**
-     * Bulk spot prices in EUR, keyed by uppercase symbol. Each asset is assigned to its first
-     * (priority-order) provider that declares {@link Capability#SPOT} and can price it, then every
-     * provider is called once with its share.
+     * Bulk spot prices in EUR, keyed by uppercase symbol — the waterfall. Each provider (priority
+     * order) is called at most once, with every still-unpriced asset it holds a ref for; the assets
+     * missing from its answer (mid-call failure, id its API didn't quote) carry over to the next
+     * provider. An asset priced upstream is never re-requested downstream.
+     *
+     * <p>Availability is asked once per provider, not once per asset: it's the same answer for the
+     * whole batch, and on a rotating-key provider each call picks (and stamps) a session.
      */
     public Map<String, BigDecimal> getPricesEur(Collection<FinancialAsset> assets) {
         if (assets.isEmpty()) return Map.of();
 
-        Map<PriceProviderPort, List<FinancialAsset>> byProvider = new LinkedHashMap<>();
-        for (FinancialAsset asset : assets) {
-            for (PriceProviderPort provider : providers) {
-                if (!provider.capabilities().contains(Capability.SPOT)) continue;
-                if (!provider.canPrice(asset)) continue;
-                byProvider.computeIfAbsent(provider, p -> new ArrayList<>()).add(asset);
-                break;   // first provider (priority order) that can price this asset wins
-            }
-        }
-
         Map<String, BigDecimal> result = new HashMap<>();
-        byProvider.forEach((provider, share) -> result.putAll(provider.getPricesEur(share)));
+        Collection<FinancialAsset> remaining = assets;
+        for (PriceProviderPort provider : providers) {
+            if (remaining.isEmpty()) break;
+            if (!provider.capabilities().contains(Capability.SPOT) || !provider.isAvailable()) continue;
+            List<FinancialAsset> share = remaining.stream().filter(provider::canPrice).toList();
+            if (share.isEmpty()) continue;
+
+            result.putAll(provider.getPricesEur(share));
+            remaining = remaining.stream()
+                .filter(a -> !result.containsKey(a.getSymbol().toUpperCase()))
+                .toList();
+        }
         return result;
     }
 
-    /** Daily historical prices for one asset from the first provider that can serve history for it. */
+    /**
+     * Daily historical prices for one asset — first non-empty answer wins, walking the providers that
+     * serve history and hold a ref. A legitimately-empty range costs one extra (empty) probe on the
+     * next provider; a mid-call failure is what the walk exists for.
+     */
     public Map<LocalDate, BigDecimal> getHistoricalPricesEur(FinancialAsset asset, LocalDate from, LocalDate to) {
-        return providerFor(asset, Capability.HISTORY)
-            .map(p -> p.getHistoricalPricesEur(asset, from, to))
-            .orElse(Map.of());
+        for (PriceProviderPort provider : providers) {
+            if (!serves(provider, asset, Capability.HISTORY)) continue;
+            Map<LocalDate, BigDecimal> prices = provider.getHistoricalPricesEur(asset, from, to);
+            if (!prices.isEmpty()) return prices;
+        }
+        return Map.of();
     }
 
-    /** Intraday (hourly) prices for one asset from the first provider that can serve intraday for it. */
+    /** Intraday (hourly) prices for one asset — same walk as {@link #getHistoricalPricesEur}. */
     public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(FinancialAsset asset, LocalDateTime from, LocalDateTime to) {
-        return providerFor(asset, Capability.INTRADAY)
-            .map(p -> p.getIntradayPricesEur(asset, from, to))
-            .orElse(Map.of());
+        for (PriceProviderPort provider : providers) {
+            if (!serves(provider, asset, Capability.INTRADAY)) continue;
+            Map<LocalDateTime, BigDecimal> prices = provider.getIntradayPricesEur(asset, from, to);
+            if (!prices.isEmpty()) return prices;
+        }
+        return Map.of();
     }
 
-    /** First provider (priority order) that declares {@code capability} and can price {@code asset}. */
-    private Optional<PriceProviderPort> providerFor(FinancialAsset asset, Capability capability) {
-        return providers.stream()
-            .filter(p -> p.capabilities().contains(capability) && p.canPrice(asset))
-            .findFirst();
+    /** Declares {@code capability}, holds a ref for {@code asset}, and is available right now. */
+    private static boolean serves(PriceProviderPort provider, FinancialAsset asset, Capability capability) {
+        return provider.capabilities().contains(capability) && provider.canPrice(asset) && provider.isAvailable();
     }
 }

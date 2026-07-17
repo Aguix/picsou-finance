@@ -111,8 +111,11 @@ public class PriceService {
             // Opportunistic persistence only: callers like DashboardService run in a read-only
             // transaction the repository @Transactional would join, and Postgres rejects the
             // UPDATE there. The write path (refreshPrices / scheduler) persists it anyway.
-            if (!TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
-                assetRepository.updateLastPrice(upper, price, Instant.now());
+            // A transient asset (bare currency code, unregistered MCP ticker) has no row — no id,
+            // nothing to persist to.
+            if (asset.getId() != null
+                && !TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+                assetRepository.updateLastPrice(asset.getId(), price, Instant.now());
             }
             return price;
         }
@@ -194,7 +197,7 @@ public class PriceService {
             if (worthlessTickers.contains(entry.getKey())) continue; // don't snapshot a fixed zero
             if (entry.getValue() == null) continue;
             FinancialAsset asset = assets.computeIfAbsent(entry.getKey(), this::mintAsset);
-            assetRepository.updateLastPrice(entry.getKey(), entry.getValue(), Instant.now());
+            assetRepository.updateLastPrice(asset.getId(), entry.getValue(), Instant.now());
             Optional<PriceSnapshot> existing = priceSnapshotRepository.findByAssetIdAndDate(asset.getId(), today);
             if (existing.isPresent()) {
                 existing.get().setPriceEur(entry.getValue());
@@ -358,8 +361,21 @@ public class PriceService {
     }
 
     /**
-     * Fetch intraday (hourly) prices for a ticker over the given time range.
-     * Routes to CoinGecko for crypto, Yahoo Finance for stocks/ETFs.
+     * Intraday (hourly) prices for an asset over the given time range — the primary entry point:
+     * a caller already holding the {@link FinancialAsset} (a holding's) hands it straight through,
+     * no symbol round-trip back to the registry.
+     */
+    public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(FinancialAsset asset, LocalDateTime from, LocalDateTime to) {
+        if (asset == null || "EUR".equalsIgnoreCase(asset.getSymbol())) {
+            return Map.of();
+        }
+        return priceRouter.getIntradayPricesEur(asset, from, to);
+    }
+
+    /**
+     * Intraday prices for a bare ticker string — the seam for callers with no asset in hand (the
+     * REST endpoint's ticker parameter). Resolves the symbol once, or rides a transient asset when
+     * unregistered, exactly like {@link #getPriceEur(String)}.
      */
     public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(String ticker, LocalDateTime from, LocalDateTime to) {
         if (ticker == null || ticker.isBlank() || "EUR".equalsIgnoreCase(ticker)) {
@@ -368,6 +384,6 @@ public class PriceService {
         String upper = ticker.toUpperCase();
         FinancialAsset asset = assetRepository.findBySymbol(upper)
             .orElseGet(() -> transientAsset(upper));
-        return priceRouter.getIntradayPricesEur(asset, from, to);
+        return getIntradayPricesEur(asset, from, to);
     }
 }

@@ -33,6 +33,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AssetController {
 
+    /** The one aggregator this standing surface still speaks; see {@link #candidates}. */
+    private static final String COINGECKO = "coingecko";
+
     private final FinancialAssetService assetService;
 
     /**
@@ -49,17 +52,31 @@ public class AssetController {
      * CoinGecko candidates for a symbol, plus its current registry status and the market-cap
      * dominant suggestion — the data behind the standing mapping editor. Returned even for a coin
      * already settled, so a mapping can always be re-verified.
+     *
+     * <p>The service now resolves across <em>every</em> aggregator, but this standing surface still
+     * speaks CoinGecko only: it narrows the preview to that block. Generalising the standing editor
+     * to one picker per aggregator (as the import preview already is) is the next pass; until then
+     * an asset's other refs are filled at import time.
      */
     @GetMapping("/{symbol}/candidates")
     public AssetCandidatesResponse candidates(@PathVariable String symbol) {
         AssetResolutionPreview p = assetService.previewResolution(symbol);
-        return new AssetCandidatesResponse(
-            p.symbol(),
-            p.currentStatus() != null ? p.currentStatus().name() : null,
-            p.suggested() != null ? p.suggested().id() : null,
-            p.candidates().stream()
-                .map(c -> new AssetCandidatesResponse.Candidate(c.id(), c.name(), c.symbol(), c.marketCapRank()))
-                .toList());
+        return p.aggregators().stream()
+            .filter(a -> COINGECKO.equals(a.aggregatorKey()))
+            .findFirst()
+            .map(a -> new AssetCandidatesResponse(
+                p.symbol(),
+                p.currentStatus() != null ? p.currentStatus().name() : null,
+                a.suggested() != null ? a.suggested().id() : null,
+                a.candidates().stream()
+                    .map(c -> new AssetCandidatesResponse.Candidate(
+                        c.id(), c.name(), c.symbol(), c.marketCapRank()))
+                    .toList()))
+            .orElseGet(() -> new AssetCandidatesResponse(
+                p.symbol(),
+                p.currentStatus() != null ? p.currentStatus().name() : null,
+                null,
+                List.of()));
     }
 
     /**

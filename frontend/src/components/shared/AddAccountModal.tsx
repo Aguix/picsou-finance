@@ -817,27 +817,51 @@ function MiniStat({ label, value }: { label: string; value: number }) {
   )
 }
 
-const COINGECKO_COIN_URL = 'https://www.coingecko.com/en/coins/'
+// Where to go to eyeball a picked id, per aggregator. An aggregator with no entry (or no id-based
+// page) simply gets no verify link — the picker still works, so adding one needs nothing here.
+const VERIFY_URL: Record<string, (id: string) => string> = {
+  coingecko: (id) => `https://www.coingecko.com/en/coins/${id}`,
+  yahoo: (id) => `https://finance.yahoo.com/quote/${encodeURIComponent(id)}`,
+}
 
-// Seed one decision per previewed coin: pre-select the best CoinGecko match (so accepting is a
-// no-op), or default to "skip" (import unpriced) when the match is ambiguous or missing.
+// Human label for an aggregator; falls back to the key itself for one we don't know about yet.
+const AGGREGATOR_LABEL: Record<string, string> = {
+  coingecko: 'CoinGecko',
+  yahoo: 'Yahoo Finance',
+}
+
+function aggregatorLabel(key: string) {
+  return AGGREGATOR_LABEL[key] ?? key
+}
+
+// Seed one decision per previewed coin: accept every aggregator's own suggestion (so confirming is
+// a no-op), which is what leaves the coin priceable by more than one. A coin no aggregator could
+// guess defaults to "skip" (imports unpriced) rather than to a guess.
 function initMappingChoices(choices: ImportAssetChoice[]): Record<string, ImportAssetMapping> {
   const out: Record<string, ImportAssetMapping> = {}
   for (const c of choices) {
-    if (c.suggestedId) {
-      const cand = c.candidates.find((x) => x.coingeckoId === c.suggestedId)
-      out[c.symbol] = { symbol: c.symbol, action: 'MAP', coingeckoId: c.suggestedId, name: cand?.name }
-    } else {
-      out[c.symbol] = { symbol: c.symbol, action: 'IGNORE' }
+    const ids: Record<string, string> = {}
+    let name: string | undefined
+    for (const block of c.aggregators) {
+      if (!block.suggestedId) continue
+      ids[block.aggregatorKey] = block.suggestedId
+      name ??= block.candidates.find((x) => x.id === block.suggestedId)?.name ?? undefined
     }
+    out[c.symbol] =
+      Object.keys(ids).length > 0
+        ? { symbol: c.symbol, action: 'MAP', aggregatorIds: ids, name }
+        : { symbol: c.symbol, action: 'IGNORE' }
   }
   return out
 }
 
-// Confirm/correct each imported coin before committing. Each row pre-fills the best market-cap
-// match (a "verify" link opens its CoinGecko page); the operator can pick another candidate, mark
-// the coin worthless, or skip it (imports unpriced). Settled coins (USER/WORTHLESS) never appear.
-// The chosen mappings ride the import request and are applied as USER before the price backfill.
+// Confirm/correct each imported coin before committing — one picker per aggregator, each pre-filled
+// with that aggregator's own suggestion and a "verify" link to eyeball the pick. Choosing an id on
+// several aggregators is what keeps the coin priced when one of them is rate-limited or off; leaving
+// one on "don't link" just means it won't quote the coin. Marking the coin worthless (a zero) or
+// skipping it (imports unpriced) is a per-coin decision, so it sits outside the pickers. Settled
+// coins (USER/WORTHLESS) never appear. The chosen mappings ride the import request and are applied
+// as USER before the price backfill.
 function ImportAssetValidation({
   choices,
   value,
@@ -850,18 +874,92 @@ function ImportAssetValidation({
   const { t } = useTranslation()
   if (choices.length === 0) return null
 
-  function setChoice(choice: ImportAssetChoice, raw: string) {
-    let mapping: ImportAssetMapping
-    if (raw === 'worthless') {
-      mapping = { symbol: choice.symbol, action: 'WORTHLESS' }
-    } else if (raw === 'ignore') {
-      mapping = { symbol: choice.symbol, action: 'IGNORE' }
-    } else {
-      const id = raw.slice(4) // strip "map:"
-      const cand = choice.candidates.find((c) => c.coingeckoId === id)
-      mapping = { symbol: choice.symbol, action: 'MAP', coingeckoId: id, name: cand?.name }
+  // The name a set of picks suggests: the first picked candidate that carries one. Used to seed the
+  // (editable) name field, never to override what the operator has typed.
+  function suggestName(choice: ImportAssetChoice, ids: Record<string, string>): string | undefined {
+    return Object.entries(ids)
+      .map(([key, pickedId]) =>
+        choice.aggregators
+          .find((b) => b.aggregatorKey === key)
+          ?.candidates.find((c) => c.id === pickedId)?.name,
+      )
+      .find((n): n is string => !!n)
+  }
+
+  // Pick (or unpick) one aggregator's id for a coin. The coin STAYS in mapping mode even with no id
+  // picked yet — flipping it back to IGNORE would hide the pickers under the operator's cursor; a
+  // MAP with no ids is treated as IGNORE server-side anyway (imports unpriced).
+  function setAggregatorId(choice: ImportAssetChoice, aggregatorKey: string, id: string) {
+    const current = value[choice.symbol]
+    const ids = { ...(current?.action === 'MAP' ? current.aggregatorIds : undefined) }
+    if (id) ids[aggregatorKey] = id
+    else delete ids[aggregatorKey]
+
+    // The name is the operator's to edit: keep whatever's there and only fill it in from the picks
+    // when it's still blank (the ambiguous-coin case, where nothing seeded it up front).
+    const existing = current?.action === 'MAP' ? current.name : undefined
+    const name = existing && existing.trim() ? existing : suggestName(choice, ids)
+
+    onChange({
+      ...value,
+      [choice.symbol]: {
+        symbol: choice.symbol,
+        action: 'MAP',
+        aggregatorIds: ids,
+        url: current?.action === 'MAP' ? current.url : undefined,
+        name,
+      },
+    })
+  }
+
+  // The operator's edit of the suggested name — from here on it's theirs; picker changes won't touch
+  // it (see setAggregatorId). An empty field falls back to re-suggesting on the next pick.
+  function setName(choice: ImportAssetChoice, name: string) {
+    const current = value[choice.symbol]
+    onChange({
+      ...value,
+      [choice.symbol]: {
+        symbol: choice.symbol,
+        action: 'MAP',
+        aggregatorIds: current?.action === 'MAP' ? current.aggregatorIds : {},
+        url: current?.action === 'MAP' ? current.url : undefined,
+        name: name || undefined,
+      },
+    })
+  }
+
+  // The pasted-link escape hatch, for a coin the searches offered nothing for (unknown symbol, or a
+  // rate-limited preview): resolved server-side by whichever aggregator recognises the URL.
+  function setUrl(choice: ImportAssetChoice, url: string) {
+    const current = value[choice.symbol]
+    onChange({
+      ...value,
+      [choice.symbol]: {
+        symbol: choice.symbol,
+        action: 'MAP',
+        aggregatorIds: current?.action === 'MAP' ? current.aggregatorIds : {},
+        url: url.trim() || undefined,
+        name: current?.action === 'MAP' ? current.name : undefined,
+      },
+    })
+  }
+
+  function setCoinAction(choice: ImportAssetChoice, action: 'MAP' | 'WORTHLESS' | 'IGNORE') {
+    if (action === 'MAP') {
+      // Re-seed each aggregator's suggestion; an ambiguous coin (candidates but no dominant match)
+      // seeds to no ids but MUST still land in mapping mode — that's exactly the coin the operator
+      // has to pick by hand, so the pickers have to show.
+      const seeded = initMappingChoices([choice])[choice.symbol]
+      onChange({
+        ...value,
+        [choice.symbol]:
+          seeded.action === 'MAP'
+            ? seeded
+            : { symbol: choice.symbol, action: 'MAP', aggregatorIds: {} },
+      })
+      return
     }
-    onChange({ ...value, [choice.symbol]: mapping })
+    onChange({ ...value, [choice.symbol]: { symbol: choice.symbol, action } })
   }
 
   return (
@@ -870,46 +968,110 @@ function ImportAssetValidation({
         <p className="text-xs font-medium">{t('sync.crypto.validateTitle')}</p>
         <p className="text-xs text-muted-foreground">{t('sync.crypto.validateNote')}</p>
       </div>
-      <ul className="max-h-56 space-y-1.5 overflow-y-auto">
+      <ul className="max-h-72 space-y-3 overflow-y-auto">
         {choices.map((choice) => {
           const current = value[choice.symbol]
-          const selected =
-            current?.action === 'WORTHLESS'
-              ? 'worthless'
-              : current?.action === 'MAP' && current.coingeckoId
-                ? `map:${current.coingeckoId}`
-                : 'ignore'
-          const verifyId = current?.action === 'MAP' ? current.coingeckoId : undefined
+          const coinAction = current?.action ?? 'IGNORE'
+          const ids = current?.action === 'MAP' ? (current.aggregatorIds ?? {}) : {}
           return (
-            <li key={choice.symbol} className="flex items-center gap-2 text-xs">
-              <span className="w-14 shrink-0 font-mono font-medium">{choice.symbol}</span>
-              <select
-                value={selected}
-                onChange={(e) => setChoice(choice, e.target.value)}
-                className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-xs"
-                aria-label={t('sync.crypto.validateTitle')}
-              >
-                {choice.candidates.map((c) => (
-                  <option key={c.coingeckoId} value={`map:${c.coingeckoId}`}>
-                    {c.name}
-                    {c.marketCapRank ? ` (#${c.marketCapRank})` : ''}
-                  </option>
-                ))}
-                <option value="worthless">{t('sync.crypto.optionWorthless')}</option>
-                <option value="ignore">{t('sync.crypto.optionSkip')}</option>
-              </select>
-              {verifyId ? (
-                <a
-                  href={`${COINGECKO_COIN_URL}${verifyId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex shrink-0 items-center text-primary hover:underline"
-                  title={t('sync.crypto.verify')}
+            <li key={choice.symbol} className="space-y-1.5 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="w-14 shrink-0 font-mono font-medium">{choice.symbol}</span>
+                <select
+                  value={coinAction === 'MAP' ? 'map' : coinAction === 'WORTHLESS' ? 'worthless' : 'ignore'}
+                  onChange={(e) =>
+                    setCoinAction(
+                      choice,
+                      e.target.value === 'worthless'
+                        ? 'WORTHLESS'
+                        : e.target.value === 'map'
+                          ? 'MAP'
+                          : 'IGNORE',
+                    )
+                  }
+                  className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+                  aria-label={choice.symbol}
                 >
-                  <ExternalLink className="size-3.5" />
-                </a>
-              ) : (
-                <span className="w-3.5 shrink-0" />
+                  <option value="map">{t('sync.crypto.optionLink')}</option>
+                  <option value="worthless">{t('sync.crypto.optionWorthless')}</option>
+                  <option value="ignore">{t('sync.crypto.optionSkip')}</option>
+                </select>
+              </div>
+              {coinAction === 'MAP' && (
+                // The coin's display name — seeded from the picked candidate, editable here so the
+                // operator can correct a label (or name a coin resolved only by a pasted link).
+                <div className="flex items-center gap-2 pl-14">
+                  <span className="w-24 shrink-0 text-muted-foreground">{t('sync.crypto.nameLabel')}</span>
+                  <input
+                    type="text"
+                    value={current?.action === 'MAP' ? (current.name ?? '') : ''}
+                    onChange={(e) => setName(choice, e.target.value)}
+                    placeholder={t('sync.crypto.namePlaceholder')}
+                    className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+                    aria-label={`${choice.symbol} — ${t('sync.crypto.nameLabel')}`}
+                  />
+                  <span className="w-3.5 shrink-0" />
+                </div>
+              )}
+              {coinAction === 'MAP' &&
+                choice.aggregators.map((block) => {
+                  const pickedId = ids[block.aggregatorKey] ?? ''
+                  const verifyHref = pickedId ? VERIFY_URL[block.aggregatorKey]?.(pickedId) : undefined
+                  const label = aggregatorLabel(block.aggregatorKey)
+                  return (
+                    <div key={block.aggregatorKey} className="flex items-center gap-2 pl-14">
+                      <span className="w-24 shrink-0 text-muted-foreground">{label}</span>
+                      <select
+                        value={pickedId}
+                        onChange={(e) => setAggregatorId(choice, block.aggregatorKey, e.target.value)}
+                        disabled={block.candidates.length === 0}
+                        className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-xs disabled:opacity-50"
+                        aria-label={`${choice.symbol} — ${label}`}
+                      >
+                        <option value="">
+                          {block.candidates.length === 0
+                            ? t('sync.crypto.optionNoMatch')
+                            : t('sync.crypto.optionNoLink')}
+                        </option>
+                        {block.candidates.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name ?? c.id}
+                            {c.marketCapRank ? ` (#${c.marketCapRank})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {verifyHref ? (
+                        <a
+                          href={verifyHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex shrink-0 items-center text-primary hover:underline"
+                          title={t('sync.crypto.verifyOn', { aggregator: label })}
+                        >
+                          <ExternalLink className="size-3.5" />
+                        </a>
+                      ) : (
+                        <span className="w-3.5 shrink-0" />
+                      )}
+                    </div>
+                  )
+                })}
+              {coinAction === 'MAP' && (
+                // Escape hatch below the pickers: a coin the searches offered nothing for (unknown
+                // symbol, or a rate-limited preview) can still be linked by pasting an aggregator
+                // page URL — resolved server-side by whichever aggregator recognises it.
+                <div className="flex items-center gap-2 pl-14">
+                  <span className="w-24 shrink-0 text-muted-foreground">{t('sync.crypto.linkLabel')}</span>
+                  <input
+                    type="url"
+                    value={current?.action === 'MAP' ? (current.url ?? '') : ''}
+                    onChange={(e) => setUrl(choice, e.target.value)}
+                    placeholder={t('sync.crypto.pasteLinkPlaceholder')}
+                    className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+                    aria-label={`${choice.symbol} — ${t('sync.crypto.linkLabel')}`}
+                  />
+                  <span className="w-3.5 shrink-0" />
+                </div>
               )}
             </li>
           )
