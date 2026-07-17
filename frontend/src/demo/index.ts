@@ -209,35 +209,64 @@ handlers.set(key('GET', '/sync/institutions'), () => [
   { id: 'BOURSOBANK', name: 'BoursoBank', bic: 'BNPAFRPP', logoUrl: null, country: 'FR' },
 ])
 
-// Asset mapping (standing crypto verification — D2). Candidates per demo crypto symbol, plus the
-// map/forget mutations (echoed back so the holding-detail editor reflects the change immediately).
-const demoAssetCandidates: Record<string, { currentStatus: string | null; suggestedId: string | null; candidates: { coingeckoId: string; name: string; symbol: string; marketCapRank: number | null }[] }> = {
-  BTC: { currentStatus: 'USER', suggestedId: 'bitcoin', candidates: [
-    { coingeckoId: 'bitcoin', name: 'Bitcoin', symbol: 'btc', marketCapRank: 1 },
-    { coingeckoId: 'bitcoin-bep2', name: 'Bitcoin BEP2', symbol: 'btc', marketCapRank: 1200 },
+// Asset mapping (standing verification — D2/F2). One candidate block per aggregator for each demo
+// crypto symbol, plus the map/forget mutations (echoed back so the editor reflects the change
+// immediately). BTC is linked on two aggregators (the state that survives one being rate-limited).
+type DemoCandidate = { id: string; name: string; symbol: string; marketCapRank: number | null }
+type DemoBlock = { aggregatorKey: string; suggestedId: string | null; currentId: string | null; candidates: DemoCandidate[] }
+const demoAssetCandidates: Record<string, { currentStatus: string | null; aggregators: DemoBlock[] }> = {
+  BTC: { currentStatus: 'USER', aggregators: [
+    { aggregatorKey: 'coingecko', suggestedId: 'bitcoin', currentId: 'bitcoin', candidates: [
+      { id: 'bitcoin', name: 'Bitcoin', symbol: 'btc', marketCapRank: 1 },
+      { id: 'bitcoin-bep2', name: 'Bitcoin BEP2', symbol: 'btc', marketCapRank: 1200 },
+    ] },
+    { aggregatorKey: 'coinmarketcap', suggestedId: '1', currentId: '1', candidates: [
+      { id: '1', name: 'Bitcoin', symbol: 'BTC', marketCapRank: 1 },
+    ] },
+    { aggregatorKey: 'yahoo', suggestedId: null, currentId: null, candidates: [] },
   ] },
-  ETH: { currentStatus: 'AUTO', suggestedId: 'ethereum', candidates: [
-    { coingeckoId: 'ethereum', name: 'Ethereum', symbol: 'eth', marketCapRank: 2 },
+  ETH: { currentStatus: 'AUTO', aggregators: [
+    { aggregatorKey: 'coingecko', suggestedId: 'ethereum', currentId: 'ethereum', candidates: [
+      { id: 'ethereum', name: 'Ethereum', symbol: 'eth', marketCapRank: 2 },
+    ] },
+    { aggregatorKey: 'coinmarketcap', suggestedId: '1027', currentId: null, candidates: [
+      { id: '1027', name: 'Ethereum', symbol: 'ETH', marketCapRank: 2 },
+    ] },
+    { aggregatorKey: 'yahoo', suggestedId: null, currentId: null, candidates: [] },
   ] },
-  SOL: { currentStatus: 'PENDING', suggestedId: 'solana', candidates: [
-    { coingeckoId: 'solana', name: 'Solana', symbol: 'sol', marketCapRank: 5 },
-    { coingeckoId: 'wrapped-solana', name: 'Wrapped Solana', symbol: 'sol', marketCapRank: 340 },
+  SOL: { currentStatus: 'PENDING', aggregators: [
+    { aggregatorKey: 'coingecko', suggestedId: 'solana', currentId: null, candidates: [
+      { id: 'solana', name: 'Solana', symbol: 'sol', marketCapRank: 5 },
+      { id: 'wrapped-solana', name: 'Wrapped Solana', symbol: 'sol', marketCapRank: 340 },
+    ] },
+    { aggregatorKey: 'coinmarketcap', suggestedId: '5426', currentId: null, candidates: [
+      { id: '5426', name: 'Solana', symbol: 'SOL', marketCapRank: 5 },
+    ] },
+    { aggregatorKey: 'yahoo', suggestedId: null, currentId: null, candidates: [] },
   ] },
+}
+function findDemoName(data: { aggregators: DemoBlock[] }, ids: Record<string, string>): string | null {
+  for (const block of data.aggregators) {
+    const id = ids[block.aggregatorKey]
+    const name = id ? block.candidates.find((c) => c.id === id)?.name : undefined
+    if (name) return name
+  }
+  return null
 }
 for (const [symbol, data] of Object.entries(demoAssetCandidates)) {
   handlers.set(key('GET', `/assets/${symbol}/candidates`), () => ({ symbol, ...data }))
   handlers.set(key('PUT', `/assets/${symbol}/mapping`), (config) => {
     const body = JSON.parse(config.data || '{}')
     const worthless = body.action === 'WORTHLESS'
-    const cand = data.candidates.find((c) => c.coingeckoId === body.coingeckoId)
+    const ids: Record<string, string> = body.aggregatorIds ?? {}
     return {
       symbol,
-      name: worthless ? null : (cand?.name ?? data.candidates[0]?.name ?? null),
+      name: worthless ? null : (findDemoName(data, ids) ?? null),
       type: 'CRYPTO',
       status: worthless ? 'WORTHLESS' : 'USER',
-      coingeckoId: worthless ? null : (body.coingeckoId ?? data.suggestedId ?? null),
-      yahooSymbol: null,
-      coinmarketcapId: null,
+      coingeckoId: worthless ? null : (ids.coingecko ?? null),
+      coinmarketcapId: worthless ? null : (ids.coinmarketcap ?? null),
+      yahooSymbol: worthless ? null : (ids.yahoo ?? null),
       lastEurValue: null,
       priceSyncedAt: null,
     }

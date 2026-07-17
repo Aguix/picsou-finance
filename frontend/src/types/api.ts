@@ -200,8 +200,12 @@ export interface HoldingResponse {
   assetType: string | null
   /** Registry resolution status — drives the aggregator-link badge/editor. */
   assetStatus: AssetStatus | null
-  /** Linked CoinGecko id, or null when unresolved/worthless. */
+  // One field per aggregator ref, mirroring the registry: a non-null one means that aggregator can
+  // quote this asset — so the holding-detail editor can show which aggregators are linked (and
+  // whether there's a price fallback), not just CoinGecko.
   coingeckoId: string | null
+  coinmarketcapId: string | null
+  yahooSymbol: string | null
 }
 
 // --- Security insight (asset type + ETF composition) ---
@@ -376,14 +380,6 @@ export interface CryptoSourceInfo {
 /** How (and whether) an asset symbol got linked to aggregator ids — mirrors backend `AssetStatus`. */
 export type AssetStatus = 'PENDING' | 'AUTO' | 'USER' | 'WORTHLESS'
 
-/** A CoinGecko coin sharing an imported symbol (best-first by `marketCapRank`). */
-export interface ImportCoinCandidate {
-  coingeckoId: string
-  name: string
-  symbol: string
-  marketCapRank: number | null
-}
-
 /** One asset an aggregator offers for a symbol (best-first by `marketCapRank`). */
 export interface ImportAssetCandidate {
   /** That aggregator's own id — a CoinGecko slug, a CoinMarketCap number, a Yahoo symbol. */
@@ -433,16 +429,30 @@ export interface ImportAssetMapping {
 }
 
 /**
- * Candidates for one symbol from the standing mapping UI (holding detail) — the backend
- * `AssetCandidatesResponse`. Served for any symbol, even one already settled, so a mapping can be
- * re-verified outside an import. Still CoinGecko-only, unlike the import preview above.
+ * What one aggregator offers for a symbol in the standing mapping UI, plus what it's mapped to today.
+ * Mirrors the import block ({@link ImportAggregatorBlock}) but adds `currentId` — the ref stored right
+ * now — so the editor pre-selects the existing mapping.
+ */
+export interface AssetAggregatorBlock {
+  /** Stable aggregator key: `coingecko`, `coinmarketcap`, `yahoo`, … */
+  aggregatorKey: string
+  /** That aggregator's dominant match, pre-selected on a fresh mapping; `null` when ambiguous/unranked. */
+  suggestedId: string | null
+  /** The ref stored for this aggregator today; `null` when unmapped. Pre-selected over `suggestedId`. */
+  currentId: string | null
+  candidates: ImportAssetCandidate[]
+}
+
+/**
+ * Candidates for one symbol from the standing mapping UI (holding detail, registry table) — the
+ * backend `AssetCandidatesResponse`. Served for any symbol, even one already settled, so a mapping
+ * can be re-verified outside an import. One block per aggregator, like the import preview: the UI
+ * loops over `aggregators`, so a new aggregator needs no frontend change.
  */
 export interface AssetCandidatesResponse {
   symbol: string
   currentStatus: AssetStatus | null
-  /** Best market-cap match, pre-selected; `null` when the match is ambiguous. */
-  suggestedId: string | null
-  candidates: ImportCoinCandidate[]
+  aggregators: AssetAggregatorBlock[]
 }
 
 /** A `financial_asset` registry row, returned after applying a standing mapping. */
@@ -459,13 +469,13 @@ export interface AssetResponse {
   priceSyncedAt: string | null
 }
 
-/** The operator's standing mapping decision for one symbol (holding detail). */
+/** The operator's standing mapping decision for one symbol (holding detail, registry table). */
 export interface AssetMappingRequest {
   action: 'MAP' | 'WORTHLESS'
-  /** A CoinGecko coin-page URL; takes precedence over `coingeckoId` for MAP. */
-  coingeckoUrl?: string
-  /** A known CoinGecko coin id (a picked candidate); used for MAP when no URL. */
-  coingeckoId?: string
+  /** A pasted aggregator asset-page URL; resolved server-side, takes precedence over `aggregatorIds`. */
+  url?: string
+  /** `aggregatorKey → picked id`, one entry per aggregator chosen. Used when `action === 'MAP'`. */
+  aggregatorIds?: Record<string, string>
   name?: string
 }
 

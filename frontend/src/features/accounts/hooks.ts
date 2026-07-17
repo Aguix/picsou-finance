@@ -25,7 +25,10 @@ export interface PortfolioLine {
   priceUpdatedAt: string | null
   assetType: string | null
   assetStatus: AssetStatus | null
+  // One field per aggregator ref (mirrors HoldingResponse): which aggregators can quote this asset.
   coingeckoId: string | null
+  coinmarketcapId: string | null
+  yahooSymbol: string | null
 }
 
 const HOLDING_ACCOUNT_TYPES: Account['type'][] = ['PEA', 'COMPTE_TITRES', 'CRYPTO']
@@ -75,6 +78,8 @@ export function usePortfolio() {
               assetType: h.assetType,
               assetStatus: h.assetStatus,
               coingeckoId: h.coingeckoId,
+              coinmarketcapId: h.coinmarketcapId,
+              yahooSymbol: h.yahooSymbol,
             }))
           } catch {
             return []
@@ -131,6 +136,8 @@ export function usePortfolio() {
           assetType: null,
           assetStatus: null,
           coingeckoId: null,
+          coinmarketcapId: null,
+          yahooSymbol: null,
         })
       }
 

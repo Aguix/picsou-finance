@@ -418,7 +418,9 @@ public class AccountService {
             priceUpdatedAt,
             asset.getType() != null ? asset.getType().name() : null,
             asset.getStatus() != null ? asset.getStatus().name() : null,
-            asset.getCoingeckoId()
+            asset.getCoingeckoId(),
+            asset.getCoinmarketcapId(),
+            asset.getYahooSymbol()
         );
     }
 }

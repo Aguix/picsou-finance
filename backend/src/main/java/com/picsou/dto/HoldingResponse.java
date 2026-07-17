@@ -17,5 +17,10 @@ public record HoldingResponse(
     String assetType,            // registry AssetType of the underlying asset (CRYPTO, STOCK, …)
     String assetStatus,          // registry AssetStatus: PENDING/AUTO/USER/WORTHLESS — drives the
                                  // resolution badge + aggregator-link editor in the holding detail
-    String coingeckoId           // linked CoinGecko id, or null when unresolved/worthless
+    // One field per aggregator ref, mirroring the registry: the standing editor shows which
+    // aggregators can quote this asset (and therefore whether it has a price fallback). Null = that
+    // aggregator can't quote it. Kept in sync with the aggregator columns of financial_asset.
+    String coingeckoId,
+    String coinmarketcapId,
+    String yahooSymbol
 ) {}

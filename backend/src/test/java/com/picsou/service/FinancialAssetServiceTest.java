@@ -447,13 +447,13 @@ class FinancialAssetServiceTest {
     }
 
     @Test
-    void applyUserMappingPinsACandidateIdAsUserWithoutCallingTheAggregator() {
-        // The import path pins a coin the operator picked from preview candidates — the id/name are
-        // trusted, so no extra lookup round-trip.
+    void applyMappingsPinsASingleCandidateIdAsUserWithoutCallingTheAggregator() {
+        // Pins a coin the operator picked from preview candidates — the id/name are trusted, so no
+        // extra lookup round-trip.
         when(repository.findBySymbol("META")).thenReturn(Optional.empty());
         expectSaveEcho();
 
-        FinancialAsset result = service.applyUserMapping("meta", "metabeat", "MetaBeat");
+        FinancialAsset result = service.applyMappings("meta", Map.of("coingecko", "metabeat"), "MetaBeat");
 
         assertThat(result.getSymbol()).isEqualTo("META");
         assertThat(result.getCoingeckoId()).isEqualTo("metabeat");
@@ -560,13 +560,13 @@ class FinancialAssetServiceTest {
     }
 
     @Test
-    void applyUserMappingPurgesHistoryWhenItChangesAnExistingCoinId() {
+    void applyMappingsPurgesHistoryWhenItChangesAnExistingCoinId() {
         FinancialAsset existing = FinancialAsset.builder().symbol("META").coingeckoId("wrong-meta")
             .type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
         when(repository.findBySymbol("META")).thenReturn(Optional.of(existing));
         expectSaveEcho();
 
-        service.applyUserMapping("META", "metabeat", "MetaBeat");
+        service.applyMappings("META", Map.of("coingecko", "metabeat"), "MetaBeat");
 
         verify(priceSnapshotRepository).deleteByAssetId(any());
         verify(priceService).evictFromCache("META");

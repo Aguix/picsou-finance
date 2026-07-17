@@ -7,16 +7,14 @@
       "worthless": "Worthless"
     },
     "link": {
-      "title": "Aggregator link",
+      "title": "Aggregator links",
       "linkedTo": "Priced from",
-      "unresolvedNote": "Not linked to a CoinGecko coin yet — this holding imports unpriced.",
+      "unresolvedNote": "Not linked to any aggregator yet — this holding imports unpriced.",
       "worthlessNote": "Marked worthless — valued at zero.",
-      "resolve": "Link a coin",
+      "resolve": "Link an asset",
       "edit": "Edit",
-      "searching": "Searching CoinGecko…",
-      "coinLink": "CoinGecko link",
-      "linkHint": "Paste the coin's CoinGecko page URL, or pick a suggestion below.",
-      "suggestions": "Suggestions",
+      "choose": "Pick a match on each aggregator, or paste an asset-page link.",
+      "searching": "Searching aggregators…",
       "optionWorthless": "Mark worthless (0)",
       "forget": "Forget mapping",
       "error": "Could not apply the mapping — check the link and try again."

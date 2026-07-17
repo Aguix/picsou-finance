@@ -79,7 +79,7 @@
                 <mxCell id="nc6" value="&lt;b&gt;AccountService.upsertSnapshot(account, balanceEur, today)&lt;/b&gt;&lt;br&gt;[table: balance_snapshot]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
                     <mxGeometry x="1480" y="680" width="300" height="90" as="geometry"/>
                 </mxCell>
-                <mxCell id="nf1" value="&lt;b&gt;AssetController&lt;/b&gt; (/api/assets)&lt;br&gt;GET / → listAll()&lt;br&gt;GET /{symbol}/candidates → previewResolution()&lt;br&gt;PUT /{symbol}/mapping → setManualMapping / applyUserMapping / markWorthless&lt;br&gt;DELETE /{symbol} → clearMapping()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                <mxCell id="nf1" value="&lt;b&gt;AssetController&lt;/b&gt; (/api/assets)&lt;br&gt;GET / → listAll()&lt;br&gt;GET /{symbol}/candidates → previewResolution()&lt;br&gt;PUT /{symbol}/mapping → setManualMapping / applyMappings / markWorthless&lt;br&gt;DELETE /{symbol} → clearMapping()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
                     <mxGeometry x="1480" y="840" width="300" height="140" as="geometry"/>
                 </mxCell>
                 <mxCell id="n6" value="&lt;b&gt;CryptoImportService.execute(req, memberId)&lt;/b&gt;&lt;br&gt;&lt;i&gt;@Transactional&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
@@ -91,7 +91,7 @@
                 <mxCell id="n8" value="&lt;b&gt;applyConfirmedMappings(mappings)&lt;/b&gt;&lt;br&gt;&lt;i&gt;boucle sur ImportAssetMapping[]&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
                     <mxGeometry x="40" y="670" width="280" height="90" as="geometry"/>
                 </mxCell>
-                <mxCell id="n9a" value="&lt;b&gt;MAP&lt;/b&gt; → FinancialAssetService.&lt;b&gt;applyUserMapping&lt;/b&gt;(ticker, coingeckoId, name)&lt;br&gt;&lt;i&gt;upsert financial_asset (status=USER) ; si remap → purge + refetch price_snapshot&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                <mxCell id="n9a" value="&lt;b&gt;MAP&lt;/b&gt; → FinancialAssetService.&lt;b&gt;applyMappings&lt;/b&gt;(ticker, idsByAggregator, name)&lt;br&gt;&lt;i&gt;upsert financial_asset (status=USER) ; si remap → purge + refetch price_snapshot&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
                     <mxGeometry x="380" y="600" width="260" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="n9b" value="&lt;b&gt;WORTHLESS&lt;/b&gt; → FinancialAssetService.&lt;b&gt;markWorthless&lt;/b&gt;(ticker)&lt;br&gt;&lt;i&gt;status=WORTHLESS, purge price_snapshot, zero holdings&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">

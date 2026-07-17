@@ -44,7 +44,7 @@ export function EditHoldingModal({ open, onOpenChange, holding, onSubmit, isLoad
                 key={`agg-${holding.ticker}`}
                 symbol={holding.ticker}
                 status={holding.assetStatus}
-                coingeckoId={holding.coingeckoId}
+                refs={{ coingecko: holding.coingeckoId, coinmarketcap: holding.coinmarketcapId, yahoo: holding.yahooSymbol }}
                 open={open}
               />
             )}

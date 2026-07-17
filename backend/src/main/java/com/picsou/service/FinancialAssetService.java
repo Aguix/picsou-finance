@@ -147,10 +147,15 @@ public class FinancialAssetService {
      * One aggregator's offer for a symbol: everything it found, plus the match it would pick on its
      * own. {@code suggested} is null when the aggregator ranks nothing dominant — the operator picks,
      * or leaves this aggregator's ref unset (and it then simply doesn't price the asset).
+     *
+     * <p>{@code currentId} is the ref stored for this aggregator on the existing registry row, so the
+     * standing editor can pre-select the current mapping; it's null for the import preview (there's no
+     * "current" — the asset isn't in the registry yet) and whenever the aggregator is unmapped.
      */
     public record AggregatorResolution(
         String aggregatorKey,
         AssetCandidate suggested,
+        String currentId,
         List<AssetCandidate> candidates
     ) {}
 
@@ -180,7 +185,9 @@ public class FinancialAssetService {
             AssetStatus status = assetRepository.findBySymbol(upper)
                 .map(FinancialAsset::getStatus).orElse(null);
             if (status == AssetStatus.USER || status == AssetStatus.WORTHLESS) continue;
-            out.add(new AssetResolutionPreview(upper, status, offersFor(upper)));
+            // Import preview: no "current" ref to pre-select (the confirmed mapping is what's being
+            // decided here), so skip the per-aggregator getRef lookup entirely.
+            out.add(new AssetResolutionPreview(upper, status, offersFor(upper, null)));
         }
         return out;
     }
@@ -198,9 +205,9 @@ public class FinancialAssetService {
             throw new IllegalArgumentException("Ticker is required.");
         }
         String upper = ticker.trim().toUpperCase();
-        AssetStatus status = assetRepository.findBySymbol(upper)
-            .map(FinancialAsset::getStatus).orElse(null);
-        return new AssetResolutionPreview(upper, status, offersFor(upper));
+        FinancialAsset current = assetRepository.findBySymbol(upper).orElse(null);
+        AssetStatus status = current != null ? current.getStatus() : null;
+        return new AssetResolutionPreview(upper, status, offersFor(upper, current));
     }
 
     /**
@@ -209,8 +216,12 @@ public class FinancialAssetService {
      * know your symbol" is information the operator needs, and it's also just the honest answer —
      * their ref stays null and they don't price the asset. A per-aggregator failure degrades to an
      * empty list rather than failing the whole preview.
+     *
+     * <p>When {@code current} is non-null (the standing preview of an existing registry row) each
+     * block also reports the ref that aggregator holds today, read off its own column — so the editor
+     * can pre-select the current mapping. The import preview passes null: there's nothing settled yet.
      */
-    private List<AggregatorResolution> offersFor(String upperSymbol) {
+    private List<AggregatorResolution> offersFor(String upperSymbol, FinancialAsset current) {
         List<AggregatorResolution> blocks = new ArrayList<>();
         for (AssetResolverPort r : resolvers) {
             if (!r.isResolutionAvailable()) continue;
@@ -222,7 +233,9 @@ public class FinancialAssetService {
                     upperSymbol, r.aggregatorKey(), e.getMessage());
                 candidates = List.of();
             }
-            blocks.add(new AggregatorResolution(r.aggregatorKey(), pickDominant(candidates), candidates));
+            String currentId = current != null ? r.getRef(current) : null;
+            blocks.add(new AggregatorResolution(
+                r.aggregatorKey(), pickDominant(candidates), currentId, candidates));
         }
         return blocks;
     }
@@ -362,18 +375,6 @@ public class FinancialAssetService {
         LinkResolution link = resolveLink(url);
         return applyMappings(ticker, Map.of(link.aggregatorKey(), link.candidate().id()),
             link.candidate().name());
-    }
-
-    /**
-     * Pin a symbol to one CoinGecko coin id as {@code USER} — the single-aggregator entry point the
-     * standing mapping UI still speaks; {@link #applyMappings} is the general form.
-     */
-    @Transactional
-    public FinancialAsset applyUserMapping(String ticker, String coingeckoId, String name) {
-        if (coingeckoId == null || coingeckoId.isBlank()) {
-            throw new IllegalArgumentException("A CoinGecko coin id is required.");
-        }
-        return applyMappings(ticker, Map.of(CRYPTO_DISCOVERY_AGGREGATOR, coingeckoId), name);
     }
 
     /**

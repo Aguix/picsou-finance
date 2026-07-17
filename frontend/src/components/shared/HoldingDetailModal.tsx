@@ -223,7 +223,7 @@ export function HoldingDetailModal({ line, onClose }: HoldingDetailModalProps) {
                   key={line.ticker}
                   symbol={line.ticker}
                   status={line.assetStatus}
-                  coingeckoId={line.coingeckoId}
+                  refs={{ coingecko: line.coingeckoId, coinmarketcap: line.coinmarketcapId, yahoo: line.yahooSymbol }}
                   open={open}
                 />
               )}

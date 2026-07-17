@@ -7,16 +7,14 @@
       "worthless": "Sans valeur"
     },
     "link": {
-      "title": "Lien agrégateur",
+      "title": "Liens agrégateurs",
       "linkedTo": "Valorisé depuis",
-      "unresolvedNote": "Pas encore lié à une pièce CoinGecko — cette ligne est importée sans prix.",
+      "unresolvedNote": "Pas encore lié à un agrégateur — cette ligne est importée sans prix.",
       "worthlessNote": "Marqué sans valeur — valorisé à zéro.",
-      "resolve": "Lier une pièce",
+      "resolve": "Lier un actif",
       "edit": "Modifier",
-      "searching": "Recherche sur CoinGecko…",
-      "coinLink": "Lien CoinGecko",
-      "linkHint": "Collez l'URL de la page CoinGecko de la pièce, ou choisissez une suggestion ci-dessous.",
-      "suggestions": "Suggestions",
+      "choose": "Choisissez une correspondance sur chaque agrégateur, ou collez un lien de page d'actif.",
+      "searching": "Recherche sur les agrégateurs…",
       "optionWorthless": "Marquer sans valeur (0)",
       "forget": "Oublier le lien",
       "error": "Impossible d'appliquer le lien — vérifiez l'URL et réessayez."

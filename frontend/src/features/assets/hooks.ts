@@ -13,10 +13,10 @@ export function useAssets(enabled = true) {
 }
 
 /**
- * CoinGecko candidates for a symbol (standing mapping editor). Lazy — only fetched when `enabled`,
- * so opening a holding detail doesn't fire a CoinGecko `/search` until the operator actually edits
- * the mapping (the free tier rate-limits hard). Never retried: a miss is a legitimate empty result,
- * not a transient error to hammer.
+ * Every aggregator's candidates for a symbol (standing mapping editor), one block each. Lazy — only
+ * fetched when `enabled`, so opening a holding detail doesn't fire the aggregators' `/search` until
+ * the operator actually edits the mapping (the free tiers rate-limit hard). Never retried: a miss is
+ * a legitimate empty result, not a transient error to hammer.
  */
 export function useAssetCandidates(symbol: string | null, enabled: boolean) {
   return useQuery({

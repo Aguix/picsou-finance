@@ -34,6 +34,7 @@ import {
   useCheckFinaryTotp,
 } from '@/features/sync/hooks'
 import { usePreviewCryptoCsv, useImportCrypto, useCryptoSources } from '@/features/crypto/hooks'
+import { aggregatorLabel, verifyUrl } from '@/features/assets/aggregators'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import {
   Landmark,
@@ -817,24 +818,6 @@ function MiniStat({ label, value }: { label: string; value: number }) {
   )
 }
 
-// Where to go to eyeball a picked id, per aggregator. An aggregator with no entry (or no id-based
-// page) simply gets no verify link — the picker still works, so adding one needs nothing here.
-const VERIFY_URL: Record<string, (id: string) => string> = {
-  coingecko: (id) => `https://www.coingecko.com/en/coins/${id}`,
-  yahoo: (id) => `https://finance.yahoo.com/quote/${encodeURIComponent(id)}`,
-}
-
-// Human label for an aggregator; falls back to the key itself for one we don't know about yet.
-const AGGREGATOR_LABEL: Record<string, string> = {
-  coingecko: 'CoinGecko',
-  coinmarketcap: 'CoinMarketCap',
-  yahoo: 'Yahoo Finance',
-}
-
-function aggregatorLabel(key: string) {
-  return AGGREGATOR_LABEL[key] ?? key
-}
-
 // Seed one decision per previewed coin: accept every aggregator's own suggestion (so confirming is
 // a no-op), which is what leaves the coin priceable by more than one. A coin no aggregator could
 // guess defaults to "skip" (imports unpriced) rather than to a guess.
@@ -1017,7 +1000,7 @@ function ImportAssetValidation({
               {coinAction === 'MAP' &&
                 choice.aggregators.map((block) => {
                   const pickedId = ids[block.aggregatorKey] ?? ''
-                  const verifyHref = pickedId ? VERIFY_URL[block.aggregatorKey]?.(pickedId) : undefined
+                  const verifyHref = verifyUrl(block.aggregatorKey, pickedId)
                   const label = aggregatorLabel(block.aggregatorKey)
                   return (
                     <div key={block.aggregatorKey} className="flex items-center gap-2 pl-14">

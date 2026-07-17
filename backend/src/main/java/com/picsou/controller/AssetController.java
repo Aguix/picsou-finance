@@ -33,9 +33,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AssetController {
 
-    /** The one aggregator this standing surface still speaks; see {@link #candidates}. */
-    private static final String COINGECKO = "coingecko";
-
     private final FinancialAssetService assetService;
 
     /**
@@ -49,49 +46,32 @@ public class AssetController {
     }
 
     /**
-     * CoinGecko candidates for a symbol, plus its current registry status and the market-cap
-     * dominant suggestion — the data behind the standing mapping editor. Returned even for a coin
-     * already settled, so a mapping can always be re-verified.
-     *
-     * <p>The service now resolves across <em>every</em> aggregator, but this standing surface still
-     * speaks CoinGecko only: it narrows the preview to that block. Generalising the standing editor
-     * to one picker per aggregator (as the import preview already is) is the next pass; until then
-     * an asset's other refs are filled at import time.
+     * Every aggregator's candidates for a symbol — one block per aggregator, each with its own
+     * candidates, its market-cap dominant suggestion, and the ref it holds today — plus the symbol's
+     * current registry status. This is the data behind the standing mapping editor (one picker per
+     * aggregator, mirroring the import preview). Returned even for a coin already settled, so a mapping
+     * can always be re-verified.
      */
     @GetMapping("/{symbol}/candidates")
     public AssetCandidatesResponse candidates(@PathVariable String symbol) {
         AssetResolutionPreview p = assetService.previewResolution(symbol);
-        return p.aggregators().stream()
-            .filter(a -> COINGECKO.equals(a.aggregatorKey()))
-            .findFirst()
-            .map(a -> new AssetCandidatesResponse(
-                p.symbol(),
-                p.currentStatus() != null ? p.currentStatus().name() : null,
-                a.suggested() != null ? a.suggested().id() : null,
-                a.candidates().stream()
-                    .map(c -> new AssetCandidatesResponse.Candidate(
-                        c.id(), c.name(), c.symbol(), c.marketCapRank()))
-                    .toList()))
-            .orElseGet(() -> new AssetCandidatesResponse(
-                p.symbol(),
-                p.currentStatus() != null ? p.currentStatus().name() : null,
-                null,
-                List.of()));
+        return AssetCandidatesResponse.from(p);
     }
 
     /**
-     * Apply a mapping for {@code symbol}: pin a pasted CoinGecko link or a picked candidate as
-     * {@code USER}, or mark the symbol worthless. Re-pinning to a different coin purges and refetches
-     * the symbol's price history (handled by the service).
+     * Apply a mapping for {@code symbol}: pin a pasted aggregator link or the ids picked per aggregator
+     * as {@code USER}, or mark the symbol worthless. Re-pinning an aggregator to a different id purges
+     * and refetches the symbol's price history (handled by the service). A pasted {@code url} takes
+     * precedence over the picked ids — an explicit paste is the stronger signal.
      */
     @PutMapping("/{symbol}/mapping")
     public AssetResponse map(@PathVariable String symbol, @Valid @RequestBody AssetMappingRequest request) {
         String action = request.action() == null ? "" : request.action().trim().toUpperCase();
         return switch (action) {
             case "MAP" -> AssetResponse.from(
-                request.coingeckoUrl() != null && !request.coingeckoUrl().isBlank()
-                    ? assetService.setManualMapping(symbol, request.coingeckoUrl())
-                    : assetService.applyUserMapping(symbol, request.coingeckoId(), request.name()));
+                request.url() != null && !request.url().isBlank()
+                    ? assetService.setManualMapping(symbol, request.url())
+                    : assetService.applyMappings(symbol, request.aggregatorIds(), request.name()));
             case "WORTHLESS" -> AssetResponse.from(assetService.markWorthless(symbol));
             default -> throw new IllegalArgumentException(
                 "Unknown mapping action: '" + request.action() + "' (expected MAP or WORTHLESS).");

@@ -32,6 +32,17 @@ const COINGECKO_COIN_URL = 'https://www.coingecko.com/en/coins/'
 // then the settled ones.
 const STATUS_ORDER: Record<string, number> = { PENDING: 0, AUTO: 1, USER: 2, WORTHLESS: 3 }
 
+// The asset's non-null refs as `aggregatorKey → id` — the shape applyMappings/confirm want. One line
+// per aggregator column, kept in sync with AssetResponse; a new aggregator ref adds an entry here.
+function refsOf(asset: AssetResponse): Record<string, string> {
+  const all: Record<string, string | null> = {
+    coingecko: asset.coingeckoId,
+    coinmarketcap: asset.coinmarketcapId,
+    yahoo: asset.yahooSymbol,
+  }
+  return Object.fromEntries(Object.entries(all).filter(([, id]) => !!id)) as Record<string, string>
+}
+
 interface AssetRegistryModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -39,12 +50,14 @@ interface AssetRegistryModalProps {
 
 /**
  * Standing management table for the whole `financial_asset` registry: one row per asset, one column
- * per aggregator (CoinGecko id, Yahoo symbol), plus its resolution status. Admins can confirm an
- * automatic guess in one click or open the per-symbol editor to correct/mark-worthless/forget.
- * Opened from `/accounts` (next to "Add account") and from the admin price-aggregators section.
+ * per aggregator (CoinGecko / CoinMarketCap / Yahoo), plus its resolution status. Admins can confirm
+ * an automatic guess in one click or open the per-symbol editor (one picker per aggregator) to
+ * correct/mark-worthless/forget. Opened from `/accounts` (next to "Add account") and from the admin
+ * price-aggregators section.
  *
- * Confirming/editing is crypto-only for now — the resolution engine is CoinGecko-bound; the Yahoo
- * column is informational (its symbols are seeded identities, not yet resolved through here).
+ * Confirming/editing is gated to crypto rows for now — a product decision, not an engine limit: the
+ * editor resolves across every aggregator, but surfacing stock/ETF (Yahoo/ISIN) resolution is a later
+ * pass. Confirm ratifies whatever refs the AUTO row already carries, across every aggregator.
  */
 export function AssetRegistryModal({ open, onOpenChange }: AssetRegistryModalProps) {
   const { t } = useTranslation()
@@ -70,11 +83,14 @@ export function AssetRegistryModal({ open, onOpenChange }: AssetRegistryModalPro
   // actions for an admin. Keep in sync with the header row below.
   const colCount = canEdit ? 9 : 8
 
+  // Ratify an AUTO row: re-pin whatever refs it already carries (across every aggregator) as USER,
+  // unchanged — so confirming preserves a multi-aggregator mapping, not just CoinGecko.
   function confirm(asset: AssetResponse) {
-    if (!asset.coingeckoId) return
+    const ids = refsOf(asset)
+    if (Object.keys(ids).length === 0) return
     setConfirming(asset.symbol)
     applyMutation.mutate(
-      { symbol: asset.symbol, data: { action: 'MAP', coingeckoId: asset.coingeckoId, name: asset.name ?? undefined } },
+      { symbol: asset.symbol, data: { action: 'MAP', aggregatorIds: ids, name: asset.name ?? undefined } },
       { onSettled: () => setConfirming(null) },
     )
   }
@@ -133,10 +149,9 @@ export function AssetRegistryModal({ open, onOpenChange }: AssetRegistryModalPro
                           <span className="text-xs text-muted-foreground">{'—'}</span>
                         )}
                       </TableCell>
-                      {/* Informative, like the Yahoo column: these refs are filled at import time
-                          (one picker per aggregator), not from this table — the editor below is
-                          still CoinGecko-only. A second ref here is what gives the asset a price
-                          fallback when CoinGecko is rate-limited. */}
+                      {/* Displayed like the Yahoo column; both are editable from the per-aggregator
+                          editor below (expand a crypto row). A second ref here is what gives the asset
+                          a price fallback when CoinGecko is rate-limited. */}
                       <TableCell className="font-mono text-xs">
                         {asset.coinmarketcapId ?? <span className="text-muted-foreground">{'—'}</span>}
                       </TableCell>
@@ -162,7 +177,7 @@ export function AssetRegistryModal({ open, onOpenChange }: AssetRegistryModalPro
                         <TableCell className="text-right">
                           {isCrypto ? (
                             <div className="inline-flex items-center justify-end gap-1">
-                              {asset.status === 'AUTO' && asset.coingeckoId && (
+                              {asset.status === 'AUTO' && Object.keys(refsOf(asset)).length > 0 && (
                                 <Button
                                   type="button"
                                   variant="ghost"
@@ -203,7 +218,7 @@ export function AssetRegistryModal({ open, onOpenChange }: AssetRegistryModalPro
                             key={`reg-${asset.symbol}`}
                             symbol={asset.symbol}
                             status={asset.status as AssetStatus | null}
-                            coingeckoId={asset.coingeckoId}
+                            refs={{ coingecko: asset.coingeckoId, coinmarketcap: asset.coinmarketcapId, yahoo: asset.yahooSymbol }}
                             open
                             defaultEditing
                           />

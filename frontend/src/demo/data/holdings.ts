@@ -16,6 +16,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       assetType: 'STOCK',
       assetStatus: 'AUTO',
       coingeckoId: null,
+      coinmarketcapId: null,
+      yahooSymbol: null,
     },
     {
       ticker: 'MSFT',
@@ -31,6 +33,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       assetType: 'STOCK',
       assetStatus: 'AUTO',
       coingeckoId: null,
+      coinmarketcapId: null,
+      yahooSymbol: null,
     },
     {
       ticker: 'AMZN',
@@ -46,6 +50,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       assetType: 'STOCK',
       assetStatus: 'AUTO',
       coingeckoId: null,
+      coinmarketcapId: null,
+      yahooSymbol: null,
     },
     {
       ticker: 'NVDA',
@@ -61,6 +67,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       assetType: 'STOCK',
       assetStatus: 'AUTO',
       coingeckoId: null,
+      coinmarketcapId: null,
+      yahooSymbol: null,
     },
   ],
   6: [
@@ -78,6 +86,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       assetType: 'CRYPTO',
       assetStatus: 'USER',
       coingeckoId: 'bitcoin',
+      coinmarketcapId: '1',
+      yahooSymbol: null,
     },
     {
       ticker: 'ETH',
@@ -93,6 +103,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       assetType: 'CRYPTO',
       assetStatus: 'AUTO',
       coingeckoId: 'ethereum',
+      coinmarketcapId: null,
+      yahooSymbol: null,
     },
     {
       ticker: 'SOL',
@@ -108,6 +120,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       assetType: 'CRYPTO',
       assetStatus: 'PENDING',
       coingeckoId: null,
+      coinmarketcapId: null,
+      yahooSymbol: null,
     },
   ],
   3: [
@@ -125,6 +139,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       assetType: 'ETF',
       assetStatus: 'AUTO',
       coingeckoId: null,
+      coinmarketcapId: null,
+      yahooSymbol: null,
     },
     {
       ticker: 'EUNL',
@@ -140,6 +156,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       assetType: 'ETF',
       assetStatus: 'AUTO',
       coingeckoId: null,
+      coinmarketcapId: null,
+      yahooSymbol: null,
     },
   ],
 }
