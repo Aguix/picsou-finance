@@ -32,6 +32,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows the backend's debt-neutral gain/loss, and a new Liabilities card lists
   loans separately.
 
+### Fixed
+
+- **Ethereum wallet balances sync again.** The hard-coded `cloudflare-eth.com`
+  RPC was deprecated and started returning an HTTP 200 JSON-RPC error for
+  `eth_getBalance`, which the adapter read as a 0 balance — wallets appeared to
+  sync but showed nothing. Switched to `ethereum-rpc.publicnode.com`.
+- **On-chain wallet adapters no longer report a false 0 on RPC failure.** Both
+  the Ethereum and Solana adapters read the JSON-RPC `result` with `path(...)`,
+  which turned an `error` payload (rate-limit, deprecated method, node outage)
+  into a silent 0 balance rather than a sync error. They now validate the
+  envelope — a present `error`, a missing `result`, or an empty response throws
+  and surfaces as a `422` sync failure instead of corrupting the balance. A
+  genuinely empty wallet still reads 0. On Solana this covers both the native
+  SOL and the SPL-token call, and sync failures now preserve their root cause in
+  the logs.
+- **Wallet sync distinguishes bugs from routine RPC failures.** `WalletSyncService`
+  now logs unexpected errors (NPE, etc.) at `ERROR` with a full stacktrace instead
+  of a one-line `WARN`, so a real bug can't hide as a transient sync; the friendly
+  `422` shown to the user is unchanged. A malformed SPL token balance or an
+  unexpected token-list shape is logged and skipped (SOL and other tokens still
+  sync) rather than silently dropped, and a malformed Ethereum hex balance now
+  fails the sync with a clear message instead of an opaque error. Batch resync
+  (`resyncAll`) reports per-wallet outcomes, so the scheduler logs which wallets
+  failed and the MCP wallet-sync tool answers with the real success count.
+  `WalletRpcException` now also has a dedicated `GlobalExceptionHandler` mapping
+  (generic `422`) as defense-in-depth, so a bad RPC response can never surface as a
+  raw `500` even on an unwrapped call path.
+
 ## [1.0.13] — 2026-07-07
 
 ### Changed

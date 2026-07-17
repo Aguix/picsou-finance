@@ -1,6 +1,6 @@
 # Feature: Crypto Tracking
 
-> Last updated: 2026-04-08
+> Last updated: 2026-07-16
 
 ## Context
 
@@ -36,11 +36,17 @@ The adapter scans each chain until `GAP_LIMIT` (20) consecutive unused addresses
 
 ### Ethereum wallet adapter
 
-`EthereumWalletAdapter` calls `eth_getBalance` on the Cloudflare Ethereum RPC (`cloudflare-eth.com`). Returns balance converted from wei to ETH (18 decimals).
+`EthereumWalletAdapter` calls `eth_getBalance` on a public Ethereum RPC (`ethereum-rpc.publicnode.com`). Returns balance converted from wei to ETH (18 decimals).
 
 ### Solana wallet adapter
 
-`SolanaWalletAdapter` calls `getBalance` on the Solana mainnet RPC (`api.mainnet-beta.solana.com`). Returns balance converted from lamports to SOL (9 decimals).
+`SolanaWalletAdapter` calls `getBalance` on the Solana mainnet RPC (`api.mainnet-beta.solana.com`). Returns balance converted from lamports to SOL (9 decimals). It also calls `getTokenAccountsByOwner` to pick up known SPL stablecoins (USDC/EURC/USDT).
+
+### JSON-RPC error handling
+
+Both on-chain adapters validate the JSON-RPC envelope through `JsonRpcResponse.requireResult(response, context)` (`adapter/util/`) before reading a balance. A present `error` field, a missing `result`, or an empty response throws `WalletRpcException`, which `WalletSyncService` surfaces as a `422` sync failure. This is deliberate: reading `result` with `path(...)` returns a non-null `MissingNode`, so an error payload would otherwise default to a **silent 0 balance** — indistinguishable from a genuinely empty wallet. A real `0x0` / `value:0` result still returns 0. On Solana, an error on the SPL-token call fails the whole sync rather than silently dropping stablecoin holdings.
+
+`WalletSyncService.sync()` splits its catch: **expected** failures (`WalletRpcException`, `SyncException`) log at `WARN` and become the friendly `422`; **unexpected** ones (NPE, `ClassCastException`, …) log at `ERROR` with the full stacktrace so a real bug can't hide as a transient sync. `WalletRpcException` has no dedicated `@ExceptionHandler` — it stays wrapped in `SyncException`, which keeps the `422` mapping. Two per-item cases inside the Solana adapter are **not** fatal, to avoid one bad field hiding the rest of the wallet: a non-array token `value` and a malformed `uiAmountString` are logged (WARN / ERROR respectively) and that one entry is skipped, while SOL and every parseable token still come through. `resyncAll()` returns a `ResyncSummary(total, succeeded, failed)` so its callers (the daily scheduler and the `trigger_crypto_wallet_sync` MCP tool) can report per-wallet outcomes instead of a blanket "done".
 
 ### Key files
 
@@ -49,8 +55,10 @@ The adapter scans each chain until `GAP_LIMIT` (20) consecutive unused addresses
 - `backend/src/main/java/com/picsou/config/CryptoEncryption.java` -- AES-256-GCM encrypt/decrypt for API secrets
 - `backend/src/main/java/com/picsou/adapter/BinanceAdapter.java` -- Binance REST API with HMAC-SHA256
 - `backend/src/main/java/com/picsou/adapter/BitcoinWalletAdapter.java` -- Blockstream Esplora, BIP32 key derivation
-- `backend/src/main/java/com/picsou/adapter/EthereumWalletAdapter.java` -- Cloudflare ETH RPC
+- `backend/src/main/java/com/picsou/adapter/EthereumWalletAdapter.java` -- PublicNode ETH RPC
 - `backend/src/main/java/com/picsou/adapter/SolanaWalletAdapter.java` -- Solana mainnet RPC
+- `backend/src/main/java/com/picsou/adapter/util/JsonRpcResponse.java` -- JSON-RPC envelope validation shared by the wallet adapters
+- `backend/src/main/java/com/picsou/exception/WalletRpcException.java` -- thrown on a JSON-RPC error/missing result
 - `backend/src/main/java/com/picsou/adapter/util/BitcoinKeyUtils.java` -- BIP32 derivation, Base58Check, Bech32
 - `backend/src/main/java/com/picsou/port/CryptoExchangePort.java` -- Exchange port interface
 - `backend/src/main/java/com/picsou/port/WalletPort.java` -- Wallet port interface
@@ -115,6 +123,9 @@ Upsert Account (type=CRYPTO, no ticker)
 - **Bitcoin xpub vs zpub**: Both are supported. `BitcoinKeyUtils.normalizeToXpub()` converts zpub to xpub before derivation. The derivation always produces P2WPKH (native segwit) addresses.
 - **Output descriptor parsing**: Descriptors are parsed by extracting the xpub between brackets. The checksum after `#` is ignored. Complex descriptors (multisig, P2SH-wrapped) are not supported.
 - **Exchange holdings use PriceService**: Holdings are converted to EUR at sync time using `PriceService.refreshPrices()`. If the price cache is stale (older than 15 min), prices are refreshed on demand.
+- **Wallet RPC errors must not read as 0**: When parsing a blockchain JSON-RPC response, always go through `JsonRpcResponse.requireResult(...)` — never `response.path("result")` directly. `path(...)` returns a `MissingNode` for an error payload, which silently becomes a 0 balance (this caused the July 2026 Ethereum outage). `requireResult` uses `get(...)` to reject a missing/error result while still allowing a legitimate `0x0` / `value:0`.
+- **Don't re-throw `WalletRpcException` raw from `sync()`**: it has no `@ExceptionHandler`, so a raw re-throw becomes a `500`, not the friendly `422`. Keep it wrapped in `SyncException`. The split catch is only about **log level** — unexpected errors log at ERROR with a stacktrace; the user-facing status/message is unchanged.
+- **Per-token Solana failures are logged, not fatal**: a malformed `uiAmountString` or a non-array token `value` is logged and skipped so the SOL balance and other tokens survive. Only an envelope-level RPC `error`/missing-`result` (via `requireResult`) fails the whole sync. Loud (logged) ≠ fatal (thrown) — pick per blast radius.
 
 ## Tests
 
@@ -122,6 +133,10 @@ Upsert Account (type=CRYPTO, no ticker)
 - `BitcoinKeyUtilsTest` -- unit tests for BIP32 derivation, address generation
 - `CryptoExchangeSyncServiceTest` -- unit tests for exchange management
 - `WalletSyncServiceTest` -- unit tests for wallet sync
+- `JsonRpcResponseTest` -- envelope validation: valid/zero/empty-array results returned; null/error/missing/explicit-null throw
+- `WalletSyncServiceTest` -- RPC error wrapped as `SyncException` (wallet not marked synced), empty balances throw, `resyncAll` summary reports failed chains
+- `EthereumWalletAdapterTest` -- valid/zero/error/missing-result parsing, null body, malformed hex
+- `SolanaWalletAdapterTest` -- SOL + SPL parsing, unknown-mint drop, RPC-error fails sync, non-array/malformed token skipped (non-fatal)
 
 ## Links
 
