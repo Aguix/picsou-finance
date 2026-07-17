@@ -237,6 +237,7 @@ for (const [symbol, data] of Object.entries(demoAssetCandidates)) {
       status: worthless ? 'WORTHLESS' : 'USER',
       coingeckoId: worthless ? null : (body.coingeckoId ?? data.suggestedId ?? null),
       yahooSymbol: null,
+      coinmarketcapId: null,
       lastEurValue: null,
       priceSyncedAt: null,
     }
@@ -244,15 +245,17 @@ for (const [symbol, data] of Object.entries(demoAssetCandidates)) {
   handlers.set(key('DELETE', `/assets/${symbol}`), () => ({}))
 }
 
-// Asset registry table (management modal) — the whole financial_asset registry, one row per asset.
+// Asset registry table (management modal) — the whole financial_asset registry, one row per asset,
+// one column per aggregator. BTC is linked on two aggregators (the state that survives one of them
+// being rate-limited); the others on one or none.
 handlers.set(key('GET', '/assets'), () => ([
-  { symbol: 'BTC', name: 'Bitcoin', type: 'CRYPTO', status: 'USER', coingeckoId: 'bitcoin', yahooSymbol: null, lastEurValue: 84500, priceSyncedAt: new Date().toISOString() },
-  { symbol: 'ETH', name: 'Ethereum', type: 'CRYPTO', status: 'AUTO', coingeckoId: 'ethereum', yahooSymbol: null, lastEurValue: 2100, priceSyncedAt: new Date().toISOString() },
+  { symbol: 'BTC', name: 'Bitcoin', type: 'CRYPTO', status: 'USER', coingeckoId: 'bitcoin', yahooSymbol: null, coinmarketcapId: '1', lastEurValue: 84500, priceSyncedAt: new Date().toISOString() },
+  { symbol: 'ETH', name: 'Ethereum', type: 'CRYPTO', status: 'AUTO', coingeckoId: 'ethereum', yahooSymbol: null, coinmarketcapId: null, lastEurValue: 2100, priceSyncedAt: new Date().toISOString() },
   // Unlinked crypto that still carries a (spurious Yahoo-fallback) value — the table hides it since there's no CoinGecko id.
-  { symbol: 'SOL', name: 'Solana', type: 'CRYPTO', status: 'PENDING', coingeckoId: null, yahooSymbol: null, lastEurValue: 148, priceSyncedAt: new Date().toISOString() },
-  { symbol: 'AAPL', name: 'Apple Inc.', type: 'STOCK', status: 'AUTO', coingeckoId: null, yahooSymbol: 'AAPL', lastEurValue: 182.5, priceSyncedAt: new Date().toISOString() },
-  { symbol: 'IWDA', name: 'iShares Core MSCI World', type: 'ETF', status: 'AUTO', coingeckoId: null, yahooSymbol: 'IWDA.AS', lastEurValue: 85, priceSyncedAt: new Date().toISOString() },
-  { symbol: 'LUNC', name: null, type: 'CRYPTO', status: 'WORTHLESS', coingeckoId: null, yahooSymbol: null, lastEurValue: 0, priceSyncedAt: null },
+  { symbol: 'SOL', name: 'Solana', type: 'CRYPTO', status: 'PENDING', coingeckoId: null, yahooSymbol: null, coinmarketcapId: null, lastEurValue: 148, priceSyncedAt: new Date().toISOString() },
+  { symbol: 'AAPL', name: 'Apple Inc.', type: 'STOCK', status: 'AUTO', coingeckoId: null, yahooSymbol: 'AAPL', coinmarketcapId: null, lastEurValue: 182.5, priceSyncedAt: new Date().toISOString() },
+  { symbol: 'IWDA', name: 'iShares Core MSCI World', type: 'ETF', status: 'AUTO', coingeckoId: null, yahooSymbol: 'IWDA.AS', coinmarketcapId: null, lastEurValue: 85, priceSyncedAt: new Date().toISOString() },
+  { symbol: 'LUNC', name: null, type: 'CRYPTO', status: 'WORTHLESS', coingeckoId: null, yahooSymbol: null, coinmarketcapId: null, lastEurValue: 0, priceSyncedAt: null },
 ]))
 
 // Crypto exchange

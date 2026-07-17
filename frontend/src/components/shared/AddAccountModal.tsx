@@ -827,6 +827,7 @@ const VERIFY_URL: Record<string, (id: string) => string> = {
 // Human label for an aggregator; falls back to the key itself for one we don't know about yet.
 const AGGREGATOR_LABEL: Record<string, string> = {
   coingecko: 'CoinGecko',
+  coinmarketcap: 'CoinMarketCap',
   yahoo: 'Yahoo Finance',
 }
 

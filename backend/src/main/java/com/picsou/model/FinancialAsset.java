@@ -60,6 +60,10 @@ public class FinancialAsset extends AuditableEntity {
     @Column(name = "yahoo_symbol", length = 50)
     private String yahooSymbol;
 
+    /** CoinMarketCap numeric id used verbatim in API calls (e.g. "1" for Bitcoin). */
+    @Column(name = "coinmarketcap_id", length = 20)
+    private String coinmarketcapId;
+
     /** Last known EUR price — survives restarts, unlike the in-memory price cache. */
     @Column(name = "last_eur_value", precision = 20, scale = 8)
     private BigDecimal lastEurValue;

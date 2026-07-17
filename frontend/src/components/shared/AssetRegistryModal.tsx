@@ -66,7 +66,9 @@ export function AssetRegistryModal({ open, onOpenChange }: AssetRegistryModalPro
     })
   }, [assets])
 
-  const colCount = canEdit ? 8 : 7
+  // symbol, name, type, one per aggregator (CoinGecko/CoinMarketCap/Yahoo), value, status — plus
+  // actions for an admin. Keep in sync with the header row below.
+  const colCount = canEdit ? 9 : 8
 
   function confirm(asset: AssetResponse) {
     if (!asset.coingeckoId) return
@@ -99,6 +101,7 @@ export function AssetRegistryModal({ open, onOpenChange }: AssetRegistryModalPro
                 <TableHead>{t('assets.registry.colName')}</TableHead>
                 <TableHead>{t('assets.registry.colType')}</TableHead>
                 <TableHead>CoinGecko</TableHead>
+                <TableHead>CoinMarketCap</TableHead>
                 <TableHead>Yahoo</TableHead>
                 <TableHead className="text-right">{t('assets.registry.colValue')}</TableHead>
                 <TableHead>{t('assets.registry.colStatus')}</TableHead>
@@ -129,6 +132,13 @@ export function AssetRegistryModal({ open, onOpenChange }: AssetRegistryModalPro
                         ) : (
                           <span className="text-xs text-muted-foreground">{'—'}</span>
                         )}
+                      </TableCell>
+                      {/* Informative, like the Yahoo column: these refs are filled at import time
+                          (one picker per aggregator), not from this table — the editor below is
+                          still CoinGecko-only. A second ref here is what gives the asset a price
+                          fallback when CoinGecko is rate-limited. */}
+                      <TableCell className="font-mono text-xs">
+                        {asset.coinmarketcapId ?? <span className="text-muted-foreground">{'—'}</span>}
                       </TableCell>
                       <TableCell className="font-mono text-xs">
                         {asset.yahooSymbol ?? <span className="text-muted-foreground">{'—'}</span>}

@@ -39,7 +39,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * The resolution engine is exercised against <b>fake aggregators</b> rather than the real adapters:
- * the service must not know one aggregator from another, so the tests hand it interchangeable
+ * the service must not know CoinGecko from CoinMarketCap, so the tests hand it three interchangeable
  * resolvers that differ only in which column they own and what they answer. Each fake is spied so a
  * test can still assert what the engine did (or didn't) ask of it.
  */
@@ -57,16 +57,19 @@ class FinancialAssetServiceTest {
 
     private FakeResolver coinGecko;
     private FakeResolver yahoo;
+    private FakeResolver coinMarketCap;
     private FinancialAssetService service;
 
     @BeforeEach
     void setUp() {
         coinGecko = spy(new FakeResolver("coingecko",
             FinancialAsset::getCoingeckoId, FinancialAsset::setCoingeckoId, COIN_URL));
+        coinMarketCap = spy(new FakeResolver("coinmarketcap",
+            FinancialAsset::getCoinmarketcapId, FinancialAsset::setCoinmarketcapId, null));
         yahoo = spy(new FakeResolver("yahoo",
             FinancialAsset::getYahooSymbol, FinancialAsset::setYahooSymbol, null));
         service = new FinancialAssetService(
-            List.of(coinGecko, yahoo),
+            List.of(coinGecko, coinMarketCap, yahoo),
             repository, priceSnapshotRepository, transactionRepository, accountHoldingRepository,
             priceService);
     }
@@ -145,7 +148,7 @@ class FinancialAssetServiceTest {
         // Un-linking has to leave nothing behind: a ref left on a second aggregator would keep the
         // symbol silently priced by it after the operator asked to forget the link.
         FinancialAsset mapped = FinancialAsset.builder()
-            .symbol("BTC").coingeckoId("bitcoin").yahooSymbol("BTC-EUR")
+            .symbol("BTC").coingeckoId("bitcoin").coinmarketcapId("1").yahooSymbol("BTC-EUR")
             .name("Bitcoin").type(AssetType.CRYPTO).status(AssetStatus.USER).build();
         when(repository.findBySymbol("BTC")).thenReturn(Optional.of(mapped));
         expectSaveEcho();
@@ -153,6 +156,7 @@ class FinancialAssetServiceTest {
         FinancialAsset result = service.clearMapping("BTC");
 
         assertThat(result.getCoingeckoId()).isNull();
+        assertThat(result.getCoinmarketcapId()).isNull();
         assertThat(result.getYahooSymbol()).isNull();
         assertThat(result.getStatus()).isEqualTo(AssetStatus.PENDING);
     }
@@ -224,6 +228,7 @@ class FinancialAssetServiceTest {
 
         service.resolveCrypto("SOL");
 
+        verify(coinMarketCap, never()).searchBySymbol(anyString());
         verify(yahoo, never()).searchBySymbol(anyString());
     }
 
@@ -380,22 +385,25 @@ class FinancialAssetServiceTest {
         // so the operator can map the coin on more than one and the price survives one being down.
         when(repository.findBySymbol("BTC")).thenReturn(Optional.empty());
         when(coinGecko.searchBySymbol("BTC")).thenReturn(List.of(coin("bitcoin", "btc", 1)));
-        when(yahoo.searchBySymbol("BTC")).thenReturn(List.of(coin("BTC-EUR", "btc", 1)));
+        when(coinMarketCap.searchBySymbol("BTC")).thenReturn(List.of(coin("1", "btc", 1)));
 
         var preview = service.previewResolution("btc");
 
         assertThat(preview.aggregators()).extracting(
                 FinancialAssetService.AggregatorResolution::aggregatorKey)
-            .containsExactly("coingecko", "yahoo");
+            .containsExactly("coingecko", "coinmarketcap", "yahoo");
         assertThat(block(preview, "coingecko").suggested().id()).isEqualTo("bitcoin");
-        assertThat(block(preview, "yahoo").suggested().id()).isEqualTo("BTC-EUR");
+        assertThat(block(preview, "coinmarketcap").suggested().id()).isEqualTo("1");
+        // Yahoo knows nothing about this symbol → empty block, its ref stays null, it won't price it.
+        assertThat(block(preview, "yahoo").candidates()).isEmpty();
+        assertThat(block(preview, "yahoo").suggested()).isNull();
     }
 
     @Test
     void previewOmitsAnAggregatorThatCannotResolveRightNow() {
-        // An aggregator that can't search right now (a keyless CoinMarketCap, e.g.) isn't offered
-        // rather than shown as an empty picker.
-        yahoo.resolutionAvailable = false;
+        // CoinMarketCap has no anonymous tier: with no key it can't search at all, so it isn't
+        // offered rather than shown as an empty picker.
+        coinMarketCap.resolutionAvailable = false;
         when(repository.findBySymbol("BTC")).thenReturn(Optional.empty());
         when(coinGecko.searchBySymbol("BTC")).thenReturn(List.of(coin("bitcoin", "btc", 1)));
 
@@ -403,8 +411,8 @@ class FinancialAssetServiceTest {
 
         assertThat(preview.aggregators()).extracting(
                 FinancialAssetService.AggregatorResolution::aggregatorKey)
-            .containsExactly("coingecko");
-        verify(yahoo, never()).searchBySymbol(anyString());
+            .containsExactly("coingecko", "yahoo");
+        verify(coinMarketCap, never()).searchBySymbol(anyString());
     }
 
     @Test
@@ -426,7 +434,7 @@ class FinancialAssetServiceTest {
     void previewResolutionsDegradesToNoCandidatesWhenTheSearchFails() {
         when(repository.findBySymbol("BOOM")).thenReturn(Optional.empty());
         when(coinGecko.searchBySymbol("BOOM")).thenThrow(new RuntimeException("rate limit"));
-        when(yahoo.searchBySymbol("BOOM")).thenReturn(List.of(coin("42", "boom", 900)));
+        when(coinMarketCap.searchBySymbol("BOOM")).thenReturn(List.of(coin("42", "boom", 900)));
 
         var previews = service.previewResolutions(new java.util.LinkedHashSet<>(List.of("boom")));
 
@@ -435,7 +443,7 @@ class FinancialAssetServiceTest {
         assertThat(previews.get(0).symbol()).isEqualTo("BOOM");
         assertThat(block(previews.get(0), "coingecko").candidates()).isEmpty();
         assertThat(block(previews.get(0), "coingecko").suggested()).isNull();
-        assertThat(block(previews.get(0), "yahoo").suggested().id()).isEqualTo("42");
+        assertThat(block(previews.get(0), "coinmarketcap").suggested().id()).isEqualTo("42");
     }
 
     @Test
@@ -463,10 +471,11 @@ class FinancialAssetServiceTest {
         expectSaveEcho();
 
         FinancialAsset result = service.applyMappings("btc",
-            Map.of("coingecko", "bitcoin", "yahoo", "BTC-EUR"), "Bitcoin");
+            Map.of("coingecko", "bitcoin", "coinmarketcap", "1"), "Bitcoin");
 
         assertThat(result.getCoingeckoId()).isEqualTo("bitcoin");
-        assertThat(result.getYahooSymbol()).isEqualTo("BTC-EUR");
+        assertThat(result.getCoinmarketcapId()).isEqualTo("1");
+        assertThat(result.getYahooSymbol()).isNull();          // not picked → stays unable to price it
         assertThat(result.getStatus()).isEqualTo(AssetStatus.USER);
     }
 
@@ -521,17 +530,17 @@ class FinancialAssetServiceTest {
 
     @Test
     void applyMappingsFillingAnEmptyRefKeepsThePriceHistory() {
-        // Adding a second aggregator alongside a working CoinGecko id doesn't invalidate anything
-        // already priced — nothing was ever fetched under a wrong id.
+        // Adding CoinMarketCap alongside a working CoinGecko id doesn't invalidate anything already
+        // priced — nothing was ever fetched under a wrong id.
         FinancialAsset existing = FinancialAsset.builder()
             .symbol("BTC").coingeckoId("bitcoin").type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
         when(repository.findBySymbol("BTC")).thenReturn(Optional.of(existing));
         expectSaveEcho();
 
         FinancialAsset result = service.applyMappings("BTC",
-            Map.of("coingecko", "bitcoin", "yahoo", "BTC-EUR"), "Bitcoin");
+            Map.of("coingecko", "bitcoin", "coinmarketcap", "1"), "Bitcoin");
 
-        assertThat(result.getYahooSymbol()).isEqualTo("BTC-EUR");
+        assertThat(result.getCoinmarketcapId()).isEqualTo("1");
         verifyNoInteractions(priceSnapshotRepository, priceService);
     }
 
@@ -619,7 +628,8 @@ class FinancialAssetServiceTest {
             "https://www.coingecko.com/en/coins/loaded-lions");
 
         assertThat(result.getCoingeckoId()).isEqualTo("loaded-lions");
-        assertThat(result.getYahooSymbol()).isNull();
+        assertThat(result.getCoinmarketcapId()).isNull();
+        verify(coinMarketCap, never()).fetchById(anyString());
         verify(yahoo, never()).fetchById(anyString());
     }
 
@@ -789,7 +799,7 @@ class FinancialAssetServiceTest {
     @Test
     void markWorthlessOverExistingAssetClearsEveryAggregatorRef() {
         FinancialAsset existing = FinancialAsset.builder()
-            .symbol("METABEAT").coingeckoId("metabeat").yahooSymbol("METABEAT").name("MetaBeat")
+            .symbol("METABEAT").coingeckoId("metabeat").coinmarketcapId("9999").name("MetaBeat")
             .type(AssetType.CRYPTO).status(AssetStatus.USER).build();
         when(repository.findBySymbol("METABEAT")).thenReturn(Optional.of(existing));
         when(accountHoldingRepository.findByAsset_Id(any())).thenReturn(List.of());
@@ -800,7 +810,7 @@ class FinancialAssetServiceTest {
         // Worthless means no aggregator prices it — a ref left behind would keep one quoting it.
         assertThat(result.getStatus()).isEqualTo(AssetStatus.WORTHLESS);
         assertThat(result.getCoingeckoId()).isNull();
-        assertThat(result.getYahooSymbol()).isNull();
+        assertThat(result.getCoinmarketcapId()).isNull();
         assertThat(result.getName()).isNull();
     }
 

@@ -454,6 +454,7 @@ export interface AssetResponse {
   /** One field per aggregator ref — a non-null one means that aggregator can quote this asset. */
   coingeckoId: string | null
   yahooSymbol: string | null
+  coinmarketcapId: string | null
   lastEurValue: number | null
   priceSyncedAt: string | null
 }

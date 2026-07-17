@@ -20,6 +20,7 @@ public record AssetResponse(
     String status,
     String coingeckoId,
     String yahooSymbol,
+    String coinmarketcapId,
     BigDecimal lastEurValue,
     Instant priceSyncedAt
 ) {
@@ -31,6 +32,7 @@ public record AssetResponse(
             a.getStatus() != null ? a.getStatus().name() : null,
             a.getCoingeckoId(),
             a.getYahooSymbol(),
+            a.getCoinmarketcapId(),
             a.getLastEurValue(),
             a.getPriceSyncedAt()
         );
