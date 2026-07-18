@@ -51,7 +51,7 @@ export function useGoals() {
 }
 ```
 
-- Stale times configured in `lib/constants.ts`.
+- Stale times configured in `frontend/src/lib/constants.ts`.
 - No Redux, no Context for server data.
 
 ### Client state — Zustand
@@ -117,7 +117,7 @@ in `eslint.config.js` rather than hand-edited. Do not add disables inside those 
 
 ## API client
 
-Single Axios instance in `lib/api-client.ts`:
+Single Axios instance in `frontend/src/lib/api-client.ts`:
 
 ```typescript
 export const api = axios.create({
@@ -183,9 +183,9 @@ Text inputs, text buttons, tabs, dropdown menus, segmented controls, and pill fi
 - Height: `h-10`
 - Horizontal padding: `px-8` for normal buttons, `px-4` for inputs/selects, `px-6` for dense segmented controls
 - Font size: `text-sm`
-- Shape: `rounded-full` for standalone buttons and filters, `rounded-xl` for inputs/menu items and inside a `rounded-2xl p-1` segmented container
+- Shape: **follow the shadcn theme radius, all derived from `--radius` in `index.css`.** Interactive text controls are `rounded-md` (buttons, filter chips, tabs/segmented items, menu items); their containers (segmented control, dropdown menu, popover) are `rounded-lg`. Never hardcode `rounded-full`, `rounded-xl`, or `rounded-2xl` on a text control or its container — a pill button next to `rounded-lg` cards reads as a foreign design system. `rounded-full` is reserved for avatars, switches, badges, and status dots; larger radii (`rounded-xl`/`rounded-2xl`/`rounded-4xl`) belong to cards and large surfaces only.
 
-Avoid local `h-6`, `h-7`, `h-8`, `h-9`, `text-xs`, `rounded-md`, or narrow `px-2` overrides for text controls. OTP slots should follow the same readable `h-10` control rhythm unless a dense, space-constrained surface has a documented reason to shrink them. Reserve smaller sizing for pure icon buttons, badges, dense table data, chart labels, and non-interactive metadata.
+Avoid local `h-6`, `h-7`, `h-8`, `h-9`, `text-xs`, or narrow `px-2` overrides for text controls, and never re-pill a control with a `rounded-full` className that overrides the shadcn `Button`/`Tabs` primitive. OTP slots should follow the same readable `h-10` control rhythm unless a dense, space-constrained surface has a documented reason to shrink them. Reserve smaller sizing for pure icon buttons, badges, dense table data, chart labels, and non-interactive metadata.
 
 `Label` and `CardDescription` are app-wide readable primitives (`text-sm`). Do not shrink form labels or section descriptions locally unless the element is truly dense metadata rather than an input label.
 
@@ -217,7 +217,7 @@ Top-level app pages should start flush with the main content column, not centere
 
 #### Color tokens — always semantic, never raw palette
 
-`shadcn/tailwind.css` remaps Tailwind's `gray` palette to a blue-tinted scale aligned with the primary hue. **Never use raw palette classes** (`text-gray-*`, `bg-gray-*`, etc.) — they will appear blue, not neutral.
+All theme color tokens are defined in the `@theme` block of `frontend/src/index.css`. **Never use raw palette classes** (`text-gray-*`, `bg-gray-*`, etc.) — they bypass the theme tokens and do not adapt to dark mode.
 
 | Intent | Use |
 |--------|-----|
@@ -236,15 +236,17 @@ Use icons from `lucide-react` as direct JSX components (e.g., `<Pencil className
 
 ## Internationalization
 
-- react-i18next with FR/EN languages.
-- Translation files: `public/locales/{fr,en}/translation.json`.
+- react-i18next with FR (default), EN, DE, ES.
+- Translation files: `frontend/src/i18n/locales/{fr,en,de,es}.json` — identical key sets; when adding a key, add it to all four files.
+- Supported languages live in the `SUPPORTED_LOCALES` registry (`frontend/src/i18n/locales.ts`); selectors and `Intl` formatting derive from it — never hardcode language lists in components. Normalize raw tags with `resolveLocale()`.
 - Flat keys with feature-based grouping.
-- All user-visible text must use `useTranslation()` — no hardcoded English strings.
-- Currency formatting via `Intl.NumberFormat`.
+- All user-visible text must use `useTranslation()` — no hardcoded strings in any language.
+- Currency/date/number formatting via `Intl.*` through the `frontend/src/lib/utils.ts` helpers (`formatCurrency`, `formatDate`…), which resolve the active locale via `getLocale()`.
+- Full details: [`docs/features/i18n.md`](../features/i18n.md).
 
 ## Types
 
-`types/api.ts` mirrors backend DTO records exactly (e.g., `AccountResponse`, `GoalProgressResponse`). When a backend DTO changes, update this file to match.
+`frontend/src/types/api.ts` mirrors backend DTO records exactly (e.g., `AccountResponse`, `GoalProgressResponse`). When a backend DTO changes, update this file to match.
 
 ## Charts
 
@@ -272,7 +274,8 @@ e2e specs (which need a browser) and fail. Keep unit tests under `src/`, e2e und
 - **Never create API functions in components** — all API calls go in `features/*/api.ts`.
 - **Never create hooks outside `features/`** — domain hooks live in `features/*/hooks.ts`. Only generic UI hooks (like `use-mobile`) go in `hooks/`.
 - **Never use Redux, Context, or global state for server data** — TanStack Query only.
-- **Never edit files in `components/ui/`** — these are shadcn/ui generated. Customize via theme tokens or the shadcn CLI.
+- **Never edit files in `components/ui/`** — these are shadcn/ui generated. Customize via theme tokens or the shadcn CLI. In particular, never inflate a primitive's radius away from the shadcn scale (e.g. `rounded-md`→`rounded-full` on `Button`, `rounded-lg`→`rounded-2xl` on `DropdownMenu`).
+- **Never hardcode `rounded-full` / `rounded-xl` / `rounded-2xl` on interactive text controls** (buttons, filter chips, tabs, segmented items, menu items) or use a `rounded-full` className to override a shadcn primitive. Shape follows the `--radius` theme: `rounded-md` for controls, `rounded-lg` for their containers. `rounded-full` is only for avatars, switches, badges, and status dots.
 - **Never use icon libraries other than `lucide-react`.**
 - **Never hardcode user-visible strings** — always use `useTranslation()`.
 - **Never use CSS modules, styled-components, or inline style objects** — Tailwind only.

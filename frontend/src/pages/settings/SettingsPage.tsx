@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { type Theme, applyTheme, getStoredTheme } from '@/lib/theme'
 import { useTranslation } from 'react-i18next'
+import { SUPPORTED_LOCALES, resolveLocale } from '@/i18n/locales'
 import { useNavigate } from 'react-router'
 import { useAuthStore } from '@/stores/auth-store'
-import { useAppStore, type DateFormat } from '@/stores/app-store'
+import { useAppStore, type DateFormat, type SidebarStyle } from '@/stores/app-store'
 import { useLogout } from '@/features/auth/hooks'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -33,6 +34,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { api } from '@/lib/api-client'
+import { APP_VERSION } from '@/lib/app-version'
 import { SecuritySection } from './security/SecuritySection'
 import { AccessKeysSection } from './sections/AccessKeysSection'
 
@@ -113,7 +115,7 @@ export function SettingsPage() {
   const user = useAuthStore((s) => s.user)
   const logoutMutation = useLogout()
   const setUsername = useAuthStore((s) => s.setUsername)
-  const { dateFormat, setDateFormat } = useAppStore()
+  const { dateFormat, setDateFormat, sidebarStyle, setSidebarStyle } = useAppStore()
 
   // Username editing -------------------------------------------------------
   const [editingUsername, setEditingUsername] = useState(false)
@@ -160,9 +162,9 @@ export function SettingsPage() {
   // Language --------------------------------------------------------------
   const [locale, setLocale] = useState(i18n.language)
 
+  // i18next persists the choice itself (localStorage key "picsou-locale").
   const handleLocaleChange = (lng: string) => {
     i18n.changeLanguage(lng)
-    localStorage.setItem('locale', lng)
     setLocale(lng)
   }
 
@@ -183,14 +185,19 @@ export function SettingsPage() {
     { value: 'system', label: t('settings.themeSystem') },
   ]
 
-  const localeOptions: ToggleOption[] = [
-    { value: 'fr', label: 'FR' },
-    { value: 'en', label: 'EN' },
-  ]
+  const localeOptions: ToggleOption[] = SUPPORTED_LOCALES.map((l) => ({
+    value: l.code,
+    label: l.label,
+  }))
 
   const dateFormatOptions: ToggleOption[] = [
     { value: 'locale', label: t('settings.dateFormatLocale') },
     { value: 'iso', label: t('settings.dateFormatIso') },
+  ]
+
+  const sidebarStyleOptions: ToggleOption[] = [
+    { value: 'current', label: t('settings.sidebarStyleCurrent') },
+    { value: 'classic', label: t('settings.sidebarStyleClassic') },
   ]
 
   return (
@@ -219,7 +226,7 @@ export function SettingsPage() {
             <Label className="text-sm font-medium">{t('settings.language')}</Label>
             <ToggleGroup
               options={localeOptions}
-              value={locale.startsWith('fr') ? 'fr' : 'en'}
+              value={resolveLocale(locale).code}
               onChange={handleLocaleChange}
             />
           </div>
@@ -231,6 +238,16 @@ export function SettingsPage() {
               options={dateFormatOptions}
               value={dateFormat}
               onChange={(v) => setDateFormat(v as DateFormat)}
+            />
+          </div>
+
+          {/* Sidebar style */}
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">{t('settings.sidebarStyle')}</Label>
+            <ToggleGroup
+              options={sidebarStyleOptions}
+              value={sidebarStyle}
+              onChange={(v) => setSidebarStyle(v as SidebarStyle)}
             />
           </div>
         </div>
@@ -352,7 +369,7 @@ export function SettingsPage() {
             <p className="text-muted-foreground">
               {t('settings.version')}
             </p>
-            <p className="font-medium text-foreground">1.0.8</p>
+            <p className="font-medium text-foreground">{APP_VERSION}</p>
           </div>
           <div className="space-y-1 sm:justify-self-end sm:text-right">
             <p className="text-muted-foreground">GitHub</p>

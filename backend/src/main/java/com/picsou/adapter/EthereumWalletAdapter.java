@@ -1,6 +1,8 @@
 package com.picsou.adapter;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.picsou.adapter.util.JsonRpcResponse;
+import com.picsou.exception.WalletRpcException;
 import com.picsou.port.WalletPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,16 +21,21 @@ import java.util.Map;
 public class EthereumWalletAdapter implements WalletPort {
 
     private static final Logger log = LoggerFactory.getLogger(EthereumWalletAdapter.class);
-    private static final String RPC_URL = "https://cloudflare-eth.com";
+    private static final String RPC_URL = "https://ethereum-rpc.publicnode.com";
     private static final BigDecimal WEI_PER_ETH = new BigDecimal("1000000000000000000");
 
     private final WebClient webClient;
 
     public EthereumWalletAdapter() {
-        this.webClient = WebClient.builder()
+        this(WebClient.builder()
             .baseUrl(RPC_URL)
             .defaultHeader("Content-Type", "application/json")
-            .build();
+            .build());
+    }
+
+    // Package-private seam for tests: inject a WebClient backed by an ExchangeFunction.
+    EthereumWalletAdapter(WebClient webClient) {
+        this.webClient = webClient;
     }
 
     @Override
@@ -52,16 +59,31 @@ public class EthereumWalletAdapter implements WalletPort {
             .timeout(Duration.ofSeconds(10))
             .block();
 
-        if (response == null) {
-            log.warn("Ethereum RPC returned null for address {}", address);
-            return List.of(new WalletBalance("ETH", BigDecimal.ZERO));
-        }
-
-        String hexBalance = response.path("result").asText("0x0");
-        BigInteger wei = new BigInteger(hexBalance.substring(2), 16);
+        JsonNode result = JsonRpcResponse.requireResult(response, "Ethereum eth_getBalance");
+        String hexBalance = result.asText();
+        BigInteger wei = parseHexWei(hexBalance);
         BigDecimal eth = new BigDecimal(wei).divide(WEI_PER_ETH, 18, RoundingMode.HALF_UP);
 
         log.info("Ethereum balance for {}: {} ETH", address, eth);
         return List.of(new WalletBalance("ETH", eth));
+    }
+
+    /**
+     * Parses a {@code 0x}-prefixed hex wei string. A malformed value (missing
+     * prefix, non-hex digits) is treated as a broken RPC response — throwing
+     * rather than letting a raw {@link NumberFormatException} surface as an
+     * opaque 500.
+     */
+    private static BigInteger parseHexWei(String hexBalance) {
+        if (hexBalance == null || !hexBalance.startsWith("0x")) {
+            throw new WalletRpcException(
+                "Ethereum eth_getBalance: malformed hex balance '" + hexBalance + "'");
+        }
+        try {
+            return new BigInteger(hexBalance.substring(2), 16);
+        } catch (NumberFormatException ex) {
+            throw new WalletRpcException(
+                "Ethereum eth_getBalance: malformed hex balance '" + hexBalance + "'");
+        }
     }
 }
