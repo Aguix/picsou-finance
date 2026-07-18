@@ -6,6 +6,7 @@ import { mockGoals } from './data/goals'
 import { mockHoldings } from './data/holdings'
 import { mockTransactions } from './data/transactions'
 import { mockExchangeStatuses, mockWalletStatuses, mockRequisitions } from './data/sync-status'
+import { mockCryptoStats } from './data/crypto-stats'
 
 function randomDelay(): number {
   return 200 + Math.random() * 400
@@ -286,6 +287,10 @@ handlers.set(key('GET', '/assets'), () => ([
   { symbol: 'IWDA', name: 'iShares Core MSCI World', type: 'ETF', status: 'AUTO', coingeckoId: null, yahooSymbol: 'IWDA.AS', coinmarketcapId: null, lastEurValue: 85, priceSyncedAt: new Date().toISOString() },
   { symbol: 'LUNC', name: null, type: 'CRYPTO', status: 'WORTHLESS', coingeckoId: null, yahooSymbol: null, coinmarketcapId: null, lastEurValue: 0, priceSyncedAt: null },
 ]))
+
+// Crypto stats — consolidated (all coins) + per-account (the demo has a single crypto account, id=6)
+handlers.set(key('GET', '/crypto/stats'), () => mockCryptoStats)
+handlers.set(key('GET', '/crypto/accounts/6/stats'), () => mockCryptoStats)
 
 // Crypto exchange
 handlers.set(key('GET', '/crypto/exchange/status'), () => mockExchangeStatuses)

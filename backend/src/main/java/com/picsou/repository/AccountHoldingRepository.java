@@ -1,6 +1,7 @@
 package com.picsou.repository;
 
 import com.picsou.model.AccountHolding;
+import com.picsou.model.AssetType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -26,4 +27,12 @@ public interface AccountHoldingRepository extends JpaRepository<AccountHolding, 
 
     /** Every holding of an asset across all accounts — used to re-value it or guard its deletion. */
     List<AccountHolding> findByAsset_Id(Long assetId);
+
+    /**
+     * Every holding of a given asset type across all of the member's accounts — so the consolidated
+     * crypto view pools crypto held inside a mixed brokerage account (e.g. Trade Republic XF000 on a
+     * COMPTE_TITRES account), not only in dedicated CRYPTO accounts.
+     */
+    @Query("SELECT h FROM AccountHolding h WHERE h.account.member.id = :memberId AND h.asset.type = :type")
+    List<AccountHolding> findByMemberIdAndAssetType(@Param("memberId") Long memberId, @Param("type") AssetType type);
 }

@@ -4,6 +4,7 @@ import type {
   CryptoImportResult,
   CryptoPreviewResponse,
   CryptoSourceInfo,
+  CryptoStatsResponse,
 } from '@/types/api'
 
 export const cryptoApi = {
@@ -25,4 +26,12 @@ export const cryptoApi = {
 
   import: (request: CryptoImportRequest) =>
     api.post<CryptoImportResult>('/crypto/import', request).then(r => r.data),
+
+  /** Per-account stats — the per-exchange/wallet view (rewards detailed by program). */
+  stats: (accountId: number) =>
+    api.get<CryptoStatsResponse>(`/crypto/accounts/${accountId}/stats`).then(r => r.data),
+
+  /** Consolidated stats: every coin pooled across all CRYPTO accounts (imports, exchanges, wallets). */
+  consolidatedStats: () =>
+    api.get<CryptoStatsResponse>('/crypto/stats').then(r => r.data),
 }

@@ -1,4 +1,39 @@
 {
+  "crypto": {
+    "globalView": "Global view",
+    "consolidatedTitle": "All platforms & wallets",
+    "accountTitle": "{{name}} — breakdown by program",
+    "empty": {
+      "title": "No crypto yet",
+      "desc": "Import a CSV export (Crypto.com, Kraken, Binance, Bybit, Bitstack, Ledger…), or connect an exchange or wallet to see your consolidated crypto here.",
+      "action": "Add a crypto source"
+    },
+    "emptyAccount": {
+      "title": "No data for this account",
+      "desc": "This account has no crypto positions or imported transactions yet."
+    }
+  },
+  "cryptoStats": {
+    "title": "Crypto statistics",
+    "invested": "Invested",
+    "value": "Current value",
+    "rewards": "Rewards",
+    "yield": "Rewards yield",
+    "yieldShort": "rewards yield",
+    "rewardsByProgram": "Rewards by program",
+    "distribution": "Distribution by coin",
+    "coins": "coins",
+    "quantity": "Quantity",
+    "avgBuyIn": "Average buy-in",
+    "currentPrice": "Current price",
+    "unrealized": "Unrealized P/L",
+    "costVsPrice": "Average cost vs market price",
+    "accumulation": "Accumulation (buys + rewards)",
+    "marketPrice": "Market price",
+    "avgCost": "Average cost",
+    "buy": "Buy",
+    "sell": "Sell"
+  },
   "assets": {
     "status": {
       "pending": "Unresolved",

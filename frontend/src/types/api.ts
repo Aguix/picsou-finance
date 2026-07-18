@@ -518,3 +518,72 @@ export interface CryptoImportResult {
   holdingsCount: number
   totalRewards: number
 }
+
+// --- Per-crypto statistics (consolidated view + per-account detail) ---
+
+export interface CryptoBuyEvent {
+  date: string
+  quantity: number | null
+  pricePerUnit: number | null
+  valueEur: number
+}
+
+export interface CryptoSellEvent {
+  date: string
+  quantity: number | null
+  pricePerUnit: number | null
+  valueEur: number
+}
+
+export interface CryptoRewardEvent {
+  date: string
+  kind: RewardKind
+  quantity: number | null
+  valueEur: number
+}
+
+export interface CryptoCostPoint {
+  date: string
+  averageBuyIn: number
+}
+
+export interface CryptoPricePoint {
+  date: string
+  priceEur: number
+}
+
+export interface CryptoAssetStat {
+  ticker: string
+  name: string | null
+  quantity: number
+  averageBuyIn: number | null
+  currentPrice: number | null
+  currentValueEur: number | null
+  costBasisEur: number | null
+  totalInvestedEur: number
+  totalRewardsEur: number
+  totalRewardsQty: number
+  /** Reward income as a percentage of the capital invested, or null when nothing was invested. */
+  rewardsYieldPct: number | null
+  unrealizedPnlEur: number | null
+  firstBuyDate: string | null
+  lastActivityDate: string | null
+  rewardsByKindEur: Partial<Record<RewardKind, number>>
+  buyEvents: CryptoBuyEvent[]
+  sellEvents: CryptoSellEvent[]
+  rewardEvents: CryptoRewardEvent[]
+  costSeries: CryptoCostPoint[]
+  priceSeries: CryptoPricePoint[]
+}
+
+export interface CryptoStatsResponse {
+  assets: CryptoAssetStat[]
+  totals: {
+    totalInvestedEur: number
+    totalRewardsEur: number
+    currentValueEur: number
+    /** Reward income across all coins as a percentage of total invested, or null. */
+    rewardsYieldPct: number | null
+    rewardsByKindEur: Partial<Record<RewardKind, number>>
+  }
+}

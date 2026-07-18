@@ -5,11 +5,14 @@ import com.picsou.crypto.CryptoImportResult;
 import com.picsou.crypto.CryptoImportService;
 import com.picsou.crypto.CryptoPreviewResponse;
 import com.picsou.crypto.CryptoSourceInfo;
+import com.picsou.crypto.CryptoStatsResponse;
+import com.picsou.crypto.CryptoStatsService;
 import com.picsou.service.UserContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,9 +23,9 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
 
 /**
- * Multi-exchange crypto CSV import. The uploaded file's format is auto-detected against the
- * registered {@link com.picsou.crypto.CryptoCsvParser}s. All endpoints are member-scoped via
- * {@link UserContext}; an access-key principal acts only on its owner's data.
+ * Multi-exchange crypto CSV import + per-crypto statistics. The uploaded file's format is
+ * auto-detected against the registered {@link com.picsou.crypto.CryptoCsvParser}s. All endpoints
+ * are member-scoped via {@link UserContext}; an access-key principal acts only on its owner's data.
  */
 @RestController
 @RequestMapping("/api/crypto")
@@ -30,6 +33,7 @@ import java.util.List;
 public class CryptoController {
 
     private final CryptoImportService importService;
+    private final CryptoStatsService statsService;
     private final UserContext userContext;
 
     /** The supported CSV source formats, for the import UI. */
@@ -46,5 +50,17 @@ public class CryptoController {
     @PostMapping("/import")
     public CryptoImportResult importData(@Valid @RequestBody CryptoImportRequest request) {
         return importService.execute(request, userContext.currentMemberId());
+    }
+
+    /** Per-account stats — the per-exchange/wallet view (rewards detailed by program). */
+    @GetMapping("/accounts/{id}/stats")
+    public CryptoStatsResponse stats(@PathVariable Long id) {
+        return statsService.stats(id, userContext.currentMemberId());
+    }
+
+    /** Consolidated stats pooling every coin across all of the member's CRYPTO accounts. */
+    @GetMapping("/stats")
+    public CryptoStatsResponse consolidatedStats() {
+        return statsService.consolidatedStats(userContext.currentMemberId());
     }
 }

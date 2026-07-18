@@ -10,6 +10,7 @@ import { useHistory } from '@/features/history/hooks'
 import { BalanceHistoryChart } from '@/components/shared/BalanceHistoryChart'
 import { NetWorthChart } from '@/components/shared/NetWorthChart'
 import { HoldingsTable } from '@/components/shared/HoldingsTable'
+import { CryptoStatsSection } from '@/components/shared/CryptoStatsSection'
 import { TransactionsList } from '@/components/shared/TransactionsList'
 import { AddTransactionModal } from '@/components/shared/AddTransactionModal'
 import { EditHoldingModal } from '@/components/shared/EditHoldingModal'
@@ -193,6 +194,9 @@ export function AccountDetailPage() {
           </Card>
         )
       )}
+
+      {/* Per-crypto stats: rewards by program, cost-vs-price, accumulation, per-token donut */}
+      {account?.type === 'CRYPTO' && <CryptoStatsSection accountId={account.id} />}
 
       {/* Transactions */}
       {!isLoan && (transactions ? (

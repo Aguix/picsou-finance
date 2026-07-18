@@ -55,6 +55,7 @@
 | ISIN → Ticker conversion | 2026-04-13 | [ISIN_TO_TICKER_CONVERSION.md](./features/ISIN_TO_TICKER_CONVERSION.md) |
 | Encryption at rest | 2026-04-08 | [encryption-at-rest.md](./features/encryption-at-rest.md) |
 | Crypto tracking | 2026-04-08 | [crypto-tracking.md](./features/crypto-tracking.md) |
+| Consolidated crypto view (per-coin stats, rewards, yield, donut) | 2026-07-17 | [crypto-consolidated.md](./features/crypto-consolidated.md) |
 | Savings goals | 2026-06-02 | [goals.md](./features/goals.md) |
 | Goals — Grid view (donuts) | 2026-06-02 | [goal-calendar-donut.md](./features/goal-calendar-donut.md) |
 | Price service | 2026-07-10 | [price-service.md](./features/price-service.md) |

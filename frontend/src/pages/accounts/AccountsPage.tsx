@@ -6,6 +6,7 @@ import { useHistory } from '@/features/history/hooks'
 import { AccountForm } from '@/components/shared/AccountForm'
 import { AddAccountModal } from '@/components/shared/AddAccountModal'
 import { AssetRegistryModal } from '@/components/shared/AssetRegistryModal'
+import { CryptoPortfolioSection } from './CryptoPortfolioSection'
 import { AccountCard } from '@/components/shared/AccountCard'
 import { AccountsStackedChart } from '@/components/shared/AccountsStackedChart'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
@@ -408,6 +409,12 @@ export function AccountsPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Consolidated crypto recap: per-token donut, cost-vs-price + accumulation charts, rewards
+          by program — global or scoped to one exchange/wallet via the ?account= param. */}
+      {filter === 'CRYPTO' && accounts && accounts.length > 0 && (
+        <CryptoPortfolioSection />
       )}
 
       <AddAccountModal
