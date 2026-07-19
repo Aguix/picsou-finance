@@ -5,7 +5,6 @@ import com.picsou.exception.ResourceNotFoundException;
 import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AccountType;
-import com.picsou.model.BalanceSnapshot;
 import com.picsou.model.FamilyMember;
 import com.picsou.model.FinancialAsset;
 import com.picsou.model.PriceSnapshot;
@@ -13,11 +12,11 @@ import com.picsou.model.Transaction;
 import com.picsou.model.TransactionType;
 import com.picsou.repository.AccountHoldingRepository;
 import com.picsou.repository.AccountRepository;
-import com.picsou.repository.BalanceSnapshotRepository;
 import com.picsou.repository.FamilyMemberRepository;
 import com.picsou.repository.FinancialAssetRepository;
 import com.picsou.repository.PriceSnapshotRepository;
 import com.picsou.repository.TransactionRepository;
+import com.picsou.service.BalanceHistoryService;
 import com.picsou.service.FinancialAssetService;
 import com.picsou.service.HoldingComputeService;
 import com.picsou.service.PriceService;
@@ -73,7 +72,7 @@ public class CryptoImportService {
     private final HoldingComputeService holdingComputeService;
     private final PriceService priceService;
     private final PriceSnapshotRepository priceSnapshotRepository;
-    private final BalanceSnapshotRepository balanceSnapshotRepository;
+    private final BalanceHistoryService balanceHistoryService;
     private final FinancialAssetService financialAssetService;
     private final FinancialAssetRepository assetRepository;
 
@@ -90,7 +89,7 @@ public class CryptoImportService {
                                HoldingComputeService holdingComputeService,
                                PriceService priceService,
                                PriceSnapshotRepository priceSnapshotRepository,
-                               BalanceSnapshotRepository balanceSnapshotRepository,
+                               BalanceHistoryService balanceHistoryService,
                                FinancialAssetService financialAssetService,
                                FinancialAssetRepository assetRepository) {
         // Generic (permissive) signatures must run after the exchange-specific ones.
@@ -104,7 +103,7 @@ public class CryptoImportService {
         this.holdingComputeService = holdingComputeService;
         this.priceService = priceService;
         this.priceSnapshotRepository = priceSnapshotRepository;
-        this.balanceSnapshotRepository = balanceSnapshotRepository;
+        this.balanceHistoryService = balanceHistoryService;
         this.financialAssetService = financialAssetService;
         this.assetRepository = assetRepository;
     }
@@ -457,103 +456,16 @@ public class CryptoImportService {
     }
 
     /**
-     * Rebuild daily {@link BalanceSnapshot}s for the account from the transaction timeline and the
-     * (backfilled) daily price history, so the account's value curve covers its whole life instead
-     * of starting at import day. For each day: balance = Σ heldQty(ticker, day) × price(ticker, day),
-     * forward-filling the most recent known price. Best-effort — never fails the import. Re-running
-     * an import overwrites the snapshots (unique on account+date), so re-importing once prices are
-     * fully backfilled refreshes the whole curve.
+     * Rebuild the account's daily value curve from this import's rows, so it covers the account's
+     * whole life instead of starting at import day. Delegates to the shared
+     * {@link BalanceHistoryService} (which the mapping-change paths reuse), mapping the parsed rows
+     * onto its normalized leg form. Best-effort and idempotent — see that service.
      */
     private void reconstructHistory(Account account, List<ParsedCryptoTx> txs) {
-        try {
-            List<ParsedCryptoTx> sorted = txs.stream()
-                .filter(t -> t.date() != null && t.ticker() != null && t.txType() != null)
-                .sorted(Comparator.comparing(ParsedCryptoTx::date))
-                .toList();
-            if (sorted.isEmpty()) {
-                return;
-            }
-
-            LocalDate start = sorted.get(0).date();
-            LocalDate today = LocalDate.now();
-            Set<String> tickers = sorted.stream()
-                .map(t -> t.ticker().toUpperCase())
-                .collect(Collectors.toSet());
-
-            // Price history per ticker as a date→price TreeMap for floor (forward-fill) lookups.
-            Map<Long, String> idToSymbol = assetRepository.findBySymbolIn(tickers).stream()
-                .collect(Collectors.toMap(FinancialAsset::getId, FinancialAsset::getSymbol));
-            Map<String, TreeMap<LocalDate, BigDecimal>> priceHist = new HashMap<>();
-            for (PriceSnapshot ps : priceSnapshotRepository.findByAssetIdInAndDateBetween(idToSymbol.keySet(), start, today)) {
-                priceHist.computeIfAbsent(idToSymbol.get(ps.getAsset().getId()), k -> new TreeMap<>())
-                    .put(ps.getDate(), ps.getPriceEur());
-            }
-            // Make sure today's live price (already on the holdings) anchors the latest point.
-            for (AccountHolding h : accountHoldingRepository.findByAccount_Id(account.getId())) {
-                if (h.getCurrentPrice() != null) {
-                    priceHist.computeIfAbsent(h.getAsset().getSymbol().toUpperCase(), k -> new TreeMap<>())
-                        .putIfAbsent(today, h.getCurrentPrice());
-                }
-            }
-
-            Map<LocalDate, List<ParsedCryptoTx>> byDate = sorted.stream()
-                .collect(Collectors.groupingBy(ParsedCryptoTx::date));
-            Map<LocalDate, BalanceSnapshot> existing = balanceSnapshotRepository
-                .findByAccountIdOrderByDateAsc(account.getId()).stream()
-                .collect(Collectors.toMap(BalanceSnapshot::getDate, s -> s, (a, b) -> a, HashMap::new));
-
-            Map<String, BigDecimal> qty = new HashMap<>();
-            BigDecimal invested = BigDecimal.ZERO;
-            List<BalanceSnapshot> toSave = new ArrayList<>();
-
-            for (LocalDate day = start; !day.isAfter(today); day = day.plusDays(1)) {
-                List<ParsedCryptoTx> dayTxs = byDate.get(day);
-                if (dayTxs != null) {
-                    for (ParsedCryptoTx t : dayTxs) {
-                        BigDecimal q = t.quantity() != null ? t.quantity() : BigDecimal.ZERO;
-                        String tk = t.ticker().toUpperCase();
-                        if (t.txType() == TransactionType.SELL) {
-                            qty.merge(tk, q.negate(), BigDecimal::add);
-                            invested = invested.subtract(t.amount() != null ? t.amount().abs() : BigDecimal.ZERO);
-                        } else { // BUY or REWARD both add quantity; only BUY adds invested capital
-                            qty.merge(tk, q, BigDecimal::add);
-                            if (t.txType() == TransactionType.BUY) {
-                                invested = invested.add(t.amount() != null ? t.amount().abs() : BigDecimal.ZERO);
-                            }
-                        }
-                    }
-                }
-
-                BigDecimal value = BigDecimal.ZERO;
-                for (Map.Entry<String, BigDecimal> e : qty.entrySet()) {
-                    if (e.getValue().signum() <= 0) {
-                        continue;
-                    }
-                    TreeMap<LocalDate, BigDecimal> ph = priceHist.get(e.getKey());
-                    if (ph == null) {
-                        continue;
-                    }
-                    Map.Entry<LocalDate, BigDecimal> priced = ph.floorEntry(day);
-                    if (priced != null) {
-                        value = value.add(e.getValue().multiply(priced.getValue()));
-                    }
-                }
-
-                LocalDate d = day;
-                BalanceSnapshot snap = existing.computeIfAbsent(d, k ->
-                    BalanceSnapshot.builder().account(account).date(k).build());
-                snap.setBalance(value);
-                snap.setInvestedAmount(invested.max(BigDecimal.ZERO));
-                toSave.add(snap);
-            }
-
-            balanceSnapshotRepository.saveAll(toSave);
-            log.info("Crypto import: rebuilt {} daily snapshots for account {} ({} → {})",
-                toSave.size(), account.getId(), start, today);
-        } catch (Exception e) {
-            log.warn("Crypto import: history reconstruction failed for account {}: {}",
-                account.getId(), e.getMessage());
-        }
+        balanceHistoryService.rebuild(account, txs.stream()
+            .map(t -> new BalanceHistoryService.HistoryLeg(
+                t.date(), t.ticker(), t.txType(), t.quantity(), t.amount()))
+            .toList());
     }
 
     private static BigDecimal sumAbs(List<ParsedCryptoTx> txs, TransactionType type) {

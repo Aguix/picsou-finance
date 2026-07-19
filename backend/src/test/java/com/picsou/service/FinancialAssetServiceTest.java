@@ -1,6 +1,8 @@
 package com.picsou.service;
 
+import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
+import com.picsou.model.AccountType;
 import com.picsou.model.AssetStatus;
 import com.picsou.model.AssetType;
 import com.picsou.model.FinancialAsset;
@@ -54,6 +56,7 @@ class FinancialAssetServiceTest {
     @Mock private TransactionRepository transactionRepository;
     @Mock private AccountHoldingRepository accountHoldingRepository;
     @Mock private PriceService priceService;
+    @Mock private BalanceHistoryService balanceHistoryService;
 
     private FakeResolver coinGecko;
     private FakeResolver yahoo;
@@ -71,7 +74,7 @@ class FinancialAssetServiceTest {
         service = new FinancialAssetService(
             List.of(coinGecko, coinMarketCap, yahoo),
             repository, priceSnapshotRepository, transactionRepository, accountHoldingRepository,
-            priceService);
+            priceService, balanceHistoryService);
     }
 
     /**
@@ -123,6 +126,18 @@ class FinancialAssetServiceTest {
 
     private void expectSaveEcho() {
         when(repository.save(any(FinancialAsset.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    private static Account cryptoAccount(Long id) {
+        return Account.builder().id(id).type(AccountType.CRYPTO).build();
+    }
+
+    private static AccountHolding holdingIn(Account account, String symbol) {
+        return AccountHolding.builder()
+            .account(account)
+            .asset(FinancialAsset.builder().symbol(symbol).build())
+            .quantity(java.math.BigDecimal.ONE)
+            .build();
     }
 
     @Test
@@ -683,6 +698,29 @@ class FinancialAssetServiceTest {
     }
 
     @Test
+    void remappingRebuildsTheValueHistoryOfEveryDistinctHolder() {
+        FinancialAsset existing = FinancialAsset.builder()
+            .symbol("MATIC").coingeckoId("wrong-clone")
+            .type(AssetType.CRYPTO).status(AssetStatus.AUTO).build();
+        when(coinGecko.fetchById("matic-network"))
+            .thenReturn(Optional.of(new AssetCandidate("matic-network", "Polygon", "matic", 12)));
+        when(repository.findBySymbol("MATIC")).thenReturn(Optional.of(existing));
+        // Two accounts hold the remapped coin — a dedicated crypto one and a mixed brokerage one.
+        // Both are delegated to the history service regardless of type: whether a rebuild is safe is
+        // that service's call (it self-gates on the trade timeline), not this layer's.
+        var cryptoHolder = cryptoAccount(3L);
+        var brokerageHolder = Account.builder().id(9L).type(AccountType.COMPTE_TITRES).build();
+        when(accountHoldingRepository.findByAsset_Id(any()))
+            .thenReturn(List.of(holdingIn(cryptoHolder, "MATIC"), holdingIn(brokerageHolder, "MATIC")));
+        expectSaveEcho();
+
+        service.setManualMapping("MATIC", "https://www.coingecko.com/en/coins/matic-network");
+
+        verify(balanceHistoryService).rebuildFromTransactions(cryptoHolder);
+        verify(balanceHistoryService).rebuildFromTransactions(brokerageHolder);
+    }
+
+    @Test
     void remappingToTheSameCoinKeepsThePriceHistory() {
         FinancialAsset existing = FinancialAsset.builder()
             .symbol("MATIC").coingeckoId("matic-network")
@@ -777,11 +815,14 @@ class FinancialAssetServiceTest {
 
     @Test
     void markWorthlessZeroesEveryHoldingOfTheTicker() {
+        var account = cryptoAccount(1L);
         var holdingA = com.picsou.model.AccountHolding.builder()
+            .account(account)
             .asset(FinancialAsset.builder().symbol("METABEAT").build())
             .quantity(new java.math.BigDecimal("1000"))
             .currentPrice(new java.math.BigDecimal("0.12")).build();
         var holdingB = com.picsou.model.AccountHolding.builder()
+            .account(account)
             .asset(FinancialAsset.builder().symbol("METABEAT").build())
             .quantity(new java.math.BigDecimal("50")).build();
         when(repository.findBySymbol("METABEAT")).thenReturn(Optional.empty());
@@ -794,6 +835,20 @@ class FinancialAssetServiceTest {
         assertThat(holdingA.getCurrentPrice()).isEqualByComparingTo("0");
         assertThat(holdingB.getCurrentPrice()).isEqualByComparingTo("0");
         verify(accountHoldingRepository).saveAll(List.of(holdingA, holdingB));
+    }
+
+    @Test
+    void markWorthlessRebuildsTheValueHistoryOfEachCryptoHolder() {
+        // Its price_snapshot history was just purged, so the holders' balance_snapshot rows are stale.
+        var cryptoAcct = cryptoAccount(7L);
+        var holding = holdingIn(cryptoAcct, "METABEAT");
+        when(repository.findBySymbol("METABEAT")).thenReturn(Optional.empty());
+        when(accountHoldingRepository.findByAsset_Id(any())).thenReturn(List.of(holding));
+        expectSaveEcho();
+
+        service.markWorthless("METABEAT");
+
+        verify(balanceHistoryService).rebuildFromTransactions(cryptoAcct);
     }
 
     @Test

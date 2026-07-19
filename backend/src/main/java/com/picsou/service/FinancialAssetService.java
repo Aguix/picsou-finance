@@ -1,5 +1,6 @@
 package com.picsou.service;
 
+import com.picsou.model.Account;
 import com.picsou.model.AccountHolding;
 import com.picsou.model.AssetStatus;
 import com.picsou.model.AssetType;
@@ -58,7 +59,9 @@ import java.util.TreeSet;
  * </ul>
  *
  * <p>A correction that changes an id the price history was fetched under purges that history and
- * refetches it under the corrected id.
+ * refetches it under the corrected id, then rebuilds the stored value history ({@code
+ * balance_snapshot}) of every account holding the symbol whose value is trade-derived — otherwise
+ * the net-worth curve would keep valuing those days under the old, wrong id.
  */
 @Service
 @RequiredArgsConstructor
@@ -86,6 +89,7 @@ public class FinancialAssetService {
     private final TransactionRepository transactionRepository;
     private final AccountHoldingRepository accountHoldingRepository;
     private final PriceService priceService;
+    private final BalanceHistoryService balanceHistoryService;
 
     /** All known assets, for the management UI. */
     @Transactional(readOnly = true)
@@ -435,6 +439,7 @@ public class FinancialAssetService {
 
         if (replacedAnId) {
             purgeAndRefetchPrices(saved);
+            rebuildHoldingAccountsHistory(accountHoldingRepository.findByAsset_Id(saved.getId()));
         }
         return saved;
     }
@@ -462,6 +467,7 @@ public class FinancialAssetService {
 
         priceSnapshotRepository.deleteByAssetId(saved.getId());
         priceService.evictFromCache(upper);
+        rebuildHoldingAccountsHistory(accountHoldingRepository.findByAsset_Id(saved.getId()));
         log.info("Cleared mapping for {} — reverted to PENDING and purged its price history", upper);
         return saved;
     }
@@ -481,7 +487,8 @@ public class FinancialAssetService {
      * {@code account_holding} references it), so this is <em>not</em> what the standing "forget the
      * link" button calls — that uses {@link #clearMapping}. The symbol's price history is purged too
      * (it was fetched under the now-disowned ids); the symbol goes back to unregistered and the next
-     * import preview re-runs auto-resolution.
+     * import preview re-runs auto-resolution. No value-history rebuild is needed here: an orphan is
+     * held by no account, so no {@code balance_snapshot} was valued under its price.
      */
     @Transactional
     public void delete(String ticker) {
@@ -528,14 +535,17 @@ public class FinancialAssetService {
 
         priceSnapshotRepository.deleteByAssetId(saved.getId());
         priceService.evictFromCache(upper);
-        zeroHoldings(saved);
+        // One read of the holdings, shared by the zero-out (live value) and the history rebuild
+        // (past value) — both need the same set, and it's the symbol's holders across all accounts.
+        List<AccountHolding> holdings = accountHoldingRepository.findByAsset_Id(saved.getId());
+        zeroHoldings(holdings);
+        rebuildHoldingAccountsHistory(holdings);
         log.info("Marked symbol {} as worthless — purged price history and zeroed its holdings", upper);
         return saved;
     }
 
-    /** Force every holding of an asset to a known-zero current price (assumed worthless). */
-    private void zeroHoldings(FinancialAsset asset) {
-        List<AccountHolding> holdings = accountHoldingRepository.findByAsset_Id(asset.getId());
+    /** Force every given holding to a known-zero current price (assumed worthless). */
+    private void zeroHoldings(List<AccountHolding> holdings) {
         for (AccountHolding h : holdings) {
             h.setCurrentPrice(BigDecimal.ZERO);
         }
@@ -565,6 +575,24 @@ public class FinancialAssetService {
             log.warn("Price re-backfill after remapping {} failed (will be retried at next boot): {}",
                 upperTicker, e.getMessage());
         }
+    }
+
+    /**
+     * Re-price the value history of every account holding this asset, after its {@code price_snapshot}
+     * history was purged/refetched/pinned-to-zero — each holder's daily {@code balance_snapshot} rows
+     * were valued under the old id. Delegates one rebuild per distinct holding account to
+     * {@link BalanceHistoryService#rebuildFromTransactions}, which <b>self-gates</b>: it only
+     * overwrites an account whose current holdings are fully reproduced by its BUY/SELL/REWARD
+     * timeline, and leaves a balance-synced account (bank/exchange/wallet, whose positions carry no
+     * trade rows) untouched rather than replaying it into a partial curve. That gate — not the
+     * account's type — is what makes rebuilding every holder safe.
+     */
+    private void rebuildHoldingAccountsHistory(List<AccountHolding> holdings) {
+        Map<Long, Account> accounts = new LinkedHashMap<>();
+        for (AccountHolding h : holdings) {
+            accounts.putIfAbsent(h.getAccount().getId(), h.getAccount());
+        }
+        accounts.values().forEach(balanceHistoryService::rebuildFromTransactions);
     }
 
     /**
