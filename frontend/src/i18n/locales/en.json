@@ -553,7 +553,8 @@
       "accountName": "Account name",
       "import": "Import",
       "done": "Import complete",
-      "doneDetail": "{{tx}} transactions · {{holdings}} coins"
+      "doneDetail": "{{tx}} transactions · {{holdings}} coins",
+      "pricingInBackground": "Prices are being fetched in the background — values will fill in shortly."
     },
     "finary": {
       "title": "Finary",

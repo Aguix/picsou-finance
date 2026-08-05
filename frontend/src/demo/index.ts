@@ -292,6 +292,9 @@ handlers.set(key('GET', '/assets'), () => ([
 handlers.set(key('GET', '/crypto/stats'), () => mockCryptoStats)
 handlers.set(key('GET', '/crypto/accounts/6/stats'), () => mockCryptoStats)
 
+// Crypto import pricing long-poll — demo prices are static, so it's always "done" (204).
+handlers.set(key('GET', '/crypto/accounts/6/pricing'), () => null)
+
 // Crypto exchange
 handlers.set(key('GET', '/crypto/exchange/status'), () => mockExchangeStatuses)
 

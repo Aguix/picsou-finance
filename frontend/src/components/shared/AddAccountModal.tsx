@@ -675,6 +675,9 @@ function CryptoCsvWizard({ onDone, onBack }: { onDone: () => void; onBack: () =>
           <p className="text-xs text-muted-foreground">
             {t('sync.crypto.doneDetail', { tx: result.transactionsImported, holdings: result.holdingsCount })}
           </p>
+          <p className="text-xs text-muted-foreground">
+            {t('sync.crypto.pricingInBackground')}
+          </p>
           <Button onClick={onDone} className="mt-2">
             <CheckCircle2 className="size-4" />
             {t('sync.finary.done')}

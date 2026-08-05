@@ -107,6 +107,15 @@ The asset path goes straight through `getPriceEur(FinancialAsset)`. A bare curre
 
 `PriceBackfillRunner` (boot) backfills each holding ticker's daily history **anchored to its own earliest transaction** (12-month fallback), and the backfill is gap-aware: only the missing tail since the latest stored snapshot is fetched, so a warm restart is a no-op instead of re-downloading whole windows.
 
+### Background import pricing (`CryptoImportService`)
+
+A CSV import used to block its HTTP response on the whole price pipeline (per-coin historical backfill, then a live refresh) — the spinner hung for the network. It's now split:
+
+- **Synchronously** (the `POST /crypto/import` transaction), `execute` resolves the account, persists the raw transactions and derives the holdings, then returns immediately. The holdings show up at once, only unpriced.
+- **In the background** (`finishImportPricing`, a daemon thread + its own transaction), the confirmed coin mappings are applied, daily history is backfilled, the rows the CSV left unvalued are re-valued, the transactions and VWAP holdings are re-derived from the valued rows, the account is valued live, and its daily value curve is rebuilt.
+
+The background job's `CompletableFuture` is kept per account and **dispatched only after the import transaction commits** (otherwise the background transaction could read the account before it's committed). `GET /crypto/accounts/{id}/pricing` long-polls that future with a `DeferredResult` (non-blocking server-side, 60 s cap → then a plain "done"): the client fires it once after an import and refetches exactly when the prices land, instead of polling. The preview stays synchronous — its candidates drive the validation UI; only `execute`'s pricing is backgrounded.
+
 ### Key files
 
 - `service/PriceService.java` -- Caching, conversion, gap-aware backfill, worthless/EUR handling (routing delegated to `PriceRouter`); `getPriceEur(FinancialAsset)` is the primary entry point, `getPriceEur(String)` a resolve-or-transient seam for callers with only a ticker (currency code, MCP)
@@ -126,6 +135,8 @@ The asset path goes straight through `getPriceEur(FinancialAsset)`. A bare curre
 - `adapter/price/YahooFinancePriceProvider.java` -- Yahoo Finance `/v8/finance/chart/{ticker}` + `/v1/finance/search`; owns `yahoo_symbol`
 - `port/PriceProviderPort.java` -- The pricing side of an aggregator, asset-typed: `aggregatorKey()`, `capabilities()`, `canPrice(FinancialAsset)`, `isAvailable()`, `getPricesEur(Collection<FinancialAsset>)`/`getHistoricalPricesEur(FinancialAsset,…)`/`getIntradayPricesEur(FinancialAsset,…)`
 - `crypto/ImportAssetChoice.java` / `ImportAssetMapping.java` -- Import preview/confirm DTOs, keyed by `aggregatorKey` (one block per aggregator)
+- `crypto/CryptoImportService.java` -- Two-phase import: synchronous account/transactions/holdings, then `finishImportPricing` (background daemon + own transaction) for mappings, backfill, valuation, live refresh, history rebuild; holds the per-account pricing `CompletableFuture`, dispatched after commit
+- `controller/CryptoController.java` -- `GET /crypto/accounts/{id}/pricing` long-polls the import's background pricing job (`DeferredResult`, member-scoped)
 
 ### Flow
 
@@ -228,6 +239,7 @@ each resolver setRef()s its own column --> USER --> TAO now has a price fallback
 - `TradeRepublicSyncServiceTest` -- VWAP dedup, and that a TR-native crypto ISIN routes through `getOrCreate` (not `getOrCreateStock`)
 - `BoursoSyncServiceTest` -- an ISIN position registers its Yahoo ticker via `getOrCreateStock`; a raw broker symbol (no ISIN) stays on the generic `getOrCreate`
 - `PriceServiceTest` -- the bare-ticker seam (`getPriceEur(String)`/`getIntradayPricesEur(String)`) rides a transient asset carrying `yahoo_symbol` so an explicitly-requested ticker still routes to Yahoo, while a registry row stays gated
+- `CryptoImportServiceTest` -- the background pricing pipeline (`finishImportPricing`) runs backfill → replace rows → recompute holdings → rebuild history in order, and no-ops when the account is gone
 - `CoinGeckoPriceProviderTest` -- per-session key header, least-recently-used key rotation, per-session breaker roll-over, anonymous fallback, disabled-aggregator cutoff, all-paused short-circuit
 - `AggregatorServiceTest` -- encrypt-on-write / decrypt-on-read, enabled-session filtering
 

@@ -26,13 +26,26 @@ export function usePreviewCryptoCsv() {
 
 export function useImportCrypto() {
   const queryClient = useQueryClient()
+
+  function invalidate(accountId: number) {
+    queryClient.invalidateQueries({ queryKey: ['accounts'] })
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    queryClient.invalidateQueries({ queryKey: cryptoKeys.stats(accountId) })
+    queryClient.invalidateQueries({ queryKey: cryptoKeys.consolidated() })
+  }
+
   return useMutation({
     mutationFn: (request: CryptoImportRequest) => cryptoApi.import(request),
+    // The import returns as soon as the account, transactions and (unpriced) holdings are persisted:
+    // a first invalidation shows the positions immediately. Prices are backfilled in the background,
+    // so we long-poll the /pricing endpoint (one request, resolves when the job lands) and invalidate
+    // again to reveal the valued holdings — without blocking the import response on the network.
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['accounts'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-      queryClient.invalidateQueries({ queryKey: cryptoKeys.stats(result.accountId) })
-      queryClient.invalidateQueries({ queryKey: cryptoKeys.consolidated() })
+      invalidate(result.accountId)
+      cryptoApi
+        .awaitPricing(result.accountId)
+        .catch(() => undefined) // a timeout/failure just means "refetch now"
+        .then(() => invalidate(result.accountId))
     },
   })
 }

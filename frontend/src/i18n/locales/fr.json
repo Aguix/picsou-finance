@@ -553,7 +553,8 @@
       "accountName": "Nom du compte",
       "import": "Importer",
       "done": "Import terminé",
-      "doneDetail": "{{tx}} transactions · {{holdings}} cryptos"
+      "doneDetail": "{{tx}} transactions · {{holdings}} cryptos",
+      "pricingInBackground": "Les prix sont récupérés en arrière-plan — les valeurs se rempliront sous peu."
     },
     "finary": {
       "title": "Finary",

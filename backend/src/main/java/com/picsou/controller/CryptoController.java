@@ -11,6 +11,7 @@ import com.picsou.service.UserContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,9 +19,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.context.request.async.DeferredResult;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Multi-exchange crypto CSV import + per-crypto statistics. The uploaded file's format is
@@ -31,6 +34,9 @@ import java.util.List;
 @RequestMapping("/api/crypto")
 @RequiredArgsConstructor
 public class CryptoController {
+
+    /** How long the /pricing long-poll waits before giving the client a "done" to refetch on. */
+    private static final long PRICING_AWAIT_TIMEOUT_MS = 60_000;
 
     private final CryptoImportService importService;
     private final CryptoStatsService statsService;
@@ -62,5 +68,26 @@ public class CryptoController {
     @GetMapping("/stats")
     public CryptoStatsResponse consolidatedStats() {
         return statsService.consolidatedStats(userContext.currentMemberId());
+    }
+
+    /**
+     * Long-poll the background pricing job an import kicked off: resolves as soon as that account's
+     * price backfill/valuation finishes (or immediately if none is pending), so the client fires one
+     * request and refetches exactly when the freshly-imported holdings are priced. Server-side this is
+     * non-blocking ({@link DeferredResult} — no Tomcat thread is held while waiting); it falls back to
+     * a plain "done" on timeout, at which point the client simply refetches. 204 either way — the
+     * value lives in the account/stats endpoints.
+     */
+    @GetMapping("/accounts/{id}/pricing")
+    public DeferredResult<ResponseEntity<Void>> awaitPricing(@PathVariable Long id) {
+        DeferredResult<ResponseEntity<Void>> result =
+            new DeferredResult<>(PRICING_AWAIT_TIMEOUT_MS, ResponseEntity.noContent().build());
+        CompletableFuture<Void> future = importService.pricingFuture(id, userContext.currentMemberId());
+        if (future == null || future.isDone()) {
+            result.setResult(ResponseEntity.noContent().build());
+        } else {
+            future.whenComplete((v, ex) -> result.setResult(ResponseEntity.noContent().build()));
+        }
+        return result;
     }
 }

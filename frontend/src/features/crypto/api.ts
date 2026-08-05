@@ -27,6 +27,14 @@ export const cryptoApi = {
   import: (request: CryptoImportRequest) =>
     api.post<CryptoImportResult>('/crypto/import', request).then(r => r.data),
 
+  /**
+   * Long-poll the background pricing job an import kicked off: resolves as soon as the account's
+   * price backfill/valuation finishes (or immediately if nothing is pending). One call, then the
+   * caller refetches. The server caps the wait and answers 204 either way, so this never hangs.
+   */
+  awaitPricing: (accountId: number) =>
+    api.get<void>(`/crypto/accounts/${accountId}/pricing`).then(() => undefined),
+
   /** Per-account stats — the per-exchange/wallet view (rewards detailed by program). */
   stats: (accountId: number) =>
     api.get<CryptoStatsResponse>(`/crypto/accounts/${accountId}/stats`).then(r => r.data),

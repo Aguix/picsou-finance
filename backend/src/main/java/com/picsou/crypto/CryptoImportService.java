@@ -25,6 +25,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -42,7 +45,10 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 /**
@@ -75,8 +81,20 @@ public class CryptoImportService {
     private final BalanceHistoryService balanceHistoryService;
     private final FinancialAssetService financialAssetService;
     private final FinancialAssetRepository assetRepository;
+    private final TransactionTemplate txTemplate;
 
     private final ConcurrentHashMap<String, Parsed> cache = new ConcurrentHashMap<>();
+
+    // Per-account handle on the in-flight price backfill/valuation kicked off by execute(). The
+    // import returns as soon as the account, transactions and (unpriced) holdings are persisted; the
+    // heavy provider work runs on this single daemon thread, and the /pricing endpoint awaits the
+    // matching future so the UI can refetch exactly when the prices land.
+    private final ExecutorService pricingExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "crypto-import-pricing");
+        t.setDaemon(true);
+        return t;
+    });
+    private final ConcurrentHashMap<Long, CompletableFuture<Void>> pricingJobs = new ConcurrentHashMap<>();
 
     private record Parsed(String sourceId, List<ParsedCryptoTx> transactions,
                           String nativeCurrency, Instant parsedAt) {}
@@ -91,7 +109,8 @@ public class CryptoImportService {
                                PriceSnapshotRepository priceSnapshotRepository,
                                BalanceHistoryService balanceHistoryService,
                                FinancialAssetService financialAssetService,
-                               FinancialAssetRepository assetRepository) {
+                               FinancialAssetRepository assetRepository,
+                               TransactionTemplate txTemplate) {
         // Generic (permissive) signatures must run after the exchange-specific ones.
         this.parsers = parsers.stream()
             .sorted(Comparator.comparingInt(CryptoCsvParser::detectionOrder))
@@ -106,6 +125,7 @@ public class CryptoImportService {
         this.balanceHistoryService = balanceHistoryService;
         this.financialAssetService = financialAssetService;
         this.assetRepository = assetRepository;
+        this.txTemplate = txTemplate;
     }
 
     /** The supported source formats, in detection order — for the import UI. */
@@ -202,6 +222,15 @@ public class CryptoImportService {
             totalInvested, totalRewards, rewardsByKind, assetChoices, existing);
     }
 
+    /**
+     * Commit the import in two phases so the UI never waits on the network. Synchronously (this
+     * transaction) the account, its transactions and holdings are persisted — the holdings show up
+     * immediately, only unpriced. The mappings, price backfill, valuation, live refresh and history
+     * rebuild — every step that hits a provider — run on a background thread in their own transaction
+     * ({@link #finishImportPricing}); the {@code /pricing} endpoint awaits that job so the client can
+     * refetch exactly when the prices land. The preview stays synchronous (its candidates drive the
+     * validation UI); only {@code execute}'s pricing is backgrounded.
+     */
     @Transactional
     public CryptoImportResult execute(CryptoImportRequest req, Long memberId) {
         Parsed parsed = cache.get(req.fileToken());
@@ -215,27 +244,39 @@ public class CryptoImportService {
 
         Account account = resolveAccount(req, memberId, parser);
 
-        // Apply the operator's confirmed coin mappings (from the preview) as USER *before* the
-        // backfill, so prices are fetched under the right CoinGecko id from the first import — no
-        // silent AUTO guess, and no re-import needed to correct one. Coins left unconfirmed stay
-        // unresolved and import unpriced (a bare PENDING row is minted later by HoldingComputeService
-        // via getOrCreate); coins already settled (USER/WORTHLESS) aren't in the request and keep
-        // their mapping.
-        applyConfirmedMappings(req.assetMappings());
-
-        // Backfill daily price history for the coins first: the valuation enrichment below and
-        // the cost-vs-price overlay on the stats page both need it. Best-effort — a provider
-        // hiccup must not fail the import.
-        backfillPriceHistory(parsed.transactions);
-
-        // Value the rows whose CSV carried no fiat amount (crypto-quoted trades, wallet transfers)
-        // from the backfilled daily prices.
-        List<ParsedCryptoTx> enriched = enrichValuations(parsed.transactions);
-
-        // Replace previously-imported (non-manual) rows; keep manual entries.
+        // Persist the rows and derive positions right away, so the account shows its holdings the
+        // instant the import returns. These are the *raw* rows: any that the CSV left unvalued
+        // (crypto-quoted trades, wallet transfers) carry no EUR amount yet — the background job below
+        // re-values them and recomputes the VWAP once the price history is in. Replace previously
+        // imported (non-manual) rows; keep manual entries.
         transactionRepository.deleteByAccountIdAndIsManualFalse(account.getId());
+        List<Transaction> toInsert = buildTransactions(account, parsed.transactions, parser);
+        transactionRepository.saveAll(toInsert);
+        holdingComputeService.recomputeHoldings(account);
+        account.setLastSyncedAt(Instant.now());
+        accountRepository.save(account);
 
-        List<Transaction> toInsert = enriched.stream()
+        cache.remove(req.fileToken());
+
+        int holdingsCount = accountHoldingRepository.findByAccount_Id(account.getId()).size();
+        BigDecimal totalRewards = sumAbs(parsed.transactions, TransactionType.REWARD);
+
+        // Hand the coin mappings + parsed rows to the background pricing job. Captured directly (not
+        // via the cache, which is already cleared) so the closure owns them.
+        Long accountId = account.getId();
+        List<ImportAssetMapping> mappings = req.assetMappings();
+        List<ParsedCryptoTx> rows = parsed.transactions;
+        startPricingJob(accountId, () -> finishImportPricing(accountId, mappings, rows, parser));
+
+        return new CryptoImportResult(
+            accountId, account.getName(), parser.sourceId(),
+            toInsert.size(), holdingsCount, totalRewards);
+    }
+
+    /** Map parsed rows onto persistable transactions — shared by the synchronous raw insert and the
+     *  background re-insert of the valued rows. */
+    private List<Transaction> buildTransactions(Account account, List<ParsedCryptoTx> rows, CryptoCsvParser parser) {
+        return rows.stream()
             .map(t -> Transaction.builder()
                 .account(account)
                 .date(t.date())
@@ -253,29 +294,111 @@ public class CryptoImportService {
                 .pricePerUnit(t.pricePerUnit())
                 .build())
             .collect(Collectors.toList());
-        transactionRepository.saveAll(toInsert);
+    }
 
-        // Derive positions (quantity + diluted VWAP) from the BUY/SELL/REWARD rows.
+    /**
+     * The background half of {@link #execute}: everything that talks to a price provider. Runs in its
+     * own transaction on {@link #pricingExecutor}. Applies the confirmed coin mappings (so prices are
+     * fetched under the right ids), backfills daily history, re-values the rows the CSV left unpriced,
+     * replaces the raw rows persisted synchronously with the valued ones, recomputes the VWAP holdings,
+     * values the account live, and rebuilds its daily value curve. Best-effort — any failure leaves the
+     * synchronously-imported account/holdings intact (just unpriced) and is surfaced by the job future.
+     */
+    void finishImportPricing(Long accountId, List<ImportAssetMapping> mappings,
+                             List<ParsedCryptoTx> rows, CryptoCsvParser parser) {
+        Account account = accountRepository.findById(accountId).orElse(null);
+        if (account == null) {
+            log.warn("Crypto import pricing: account {} no longer exists — skipping", accountId);
+            return;
+        }
+
+        // Apply the operator's confirmed coin mappings as USER *before* the backfill, so prices are
+        // fetched under the right id — no silent AUTO guess, no re-import needed to correct one.
+        applyConfirmedMappings(mappings);
+
+        // Backfill daily price history first: the valuation below and the cost-vs-price overlay on the
+        // stats page both need it. Best-effort — a provider hiccup must not fail the whole job.
+        backfillPriceHistory(rows);
+
+        // Value the rows whose CSV carried no fiat amount from the backfilled daily prices, then
+        // replace the raw rows persisted synchronously with the valued ones and re-derive holdings.
+        List<ParsedCryptoTx> enriched = enrichValuations(rows);
+        transactionRepository.deleteByAccountIdAndIsManualFalse(accountId);
+        transactionRepository.saveAll(buildTransactions(account, enriched, parser));
         holdingComputeService.recomputeHoldings(account);
 
         // Value the account now so it isn't 0 until the next scheduled price refresh.
-        BigDecimal balanceEur = valueHoldings(account.getId());
+        BigDecimal balanceEur = valueHoldings(accountId);
         account.setCurrentBalance(balanceEur);
         account.setLastSyncedAt(Instant.now());
         accountRepository.save(account);
 
-        // Rebuild the account's daily value history from the transaction timeline × backfilled
-        // prices, so the portfolio curve goes back to the first transaction instead of today.
+        // Rebuild the account's daily value history from the transaction timeline × backfilled prices,
+        // so the portfolio curve goes back to the first transaction instead of today.
         reconstructHistory(account, enriched);
+        log.info("Crypto import pricing complete for account {} — {} EUR", accountId, balanceEur);
+    }
 
-        cache.remove(req.fileToken());
+    /**
+     * Register the pricing job's future under {@code accountId} synchronously (so the {@code /pricing}
+     * endpoint finds it even if the client awaits the instant the import returns), but dispatch the
+     * actual work only <em>after this import's transaction commits</em> — otherwise the background
+     * transaction could read the account before it's committed and bail. The work runs in its own
+     * transaction on {@link #pricingExecutor}; the future is completed either way (a failure leaves the
+     * account unpriced rather than hanging the awaiter), so the reaper can collect it. A prior job for
+     * the same account is superseded by a re-import.
+     */
+    private void startPricingJob(Long accountId, Runnable work) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        pricingJobs.put(accountId, future);
 
-        int holdingsCount = accountHoldingRepository.findByAccount_Id(account.getId()).size();
-        BigDecimal totalRewards = sumAbs(enriched, TransactionType.REWARD);
+        Runnable dispatch = () -> pricingExecutor.submit(() -> {
+            try {
+                txTemplate.executeWithoutResult(status -> work.run());
+            } catch (Throwable ex) {
+                log.error("Crypto import background pricing failed for account {}: {}",
+                    accountId, ex.getMessage(), ex);
+            } finally {
+                future.complete(null);
+            }
+        });
 
-        return new CryptoImportResult(
-            account.getId(), account.getName(), parser.sourceId(),
-            toInsert.size(), holdingsCount, totalRewards);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() {
+                    dispatch.run();
+                }
+                @Override public void afterCompletion(int status) {
+                    // Rolled back → the account was never persisted; drop the job and release awaiters.
+                    if (status != STATUS_COMMITTED) {
+                        pricingJobs.remove(accountId, future);
+                        future.complete(null);
+                    }
+                }
+            });
+        } else {
+            dispatch.run();
+        }
+    }
+
+    /**
+     * The in-flight pricing job for an account, or {@code null} if none is pending (never started, or
+     * already finished and reaped). A {@code null} means "nothing to wait for" — treat as done.
+     */
+    CompletableFuture<Void> pricingFuture(Long accountId) {
+        return pricingJobs.get(accountId);
+    }
+
+    /**
+     * The pricing job to await for a member's account — after checking they own it. Returns
+     * {@code null} when no job is pending (already priced, or none ran); the endpoint resolves that
+     * immediately. Read-only: it only reads the ownership row and an in-memory future.
+     */
+    @Transactional(readOnly = true)
+    public CompletableFuture<Void> pricingFuture(Long accountId, Long memberId) {
+        accountRepository.findByIdAndMemberId(accountId, memberId)
+            .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+        return pricingJobs.get(accountId);
     }
 
     private Account resolveAccount(CryptoImportRequest req, Long memberId, CryptoCsvParser parser) {
@@ -484,5 +607,8 @@ public class CryptoImportService {
     void cleanupExpiredCache() {
         Instant cutoff = Instant.now().minusSeconds(1800);
         cache.entrySet().removeIf(e -> e.getValue().parsedAt().isBefore(cutoff));
+        // Reap finished pricing jobs — the /pricing endpoint treats a missing future as "done", so a
+        // late await after reaping still resolves immediately.
+        pricingJobs.entrySet().removeIf(e -> e.getValue().isDone());
     }
 }
