@@ -1,4 +1,4 @@
--- V58: CoinMarketCap as a third price aggregator — its ref column on financial_asset, and its
+-- V87: CoinMarketCap as a third price aggregator — its ref column on financial_asset, and its
 -- `aggregator` row so the operator can add an API key from the admin panel.
 --
 -- Every aggregator owns exactly one nullable ref column here (coingecko_id, yahoo_symbol, and now

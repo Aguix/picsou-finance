@@ -23,7 +23,7 @@ public class PriceSnapshot {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** The asset this daily price is for — identity by FK, not a ticker string (see V56). */
+    /** The asset this daily price is for — identity by FK, not a ticker string (see V85). */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "asset_id", nullable = false)
     private FinancialAsset asset;

@@ -47,7 +47,7 @@ import java.util.stream.Collectors;
  * exist for transaction-backed sources; balance-only sources contribute quantity &amp; value.
  *
  * <p>Everything is keyed by the coin's symbol (uppercase). The daily price history lives in
- * {@code price_snapshot}, keyed by the asset id (FK to {@code financial_asset} since V56), so the
+ * {@code price_snapshot}, keyed by the asset id (FK to {@code financial_asset} since V85), so the
  * tickers are resolved to asset ids once at the boundary before the per-coin price series are read.
  */
 @Service
@@ -170,7 +170,7 @@ public class CryptoStatsService {
         tickers.addAll(holdings.keySet());
 
         // Resolve tickers → asset ids once, so the per-coin daily price series can be read from
-        // price_snapshot (id-keyed since V56) without a lookup per coin.
+        // price_snapshot (id-keyed since V85) without a lookup per coin.
         Map<String, Long> symbolToAssetId = assetRepository.findBySymbolIn(
                 tickers.stream().map(String::toUpperCase).collect(Collectors.toSet())).stream()
             .filter(a -> a.getId() != null)

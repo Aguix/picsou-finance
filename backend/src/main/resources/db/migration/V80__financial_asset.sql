@@ -1,4 +1,4 @@
--- V51: financial_asset — one row per priceable asset (crypto, stock, ETF), replacing the
+-- V80: financial_asset — one row per priceable asset (crypto, stock, ETF), replacing the
 -- hardcoded ticker registries (CoinGeckoPriceProvider.TICKER_TO_ID and the drifted crypto
 -- skip-list in YahooFinancePriceProvider). Aggregator references are dedicated nullable
 -- columns — one column per aggregator (decided 2026-07-08 over a junction table: there is
@@ -31,7 +31,7 @@ CREATE TABLE financial_asset (
 );
 
 -- No seed rows. The registry starts EMPTY and is built entirely from real data:
---   • existing holdings are migrated into it by V52 (one row per held ticker, PENDING/UNKNOWN);
+--   • existing holdings are migrated into it by V81 (one row per held ticker, PENDING/UNKNOWN);
 --   • at runtime, holding write paths call FinancialAssetService.getOrCreate(symbol), and the
 --     crypto import/verification flow resolves each symbol to a CoinGecko id (AUTO/USER).
 -- A fresh install therefore boots with an empty registry that fills as accounts are synced —

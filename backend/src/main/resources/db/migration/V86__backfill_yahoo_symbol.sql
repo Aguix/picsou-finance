@@ -1,4 +1,4 @@
--- V57: one-shot backfill of yahoo_symbol for existing stock/ETF assets, ahead of gating
+-- V86: one-shot backfill of yahoo_symbol for existing stock/ETF assets, ahead of gating
 -- YahooFinancePriceProvider.canPrice() on yahoo_symbol instead of falling back to the internal
 -- symbol. For every asset discovered so far via TR/Bourso ISIN resolution or a manual stock
 -- ticker, the internal symbol already IS the Yahoo ticker (e.g. "IWDA.AS") -- OpenFIGI resolved

@@ -1,4 +1,4 @@
--- V54: aggregator + aggregator_session — persistent identity and API credentials for the price
+-- V83: aggregator + aggregator_session — persistent identity and API credentials for the price
 -- aggregators behind PriceProviderPort (CoinGecko, Yahoo, and later CoinMarketCap). One `aggregator`
 -- row per provider, keyed by PriceProviderPort.aggregatorKey(); `aggregator_session` holds the API
 -- credentials used against it. Several sessions per aggregator are allowed so rate limits can be

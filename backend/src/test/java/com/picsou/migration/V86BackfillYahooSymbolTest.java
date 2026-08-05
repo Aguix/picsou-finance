@@ -14,24 +14,24 @@ import java.sql.Statement;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Exercises the actual V57 backfill SQL (loaded verbatim from the classpath) against seeded rows on
+ * Exercises the actual V86 backfill SQL (loaded verbatim from the classpath) against seeded rows on
  * an in-memory H2 in PostgreSQL-compatibility mode. The project's other tests are pure Mockito and
- * never boot Flyway, so this is a focused check that V57's row-selection logic does what its scoping
+ * never boot Flyway, so this is a focused check that V86's row-selection logic does what its scoping
  * clauses claim: link pre-existing stock/ETF rows with {@code yahoo_symbol = symbol}, while leaving
  * every crypto flavour untouched — including the exchange/wallet coins that are minted UNKNOWN (not
  * CRYPTO) and can only be told apart from a stock by the CRYPTO-account exclusion.
  *
- * <p>The three tables are created with just the columns V57 touches (not the full Flyway DDL), so
+ * <p>The three tables are created with just the columns V86 touches (not the full Flyway DDL), so
  * this validates the migration's <em>logic</em>, not its schema compatibility.
  */
-class V57BackfillYahooSymbolTest {
+class V86BackfillYahooSymbolTest {
 
     private Connection conn;
 
     @BeforeEach
     void setUp() throws Exception {
         conn = DriverManager.getConnection(
-            "jdbc:h2:mem:v57;MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
+            "jdbc:h2:mem:v70;MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
         try (Statement st = conn.createStatement()) {
             st.execute("""
                 CREATE TABLE financial_asset (
@@ -94,11 +94,11 @@ class V57BackfillYahooSymbolTest {
         }
     }
 
-    private void runV57() throws Exception {
+    private void runV86() throws Exception {
         String sql;
         try (InputStream in = getClass().getResourceAsStream(
-                "/db/migration/V57__backfill_yahoo_symbol.sql")) {
-            assertThat(in).as("V57 migration file on classpath").isNotNull();
+                "/db/migration/V86__backfill_yahoo_symbol.sql")) {
+            assertThat(in).as("V86 migration file on classpath").isNotNull();
             sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
         try (Statement st = conn.createStatement()) {
@@ -128,10 +128,10 @@ class V57BackfillYahooSymbolTest {
 
     @Test
     void backfillsUnknownStockNotHeldOnACryptoAccount() throws Exception {
-        // A pre-existing stock/ETF (all such rows are UNKNOWN — nothing set STOCK before V57).
+        // A pre-existing stock/ETF (all such rows are UNKNOWN — nothing set STOCK before V86).
         asset(1, "IWDA.AS", "UNKNOWN", null);
 
-        runV57();
+        runV86();
 
         assertThat(yahooSymbolOf("IWDA.AS")).isEqualTo("IWDA.AS");
         assertThat(typeOf("IWDA.AS")).isEqualTo("STOCK");
@@ -143,7 +143,7 @@ class V57BackfillYahooSymbolTest {
         account(101, "PEA", null);
         holding(1, 101, 2);
 
-        runV57();
+        runV86();
 
         assertThat(yahooSymbolOf("MC.PA")).isEqualTo("MC.PA");
         assertThat(typeOf("MC.PA")).isEqualTo("STOCK");
@@ -158,7 +158,7 @@ class V57BackfillYahooSymbolTest {
         account(100, "CRYPTO", null);
         holding(2, 100, 3);
 
-        runV57();
+        runV86();
 
         assertThat(yahooSymbolOf("DOGE")).isNull();
         assertThat(typeOf("DOGE")).isEqualTo("UNKNOWN");
@@ -170,7 +170,7 @@ class V57BackfillYahooSymbolTest {
         asset(4, "ETH", "UNKNOWN", null);
         account(102, "CRYPTO", 4L);
 
-        runV57();
+        runV86();
 
         assertThat(yahooSymbolOf("ETH")).isNull();
     }
@@ -182,7 +182,7 @@ class V57BackfillYahooSymbolTest {
         asset(5, "BTC", "CRYPTO", "bitcoin");
         asset(6, "AAA", "CRYPTO", null);
 
-        runV57();
+        runV86();
 
         assertThat(yahooSymbolOf("BTC")).isNull();
         assertThat(yahooSymbolOf("AAA")).isNull();
@@ -197,8 +197,8 @@ class V57BackfillYahooSymbolTest {
             st.execute("UPDATE financial_asset SET yahoo_symbol = 'AAPL' WHERE symbol = 'AAPL'");
         }
 
-        runV57();
-        runV57();
+        runV86();
+        runV86();
 
         assertThat(yahooSymbolOf("AAPL")).isEqualTo("AAPL");
         assertThat(typeOf("AAPL")).isEqualTo("STOCK");

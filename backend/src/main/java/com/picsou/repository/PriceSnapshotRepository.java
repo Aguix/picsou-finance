@@ -13,7 +13,7 @@ import java.util.Optional;
 
 /**
  * Daily price history, keyed by the asset's id (FK to financial_asset) rather than a ticker string —
- * every lookup takes an {@code assetId}, resolved once from the symbol at the boundary (see V56).
+ * every lookup takes an {@code assetId}, resolved once from the symbol at the boundary (see V85).
  */
 public interface PriceSnapshotRepository extends JpaRepository<PriceSnapshot, Long> {
 

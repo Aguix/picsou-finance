@@ -68,7 +68,7 @@ shape explicit and keep the app-global price config cleanly separate from per-me
 
 ## Consequences
 
-- `V54__aggregator.sql` creates both tables and seeds the `coingecko` / `yahoo` rows (no sessions —
+- `V83__aggregator.sql` creates both tables and seeds the `coingecko` / `yahoo` rows (no sessions —
   the admin adds keys from the admin panel; until then CoinGecko runs anonymous, Yahoo needs no key).
 - `AggregatorService` owns encrypt-on-write / decrypt-on-read and exposes decrypted credentials
   (with the session id) to the adapters.

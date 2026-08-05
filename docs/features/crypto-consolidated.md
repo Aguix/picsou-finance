@@ -49,7 +49,7 @@ ticker plus a date-ASC transaction list.
    timelines exist only where transactions do (Crypto.com today).
 
 The daily market-price series per coin comes from `price_snapshot`, which is keyed by the **asset id**
-(FK to `financial_asset` since V56). The tickers seen in the response are resolved to asset ids once
+(FK to `financial_asset` since V85). The tickers seen in the response are resolved to asset ids once
 (via `FinancialAssetRepository.findBySymbolIn`) before the per-coin price series are read — no lookup
 per coin, and no dependence on any single aggregator.
 
@@ -110,7 +110,7 @@ CryptoStatsView (totals · per-token donut · rewards bars · per-coin cards)
 | Reuse `CryptoStatsResponse` + a shared `assemble()` | One rendering path for per-account and consolidated; no DTO/UI duplication | A separate consolidated DTO + component |
 | Weighted average buy-in over cost-bearing sources only | Binance/wallets report no cost basis; weighting only the known costs avoids inventing one | Treat missing cost as 0 (understates the average) |
 | Wallet value added as value-only (no quantity) | On-chain wallet accounts store EUR balance, not a per-coin holding | Re-deriving on-chain quantities (out of scope, needs price-at-sync) |
-| Price series read by asset id (resolved once) | `price_snapshot` is id-keyed since V56; keeps the service asset-based, not symbol-based | Re-query per ticker string (drifts from the id-based schema) |
+| Price series read by asset id (resolved once) | `price_snapshot` is id-keyed since V85; keeps the service asset-based, not symbol-based | Re-query per ticker string (drifts from the id-based schema) |
 | Reward yield in the backend service | Same figure feeds the per-account and consolidated views; front stays a pure renderer | Compute it in the component (duplicated across the two views) |
 | Per-token donut on the frontend | The per-coin `currentValueEur` is already in the response; no extra endpoint | A backend distribution DTO |
 | Surfaced in the Accounts `CRYPTO` filter (no `/crypto` route) | Keeps the crypto recap next to the accounts it summarises | A dedicated sidebar page |

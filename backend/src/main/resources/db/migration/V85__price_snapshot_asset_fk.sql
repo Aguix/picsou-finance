@@ -1,5 +1,5 @@
--- V56: price_snapshot references financial_asset by FK (asset_id) instead of a ticker string,
--- mirroring account_holding (V52) and account (V55). A daily price snapshot is a fact about an
+-- V85: price_snapshot references financial_asset by FK (asset_id) instead of a ticker string,
+-- mirroring account_holding (V81) and account (V84). A daily price snapshot is a fact about an
 -- asset, so it's keyed by the asset's id; the (ticker, date) uniqueness becomes (asset_id, date).
 --
 -- Every priced symbol goes through the financial_asset registry now, so a passthrough asset is

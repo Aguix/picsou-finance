@@ -265,7 +265,7 @@ public class FinancialAssetService {
 
     /**
      * Return the asset for a symbol, minting a bare {@code PENDING}/{@code UNKNOWN} passthrough row
-     * the first time a symbol is seen. This is the runtime counterpart of the V52 backfill: a
+     * the first time a symbol is seen. This is the runtime counterpart of the V81 backfill: a
      * holding must always point at an asset, so the write paths (TR/Bourso/wallet sync,
      * {@link HoldingComputeService}, {@link AccountService#upsertHolding}) resolve their symbol
      * through here. It never calls an external API — real resolution happens later via

@@ -13,7 +13,7 @@
                 <mxCell id="nH1" value="PHASE 1 — Import CSV : détection &amp; résolution d&#39;un asset inconnu" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="40" y="20" width="900" height="30" as="geometry"/>
                 </mxCell>
-                <mxCell id="nH2" value="Schéma BDD — FK asset_id (migrations V55 / V56)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="nH2" value="Schéma BDD — FK asset_id (migrations V84 / V85)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="20" width="400" height="30" as="geometry"/>
                 </mxCell>
                 <mxCell id="nH3" value="Wallet Sync — déclencheur parallèle&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-style:italic;font-size:11px&quot;&gt;(source d&#39;assets inconnus, elle aussi)&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;fontStyle=1;" parent="1" vertex="1">
@@ -55,10 +55,10 @@
                 <mxCell id="ndb1" value="&lt;b&gt;financial_asset&lt;/b&gt;&lt;br&gt;id, symbol, status [PENDING|USER|WORTHLESS], coingecko_id, name, last_eur_value, price_synced_at" style="shape=cylinder;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="60" width="260" height="110" as="geometry"/>
                 </mxCell>
-                <mxCell id="ndb2" value="&lt;b&gt;account.asset_id&lt;/b&gt; → FK financial_asset&lt;br&gt;&lt;i&gt;V55 — nullable, remplace account.ticker (dropped)&lt;/i&gt;" style="shape=cylinder;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                <mxCell id="ndb2" value="&lt;b&gt;account.asset_id&lt;/b&gt; → FK financial_asset&lt;br&gt;&lt;i&gt;V84 — nullable, remplace account.ticker (dropped)&lt;/i&gt;" style="shape=cylinder;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="200" width="260" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="ndb3" value="&lt;b&gt;price_snapshot.asset_id&lt;/b&gt; → FK financial_asset&lt;br&gt;&lt;i&gt;V56 — NOT NULL, unique(asset_id,date), remplace price_snapshot.ticker (dropped)&lt;/i&gt;" style="shape=cylinder;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+                <mxCell id="ndb3" value="&lt;b&gt;price_snapshot.asset_id&lt;/b&gt; → FK financial_asset&lt;br&gt;&lt;i&gt;V85 — NOT NULL, unique(asset_id,date), remplace price_snapshot.ticker (dropped)&lt;/i&gt;" style="shape=cylinder;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
                     <mxGeometry x="1060" y="310" width="260" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="nc1" value="&lt;b&gt;Déclencheur Wallet Sync&lt;/b&gt;&lt;br&gt;WalletSyncService.addWallet()→sync() (à la demande)&lt;br&gt;ou SchedulerService.dailyBankSync() (cron 8h) → resyncAll()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">

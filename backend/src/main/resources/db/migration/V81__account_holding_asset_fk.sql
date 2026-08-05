@@ -1,4 +1,4 @@
--- V52: account_holding references financial_asset by FK instead of carrying a ticker string,
+-- V81: account_holding references financial_asset by FK instead of carrying a ticker string,
 -- and no longer carries its own display name either.
 --
 -- The `ticker` column is fully replaced by `asset_id` (single source of truth =
@@ -6,7 +6,7 @@
 -- skip-list in YahooFinancePriceProvider can be retired. The pricing layer still speaks in symbol
 -- strings — call-sites recover the symbol via the join (holding.asset.symbol).
 --
--- V51 seeds no rows, so this mint is the sole populator of the registry from pre-existing data:
+-- V80 seeds no rows, so this mint is the sole populator of the registry from pre-existing data:
 -- it registers a financial_asset row for EVERY ticker referenced by a holding, as PENDING/UNKNOWN,
 -- so no holding is left without an asset (the FK is NOT NULL). A PENDING row carries no aggregator
 -- ref, so it stays unpriced until resolved via the management UI / FinancialAssetService.resolveCrypto.
