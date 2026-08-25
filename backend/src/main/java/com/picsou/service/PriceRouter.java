@@ -3,6 +3,8 @@ package com.picsou.service;
 import com.picsou.model.FinancialAsset;
 import com.picsou.port.PriceProviderPort;
 import com.picsou.port.PriceProviderPort.Capability;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -13,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Routes a pricing request to the aggregator that can serve it, over the ordered list of
@@ -38,6 +41,8 @@ import java.util.Optional;
  */
 @Component
 public class PriceRouter {
+
+    private static final Logger log = LoggerFactory.getLogger(PriceRouter.class);
 
     private final List<PriceProviderPort> providers;
 
@@ -76,7 +81,7 @@ public class PriceRouter {
             List<FinancialAsset> share = remaining.stream().filter(provider::canPrice).toList();
             if (share.isEmpty()) continue;
 
-            result.putAll(provider.getPricesEur(share));
+            result.putAll(attempt(provider, "spot prices", () -> provider.getPricesEur(share)));
             remaining = remaining.stream()
                 .filter(a -> !result.containsKey(a.getSymbol().toUpperCase()))
                 .toList();
@@ -92,7 +97,8 @@ public class PriceRouter {
     public Map<LocalDate, BigDecimal> getHistoricalPricesEur(FinancialAsset asset, LocalDate from, LocalDate to) {
         for (PriceProviderPort provider : providers) {
             if (!serves(provider, asset, Capability.HISTORY)) continue;
-            Map<LocalDate, BigDecimal> prices = provider.getHistoricalPricesEur(asset, from, to);
+            Map<LocalDate, BigDecimal> prices =
+                attempt(provider, "historical prices", () -> provider.getHistoricalPricesEur(asset, from, to));
             if (!prices.isEmpty()) return prices;
         }
         return Map.of();
@@ -102,10 +108,33 @@ public class PriceRouter {
     public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(FinancialAsset asset, LocalDateTime from, LocalDateTime to) {
         for (PriceProviderPort provider : providers) {
             if (!serves(provider, asset, Capability.INTRADAY)) continue;
-            Map<LocalDateTime, BigDecimal> prices = provider.getIntradayPricesEur(asset, from, to);
+            Map<LocalDateTime, BigDecimal> prices =
+                attempt(provider, "intraday prices", () -> provider.getIntradayPricesEur(asset, from, to));
             if (!prices.isEmpty()) return prices;
         }
         return Map.of();
+    }
+
+    /**
+     * Runs one provider call, turning a <em>thrown</em> failure into "this aggregator returned
+     * nothing" so the waterfall carries on to the next one.
+     *
+     * <p>The walk was built around adapters that answer partially — the leftovers move on. An adapter
+     * that throws instead would, without this, abort the whole batch from inside the loop and strand
+     * every asset the remaining aggregators could have priced. Adapters are expected to swallow their
+     * own upstream failures (HTTP error, timeout, unreachable API) and return an empty map; reaching
+     * here therefore means the adapter judged the failure to be a defect on our side, hence ERROR with
+     * the stacktrace — the router degrades the batch rather than losing it, but the bug stays visible.
+     */
+    private static <K, V> Map<K, V> attempt(
+        PriceProviderPort provider, String operation, Supplier<Map<K, V>> call) {
+        try {
+            return call.get();
+        } catch (RuntimeException ex) {
+            log.error("Aggregator '{}' threw fetching {} -- skipping it for this batch",
+                provider.aggregatorKey(), operation, ex);
+            return Map.of();
+        }
     }
 
     /** Declares {@code capability}, holds a ref for {@code asset}, and is available right now. */

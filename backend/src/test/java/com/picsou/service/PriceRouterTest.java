@@ -30,6 +30,8 @@ class PriceRouterTest {
         boolean available = true;
         /** Symbols this provider canPrice but whose call fails mid-flight — absent from its answer. */
         final Set<String> failsOn = new java.util.HashSet<>();
+        /** Symbols whose call <em>throws</em> instead of answering — a defect, not an outage. */
+        final Set<String> throwsOn = new java.util.HashSet<>();
         final List<Collection<FinancialAsset>> batches = new ArrayList<>();
 
         FakeProvider(String key, Set<String> known, String price) {
@@ -46,6 +48,11 @@ class PriceRouterTest {
         @Override
         public Map<String, BigDecimal> getPricesEur(Collection<FinancialAsset> assets) {
             batches.add(assets);
+            for (FinancialAsset a : assets) {
+                if (canPrice(a) && throwsOn.contains(a.getSymbol())) {
+                    throw new IllegalStateException("defect pricing " + a.getSymbol());
+                }
+            }
             Map<String, BigDecimal> out = new java.util.HashMap<>();
             for (FinancialAsset a : assets) {
                 if (canPrice(a) && !failsOn.contains(a.getSymbol())) out.put(a.getSymbol(), price);
@@ -84,6 +91,23 @@ class PriceRouterTest {
         assertThat(prices.get("BTC")).isEqualByComparingTo("999");
         assertThat(primary.batches).isEmpty();
         assertThat(router.providerFor(asset("BTC"))).contains(fallback);
+    }
+
+    @Test
+    void aProviderThatThrowsIsSkippedAndTheRestOfTheBatchStillGetsPriced() {
+        // An adapter is expected to swallow its own upstream failures (HTTP error, timeout,
+        // unreachable API) and answer empty; a throw therefore means a defect on our side. The router
+        // must degrade to the next aggregator rather than let one bad adapter abort the loop and
+        // strand every asset the remaining aggregators could have priced.
+        var primary = new FakeProvider("primary", Set.of("BTC", "ETH"), "100");
+        var fallback = new FakeProvider("fallback", Set.of("BTC", "ETH"), "999");
+        primary.throwsOn.add("BTC");
+        var router = new PriceRouter(List.of(primary, fallback));
+
+        Map<String, BigDecimal> prices = router.getPricesEur(List.of(asset("BTC"), asset("ETH")));
+
+        assertThat(prices.get("BTC")).isEqualByComparingTo("999");
+        assertThat(prices.get("ETH")).isEqualByComparingTo("999");
     }
 
     @Test

@@ -17,6 +17,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.math.BigDecimal;
@@ -28,6 +29,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -66,6 +68,8 @@ public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverP
 
     private static final Logger log = LoggerFactory.getLogger(CoinGeckoPriceProvider.class);
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
+    /** History and intraday pull a whole range, so they get a longer budget than a spot quote. */
+    private static final Duration HISTORY_TIMEOUT = Duration.ofSeconds(15);
     private static final String AGGREGATOR_KEY = "coingecko";
 
     /** Grabs the coin-id slug from a CoinGecko coin URL, e.g. {@code .../en/coins/loaded-lions}. */
@@ -196,6 +200,123 @@ public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverP
         return Optional.empty();
     }
 
+    /**
+     * Classifies a failed CoinGecko call, and decides whether it is ours to swallow.
+     *
+     * <p><b>Expected upstream failures</b> (HTTP error, unreachable API, timeout) are logged and the
+     * caller returns no prices. That contract is load-bearing: a missing price means "not valued by
+     * this aggregator", never "not held" — {@link com.picsou.service.PriceRouter} hands whatever this
+     * provider didn't return to the next one, and {@code WalletSyncService} keys its holdings prune on
+     * on-chain balances, so a CoinGecko blip leaves holdings and their cost basis intact. Severity
+     * lives in the log, graded by whose problem it is.
+     *
+     * <p><b>Anything else</b> — an NPE, a {@link ClassCastException}, a parse defect — is
+     * <em>rethrown</em>. Swallowing a real bug into an empty map hides it behind data that merely
+     * looks unpriced. This is safe because {@code PriceRouter} guards each provider call and drops to
+     * the next aggregator on a throw, so a defect here degrades to a fallback instead of aborting a
+     * batch.
+     *
+     * <p>Note it unwraps first: {@code Mono.timeout()} signals a <em>checked</em>
+     * {@link TimeoutException}, which {@code block()} wraps in a reactor {@code ReactiveException}.
+     * Matching on the declared type without unwrapping would miss timeouts entirely — the most common
+     * real CoinGecko failure.
+     */
+    private static void handleFetchFailure(String operation, Object context, Duration timeout, RuntimeException ex) {
+        Throwable cause = reactor.core.Exceptions.unwrap(ex);
+        if (cause instanceof WebClientResponseException http) {
+            int status = http.getStatusCode().value();
+            if (status == 429) {
+                log.warn("CoinGecko rate-limited (429) fetching {} for {} -- returning no prices", operation, context);
+            } else if (http.getStatusCode().is5xxServerError()) {
+                // Their outage, not our bug: WARN, matching how the rest of the codebase grades
+                // expected external failures. These callers run on a scheduler, so an hours-long
+                // outage would otherwise pour ERROR lines (each carrying a full HTML error page)
+                // into a self-hosted instance's log.
+                log.warn("CoinGecko server error (HTTP {}) fetching {} for {} -- returning no prices: {}",
+                    status, operation, context, lazyBody(http));
+            } else if (status == 400 || status == 404) {
+                // A malformed request or an unknown coin id points at a bad coingecko_id in the
+                // registry -- something we can actually fix, so ERROR. The body is decoded lazily
+                // via a supplier so a disabled level costs nothing.
+                log.error("CoinGecko rejected the {} request for {} with HTTP {} -- returning no prices: {}",
+                    operation, context, status, lazyBody(http));
+            } else {
+                // Other 4xx (401/403 free-tier restrictions, 451...) are the provider's access
+                // policy, not a bug on our side: WARN like the other outage cases.
+                log.warn("CoinGecko refused the {} request for {} with HTTP {} -- returning no prices: {}",
+                    operation, context, status, lazyBody(http));
+            }
+        } else if (cause instanceof TimeoutException) {
+            log.warn("CoinGecko {} request for {} timed out after {} -- returning no prices",
+                operation, context, timeout);
+        } else if (cause instanceof WebClientRequestException) {
+            // Never reached the server at all: DNS failure, connection refused/reset, TLS handshake.
+            // Same class of expected outage as a 5xx -- WARN, and without the stacktrace, which
+            // would otherwise flood the log for the whole outage.
+            log.warn("CoinGecko {} request for {} could not reach the API ({}) -- returning no prices",
+                operation, context, cause.getMessage());
+        } else {
+            // Not an upstream failure -- an NPE, ClassCastException or parse defect on our side.
+            // Rethrow rather than return an empty map: a bug that presents as "no prices" is
+            // indistinguishable from a quiet outage and would never get fixed.
+            throw ex;
+        }
+    }
+
+    /**
+     * Walks CoinGecko's {@code prices} field — documented as an array of {@code [epochMillis, price]}
+     * pairs — handing each well-formed pair to {@code consumer}.
+     *
+     * <p>Every step is checked rather than cast. A shape change upstream (an object instead of an
+     * array, string-encoded numbers, a short pair) must degrade to a warn and a skip: since
+     * {@link #handleFetchFailure} rethrows anything that is not an upstream failure, a blind cast here
+     * would turn a CoinGecko format change into a {@link ClassCastException} bouncing the whole
+     * aggregator out of the price waterfall.
+     */
+    private static void forEachPricePoint(
+        Map<String, Object> response, String context, java.util.function.BiConsumer<Long, Double> consumer) {
+
+        Object raw = response.getOrDefault("prices", List.of());
+        if (!(raw instanceof List<?> rawPrices)) {
+            log.warn("CoinGecko returned a non-list 'prices' field ({}) for {} -- returning no prices",
+                raw == null ? "null" : raw.getClass().getSimpleName(), context);
+            return;
+        }
+
+        int skipped = 0;
+        for (Object entry : rawPrices) {
+            if (!(entry instanceof List<?> pair) || pair.size() < 2
+                || !(pair.get(0) instanceof Number timestamp)
+                || !(pair.get(1) instanceof Number price)) {
+                skipped++;
+                continue;
+            }
+            consumer.accept(timestamp.longValue(), price.doubleValue());
+        }
+
+        // Once per call, not per entry: a wholesale format change would otherwise emit one line per
+        // data point, thousands of them for a long range.
+        if (skipped > 0) {
+            log.warn("CoinGecko returned {} malformed price points (of {}) for {} -- skipped",
+                skipped, rawPrices.size(), context);
+        }
+    }
+
+    /**
+     * Defers decoding the upstream error body until the log level is known to be enabled — SLF4J only
+     * calls {@code toString()} on an argument it actually formats. Also caps it, so one bad gateway's
+     * multi-kilobyte HTML page can't fill the log.
+     */
+    private static Object lazyBody(WebClientResponseException http) {
+        return new Object() {
+            @Override public String toString() {
+                String body = http.getResponseBodyAsString();
+                if (body == null || body.isBlank()) return "<empty body>";
+                return body.length() <= 200 ? body : body.substring(0, 200) + "... (truncated)";
+            }
+        };
+    }
+
     /** Uppercase symbol → CoinGecko coin id for the priceable assets in the set (id present). */
     private static Map<String, String> coinIds(Collection<FinancialAsset> assets) {
         Map<String, String> bySymbol = new HashMap<>();
@@ -270,7 +391,11 @@ public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverP
                 .timeout(TIMEOUT)
                 .block();
 
-            if (response == null) return Map.of();
+            if (response == null) {
+                log.warn("CoinGecko returned an empty body for spot prices {} -- returning no prices",
+                    tickerToId.keySet());
+                return Map.of();
+            }
 
             Map<String, BigDecimal> result = new HashMap<>();
             for (Map.Entry<String, String> e : tickerToId.entrySet()) {
@@ -280,9 +405,9 @@ public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverP
                 }
             }
             return result;
-        } catch (Exception ex) {
+        } catch (RuntimeException ex) {
             if (isRateLimited(ex)) pause(session, ex);
-            log.warn("CoinGecko price fetch failed: {}", ex.getMessage());
+            handleFetchFailure("spot prices", tickerToId.keySet(), TIMEOUT, ex);
             return Map.of();
         }
     }
@@ -409,31 +534,28 @@ public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverP
                 .headers(h -> applyKey(h, session))
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .timeout(Duration.ofSeconds(15))
+                .timeout(HISTORY_TIMEOUT)
                 .block();
 
-            if (response == null) return Map.of();
-
-            List<?> rawPrices = (List<?>) response.getOrDefault("prices", List.of());
-            Map<LocalDateTime, BigDecimal> prices = new LinkedHashMap<>();
-
-            for (Object entry : rawPrices) {
-                List<?> pair = (List<?>) entry;
-                if (pair.size() >= 2) {
-                    long timestamp = ((Number) pair.get(0)).longValue();
-                    double price = ((Number) pair.get(1)).doubleValue();
-                    LocalDateTime dt = Instant.ofEpochMilli(timestamp).atZone(ZoneOffset.UTC).toLocalDateTime();
-                    if (!dt.isBefore(from) && !dt.isAfter(to) && price > 0) {
-                        prices.put(dt, BigDecimal.valueOf(price).setScale(8, RoundingMode.HALF_UP));
-                    }
-                }
+            if (response == null) {
+                log.warn("CoinGecko returned an empty body for intraday prices of {} ({})",
+                    asset.getSymbol(), coinId);
+                return Map.of();
             }
+
+            Map<LocalDateTime, BigDecimal> prices = new LinkedHashMap<>();
+            forEachPricePoint(response, asset.getSymbol() + " (" + coinId + ")", (timestamp, price) -> {
+                LocalDateTime dt = Instant.ofEpochMilli(timestamp).atZone(ZoneOffset.UTC).toLocalDateTime();
+                if (!dt.isBefore(from) && !dt.isAfter(to) && price > 0) {
+                    prices.put(dt, BigDecimal.valueOf(price).setScale(8, RoundingMode.HALF_UP));
+                }
+            });
 
             log.debug("Fetched {} intraday prices for {} ({}) from CoinGecko", prices.size(), asset.getSymbol(), coinId);
             return prices;
-        } catch (Exception ex) {
+        } catch (RuntimeException ex) {
             if (isRateLimited(ex)) pause(session, ex);
-            log.warn("CoinGecko intraday price fetch failed for {}: {}", asset.getSymbol(), ex.getMessage());
+            handleFetchFailure("intraday prices", asset.getSymbol() + " (" + coinId + ")", HISTORY_TIMEOUT, ex);
             return Map.of();
         }
     }
@@ -452,6 +574,9 @@ public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverP
         // tier allows. Older history would need a paid Pro key.
         LocalDate floor = LocalDate.now().minusDays(MAX_FREE_HISTORY_DAYS);
         if (from.isBefore(floor)) from = floor;
+        // Effectively-final copy for the range filter below: the clamp reassigns `from`, so it can't
+        // be captured by a lambda.
+        final LocalDate rangeStart = from;
         SessionCredentials session = pickSession().orElse(null);
         if (session == null) return Map.of();
 
@@ -469,31 +594,28 @@ public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverP
                 .headers(h -> applyKey(h, session))
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .timeout(Duration.ofSeconds(15))
+                .timeout(HISTORY_TIMEOUT)
                 .block();
 
-            if (response == null) return Map.of();
-
-            List<?> rawPrices = (List<?>) response.getOrDefault("prices", List.of());
-            Map<LocalDate, BigDecimal> prices = new HashMap<>();
-
-            for (Object entry : rawPrices) {
-                List<?> pair = (List<?>) entry;
-                if (pair.size() >= 2) {
-                    long timestamp = ((Number) pair.get(0)).longValue();
-                    double price = ((Number) pair.get(1)).doubleValue();
-                    LocalDate date = Instant.ofEpochMilli(timestamp).atZone(ZoneOffset.UTC).toLocalDate();
-                    if (!date.isBefore(from) && !date.isAfter(to) && price > 0) {
-                        prices.put(date, BigDecimal.valueOf(price).setScale(8, RoundingMode.HALF_UP));
-                    }
-                }
+            if (response == null) {
+                log.warn("CoinGecko returned an empty body for historical prices of {} ({})",
+                    asset.getSymbol(), coinId);
+                return Map.of();
             }
+
+            Map<LocalDate, BigDecimal> prices = new HashMap<>();
+            forEachPricePoint(response, asset.getSymbol() + " (" + coinId + ")", (timestamp, price) -> {
+                LocalDate date = Instant.ofEpochMilli(timestamp).atZone(ZoneOffset.UTC).toLocalDate();
+                if (!date.isBefore(rangeStart) && !date.isAfter(to) && price > 0) {
+                    prices.put(date, BigDecimal.valueOf(price).setScale(8, RoundingMode.HALF_UP));
+                }
+            });
 
             log.debug("Fetched {} historical prices for {} ({}) from CoinGecko", prices.size(), asset.getSymbol(), coinId);
             return prices;
-        } catch (Exception ex) {
+        } catch (RuntimeException ex) {
             if (isRateLimited(ex)) pause(session, ex);
-            log.warn("CoinGecko historical price fetch failed for {}: {}", asset.getSymbol(), ex.getMessage());
+            handleFetchFailure("historical prices", asset.getSymbol() + " (" + coinId + ")", HISTORY_TIMEOUT, ex);
             return Map.of();
         }
     }
