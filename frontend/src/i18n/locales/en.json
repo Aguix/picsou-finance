@@ -98,7 +98,7 @@
     "no": "No",
     "today": "Today",
     "currency": "EUR",
-    "locale": "en-US"
+    "done": "Done"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -198,7 +198,14 @@
     "recentAccounts": "Recent accounts",
     "viewAll": "View all",
     "totalLiabilities": "Total liabilities",
-    "totalAssets": "Total assets"
+    "totalAssets": "Total assets",
+    "evolution": {
+      "net": "Net worth evolution",
+      "gross": "Gross assets evolution",
+      "financial": "Financial assets evolution"
+    },
+    "liabilitiesTitle": "Liabilities",
+    "liabilitiesDescription": "Outstanding debt by account"
   },
   "accounts": {
     "title": "Accounts",
@@ -206,9 +213,13 @@
     "editAccount": "Edit account",
     "deleteAccount": "Delete account",
     "deleteConfirm": "Delete this account and all its data?",
+    "deleteRemovesConnection": "The {{connection}} connection is removed with it and will stop syncing.",
     "noAccounts": "No accounts",
     "balance": "Balance",
     "lastSync": "Last sync",
+    "lastValuation": "Last valuation",
+    "syncStale": "Synced {{time}}",
+    "syncStaleTooltip": "This account has not synced recently. Run a sync or reconnect the provider.",
     "neverSynced": "Never synced",
     "holdings": "Holdings",
     "transactions": "Transactions",
@@ -226,16 +237,22 @@
     "assetNamePlaceholder": "Example: iShares Core MSCI World",
     "priceLive": "Live price",
     "priceStale": "Price from {{time}}",
+    "priceAsOf": "Price from {{date}} — the price provider did not respond",
     "history": "History",
     "manual": "Manual",
     "allTypes": "All types",
     "accountName": "Account name",
     "accountType": "Account type",
     "provider": "Provider",
+    "bankPickerHint": "Pick your bank from the list to show its logo.",
     "ticker": "Ticker",
     "color": "Color",
+    "logo": "Logo",
+    "logoBlockchain": "Blockchain wallet",
+    "logoLedger": "Ledger",
     "total": "Total",
     "currentBalance": "Current balance",
+    "cashBalance": "Cash in the PEA/securities account",
     "snapshots": "Monthly snapshots",
     "addSnapshot": "Save",
     "monthlyHistory": "Month-end balance",
@@ -250,18 +267,25 @@
       "CRYPTO": "Crypto",
       "REAL_ESTATE": "Real estate",
       "DEBTS": "Debts"
-    }
+    },
+    "fees": "Fees"
   },
   "accountTypes": {
     "checking": "Checking",
     "savings": "Savings",
     "lep": "LEP",
+    "livretA": "Livret A",
+    "ldds": "LDDS",
+    "livretJeune": "Livret Jeune",
+    "pel": "PEL",
+    "cel": "CEL",
     "pea": "PEA",
     "compteTitres": "Brokerage",
     "crypto": "Crypto",
     "realEstate": "Real estate",
     "loan": "Loan",
-    "other": "Other"
+    "other": "Other",
+    "employeeSavings": "Employee savings"
   },
   "realEstate": {
     "purchasePrice": "Purchase price",
@@ -310,7 +334,9 @@
     "amortizationChart": "Amortization curve",
     "today": "Today",
     "loanProgress": "Loan progress",
-    "monthlyBreakdown": "Monthly breakdown"
+    "monthlyBreakdown": "Monthly breakdown",
+    "noLinkedAsset": "No linked asset",
+    "linkedAssetHint": "Linking this loan to a property is what makes net property wealth computable."
   },
   "portfolio": {
     "title": "Detailed Portfolio",
@@ -374,14 +400,43 @@
         "real_estate": "Real Estate"
       },
       "countryNames": {
-        "US": "United States", "NL": "Netherlands", "CA": "Canada", "FR": "France",
-        "GB": "United Kingdom", "DE": "Germany", "CH": "Switzerland", "IE": "Ireland",
-        "JP": "Japan", "CN": "China", "LU": "Luxembourg", "AU": "Australia",
-        "ES": "Spain", "IT": "Italy", "SE": "Sweden", "DK": "Denmark", "HK": "Hong Kong",
-        "KR": "South Korea", "TW": "Taiwan", "IN": "India", "BR": "Brazil", "BE": "Belgium",
-        "FI": "Finland", "NO": "Norway", "SG": "Singapore"
+        "US": "United States",
+        "NL": "Netherlands",
+        "CA": "Canada",
+        "FR": "France",
+        "GB": "United Kingdom",
+        "DE": "Germany",
+        "CH": "Switzerland",
+        "IE": "Ireland",
+        "JP": "Japan",
+        "CN": "China",
+        "LU": "Luxembourg",
+        "AU": "Australia",
+        "ES": "Spain",
+        "IT": "Italy",
+        "SE": "Sweden",
+        "DK": "Denmark",
+        "HK": "Hong Kong",
+        "KR": "South Korea",
+        "TW": "Taiwan",
+        "IN": "India",
+        "BR": "Brazil",
+        "BE": "Belgium",
+        "FI": "Finland",
+        "NO": "Norway",
+        "SG": "Singapore"
       }
     }
+  },
+  "positions": {
+    "products": {
+      "SPOT": "Spot",
+      "STAKING": "Staking",
+      "LENDING": "Lending"
+    },
+    "principal": "Principal",
+    "interest": "Interest",
+    "total": "Total"
   },
   "goals": {
     "title": "Goals",
@@ -445,12 +500,17 @@
     "desc": {
       "banks": "Connect your banks via OAuth",
       "crypto": "Exchanges, wallets...",
-      "exchanges": "Binance, Kraken...",
-      "wallets": "Bitcoin, Ethereum, Solana...",
       "cryptoCsv": "Crypto.com",
+      "exchanges": "Binance, Meria...",
+      "wallets": "Bitcoin, Ethereum, BNB, Solana...",
       "tr": "Trade Republic",
+      "bourso": "Current accounts, savings, PEA and securities accounts held at BoursoBank",
+      "bourseDirect": "Sync your PEA and securities accounts",
+      "degiro": "Sync your DEGIRO securities account",
       "finary": "Import from Finary",
-      "manual": "Create an account manually"
+      "manual": "Create an account manually",
+      "amundi": "PEE, PEG, PERCO, PER held at Amundi",
+      "property": "House, apartment, land…"
     }
   },
   "sync": {
@@ -458,19 +518,24 @@
     "banks": {
       "title": "Banks",
       "search": "Search a bank",
+      "country": "Country",
+      "countriesLoadError": "Couldn't load all countries — showing France only.",
       "searchPlaceholder": "e.g. BNP Paribas...",
       "searchError": "Unable to search banks right now.",
       "connected": "Active connections",
       "noConnections": "No bank connections",
       "connect": "Connect",
       "retry": "Retry",
+      "reconnect": "Reconnect to bank",
       "delete": "Remove",
       "deleteConfirm": "Remove this bank connection?",
       "callbackCompleting": "Fetching accounts...",
       "callbackDone": "Accounts synced!",
       "callbackError": "Sync error",
       "initiateError": "Connection failed",
-      "psd2ScopeNote": "Enable Banking only syncs current accounts (PSD2 limitation). For PEA, life insurance, savings: use Trade Republic, Boursobank, Finary, or add them manually."
+      "psd2ScopeNote": "Enable Banking only syncs current accounts (PSD2 limitation). For PEA, life insurance, savings: use Trade Republic, Boursobank, Finary, or add them manually.",
+      "proBadge": "Pro",
+      "proBadgeTitle": "Business account — this bank only serves professional customers"
     },
     "tr": {
       "title": "Trade Republic",
@@ -498,14 +563,41 @@
         "unknownError": "An unexpected error occurred."
       }
     },
+    "ibkr": {
+      "title": "Interactive Brokers",
+      "setupHint": "In IBKR Client Portal, create an \"Open Positions\" Flex Query and generate a Flex Web Service token, then paste both below.",
+      "token": "Flex Web Service token",
+      "tokenPlaceholder": "e.g. 123456789012345678901234",
+      "queryId": "Flex Query ID",
+      "queryIdPlaceholder": "e.g. 987654",
+      "connect": "Connect",
+      "sync": "Sync",
+      "syncing": "Syncing…",
+      "disconnect": "Disconnect",
+      "disconnectConfirm": "Remove the stored Interactive Brokers connection?",
+      "connected": "Connected",
+      "statusError": "Last sync failed",
+      "lastSync": "Last sync",
+      "neverSynced": "Never synced",
+      "syncedToast": "Interactive Brokers synced: {{count}} account(s)",
+      "errors": {
+        "connectFailed": "Could not save the connection. Check the token and query id.",
+        "syncFailed": "Interactive Brokers sync failed. Check your token or try again.",
+        "disconnectFailed": "Could not remove the connection. Please try again."
+      }
+    },
     "exchanges": {
       "title": "Exchanges",
       "add": "Add exchange",
       "type": "Exchange type",
       "apiKey": "API Key",
       "apiSecret": "API Secret",
+      "apiKeyOnly": "Meria connects with a single read-only API key — no secret needed.",
+      "showSecret": "Show API secret",
+      "hideSecret": "Hide API secret",
       "connect": "Connect",
       "connectError": "Failed to connect exchange. Check your API key and secret.",
+      "connectErrorKeyOnly": "Failed to connect exchange. Check your API key.",
       "sync": "Synchronize",
       "remove": "Remove",
       "removeConfirm": "Remove this exchange?",
@@ -520,11 +612,14 @@
       "label": "Label",
       "track": "Track",
       "connectError": "Failed to add wallet. Check the address and try again.",
+      "syncError": "Sync failed. Check the address or try again later.",
+      "removeError": "Could not remove this wallet. Please try again.",
       "sync": "Synchronize",
       "remove": "Remove",
       "removeConfirm": "Remove this wallet?",
       "noWallets": "No wallets tracked",
-      "lastSync": "Last sync"
+      "lastSync": "Last sync",
+      "evmHint": "One address, all EVM chains — Ethereum, BNB Chain, Polygon, Arbitrum, Optimism, Base and Avalanche."
     },
     "crypto": {
       "title": "Crypto import (CSV)",
@@ -605,6 +700,8 @@
       "noConnections": "No active sync connections",
       "lastSync": "Last sync",
       "openFinary": "Open Finary page to sync",
+      "sessionExpired": "Session expired",
+      "reconnect": "Reconnect on the provider's tab",
       "trManualInfo": "Trade Republic is the only bank that requires manual re-authentication. You will need to re-enter your phone number and PIN each time you sync.",
       "trSlowWarning": "Connection may take a few moments, this is normal."
     },
@@ -612,20 +709,114 @@
       "title": "BoursoBank",
       "customerId": "Client number",
       "password": "Password",
-      "mfaCode": "MFA code",
+      "appValidationPrompt": "Open the BoursoBank app and approve the sign-in.",
+      "appValidationHint": "This page updates on its own as soon as you approve.",
+      "connect": "Connect",
+      "connecting": "Connecting…",
+      "sync": "Sync",
+      "queued": "Sync queued…",
+      "syncing": "Syncing…",
+      "syncSuccess": "BoursoBank accounts synced.",
+      "clearSession": "Disconnect",
+      "noSession": "No active session",
+      "sessionActive": "Session active",
+      "scope": "Syncs your BoursoBank current accounts, savings accounts and PEA/securities accounts, with the positions they hold. Accounts from other banks that BoursoBank aggregates are not imported.",
+      "errors": {
+        "tooManyAttempts": "Too many attempts. Please wait before retrying.",
+        "invalidCredentials": "Invalid BoursoBank client number or password.",
+        "mfaTypeUnsupported": "BoursoBank asked for an SMS or e-mail code, which Picsou cannot handle. Switch to app validation in your BoursoBank security settings.",
+        "appValidationTimeout": "The app approval was not confirmed in time. Please start over.",
+        "authAttemptExpired": "The authentication attempt expired. Please start over.",
+        "sessionExpired": "The BoursoBank session expired. Please reconnect.",
+        "portfolioIncomplete": "BoursoBank returned an incomplete portfolio. Your existing data was kept.",
+        "formatChanged": "The BoursoBank website format changed. Your existing data was kept.",
+        "invalidData": "BoursoBank returned inconsistent data. Your existing data was kept.",
+        "serverError": "Could not reach BoursoBank. Please try again."
+      }
+    },
+    "degiro": {
+      "title": "DEGIRO",
+      "username": "Username",
+      "password": "Password",
+      "totpCode": "Authenticator code",
       "connect": "Connect",
       "sync": "Synchronize",
       "clearSession": "Disconnect",
       "noSession": "No active session",
       "sessionActive": "Active session",
-      "expiresAt": "Expires on",
-      "mfaPrompt": "A code was sent via {{mfaType}} to {{contact}}",
+      "reauthRequired": "Reconnection needed",
+      "lastSyncedAt": "Last synced on",
+      "totpPrompt": "Enter the 6-digit code from your authenticator app",
       "errors": {
         "tooManyAttempts": "Too many attempts. Please wait.",
         "invalidCredentials": "Invalid credentials.",
-        "invalidMfaCode": "Invalid or expired MFA code.",
+        "invalidTotpCode": "Invalid or expired authenticator code.",
         "sessionExpired": "Session expired. Please reconnect.",
-        "serverError": "BoursoBank server error. Please try again."
+        "serverError": "DEGIRO server error. Please try again."
+      }
+    },
+    "bourseDirect": {
+      "title": "Bourse Direct",
+      "login": "Login",
+      "password": "Password",
+      "otpCode": "6-digit security code",
+      "otpPrompt": "Enter the code sent by Bourse Direct. This device will not be marked as trusted.",
+      "connect": "Connect",
+      "connecting": "Connecting…",
+      "validate": "Validate code",
+      "validating": "Validating…",
+      "sync": "Sync",
+      "queued": "Synchronization queued…",
+      "syncing": "Syncing…",
+      "syncSuccess": "Portfolio synchronized.",
+      "clearSession": "Disconnect",
+      "noSession": "No active session",
+      "sessionActive": "Active session",
+      "scope": "Syncs positions, average cost, price, valuation and cash for PEA and securities accounts.",
+      "errors": {
+        "tooManyAttempts": "Too many attempts. Please wait.",
+        "invalidCredentials": "Invalid Bourse Direct credentials.",
+        "invalidCode": "Invalid or expired security code. Start the login again.",
+        "authAttemptExpired": "The authentication attempt expired. Start the login again.",
+        "sessionExpired": "The Bourse Direct session expired. Please reconnect.",
+        "portfolioIncomplete": "Bourse Direct returned an incomplete portfolio. Your existing data was kept unchanged.",
+        "formatChanged": "Bourse Direct changed its portfolio format. Your existing data was kept unchanged.",
+        "invalidData": "Bourse Direct returned inconsistent portfolio data. Your existing data was kept unchanged.",
+        "serverError": "Could not reach Bourse Direct. Please try again."
+      }
+    },
+    "amundi": {
+      "title": "Amundi",
+      "login": "Username",
+      "password": "Password",
+      "otpCode": "6-digit security code",
+      "otpPrompt": "Enter the code Amundi sent you by SMS.",
+      "appValidationPrompt": "Open the Mon Épargne app and approve the sign-in.",
+      "appValidationHint": "This page updates on its own as soon as you approve.",
+      "connect": "Connect",
+      "connecting": "Connecting…",
+      "validate": "Submit code",
+      "validating": "Validating…",
+      "sync": "Sync",
+      "queued": "Sync queued…",
+      "syncing": "Syncing…",
+      "syncSuccess": "Savings plans synced.",
+      "clearSession": "Disconnect",
+      "noSession": "No active session",
+      "sessionActive": "Session active",
+      "scope": "Syncs your employee savings plans (PEE, PEG, PERCO, PER) and the FCPE lines they hold, with their valuation.",
+      "errors": {
+        "tooManyAttempts": "Too many attempts. Please wait before retrying.",
+        "invalidCredentials": "Invalid Amundi credentials.",
+        "captchaBlocked": "Amundi asked for a captcha Picsou cannot solve. Please try again later.",
+        "invalidCode": "Invalid or expired security code. Please start over.",
+        "appValidationTimeout": "The app approval was not confirmed in time. Please start over.",
+        "authAttemptExpired": "The authentication attempt expired. Please start over.",
+        "sessionExpired": "The Amundi session expired. Please reconnect.",
+        "portfolioIncomplete": "Amundi returned incomplete plans. Your existing data was kept.",
+        "formatChanged": "The Amundi website format changed. Your existing data was kept.",
+        "invalidData": "Amundi returned inconsistent data. Your existing data was kept.",
+        "serverError": "Could not reach Amundi. Please try again."
       }
     }
   },
@@ -646,6 +837,9 @@
     "dateFormat": "Date format",
     "dateFormatLocale": "Localized",
     "dateFormatIso": "DD-MM-YYYY",
+    "sidebarStyle": "Sidebar style",
+    "sidebarStyleCurrent": "Current",
+    "sidebarStyleClassic": "Classic",
     "account": "Account",
     "accountDescription": "Manage your account",
     "username": "Username",
@@ -755,16 +949,46 @@
     "revokeTitle": "Revoke this key?",
     "revokeDescription": "Any MCP client using this key loses access immediately. This can't be undone.",
     "scopes": {
-      "accounts_read": { "label": "Accounts", "desc": "View accounts, balances, holdings and history" },
-      "transactions_read": { "label": "Transactions", "desc": "View transactions" },
-      "goals_read": { "label": "Goals", "desc": "View savings goals" },
-      "dashboard_read": { "label": "Dashboard", "desc": "View net worth, dashboard and P&L" },
-      "prices_read": { "label": "Prices", "desc": "Look up asset prices" },
-      "family_read": { "label": "Family", "desc": "View the shared family dashboard" },
-      "accounts_write": { "label": "Accounts", "desc": "Create and edit manual accounts, balances and holdings" },
-      "transactions_write": { "label": "Transactions", "desc": "Add, edit and delete manual transactions" },
-      "goals_write": { "label": "Goals", "desc": "Create, edit and delete goals and contributions" },
-      "sync_trigger": { "label": "Sync", "desc": "Refresh existing bank, crypto and broker connections" }
+      "accounts_read": {
+        "label": "Accounts",
+        "desc": "View accounts, balances, holdings and history"
+      },
+      "transactions_read": {
+        "label": "Transactions",
+        "desc": "View transactions"
+      },
+      "goals_read": {
+        "label": "Goals",
+        "desc": "View savings goals"
+      },
+      "dashboard_read": {
+        "label": "Dashboard",
+        "desc": "View net worth, dashboard and P&L"
+      },
+      "prices_read": {
+        "label": "Prices",
+        "desc": "Look up asset prices"
+      },
+      "family_read": {
+        "label": "Family",
+        "desc": "View the shared family dashboard"
+      },
+      "accounts_write": {
+        "label": "Accounts",
+        "desc": "Create and edit manual accounts, balances and holdings"
+      },
+      "transactions_write": {
+        "label": "Transactions",
+        "desc": "Add, edit and delete manual transactions"
+      },
+      "goals_write": {
+        "label": "Goals",
+        "desc": "Create, edit and delete goals and contributions"
+      },
+      "sync_trigger": {
+        "label": "Sync",
+        "desc": "Refresh existing bank, crypto and broker connections"
+      }
     }
   },
   "admin": {
@@ -825,6 +1049,7 @@
       "description": "Enable or disable data connectors",
       "enablebanking": "Enable Banking",
       "boursobank": "BoursoBank",
+      "boursedirect": "Bourse Direct",
       "traderepublic": "Trade Republic",
       "finary": "Finary",
       "crypto": "Crypto"
@@ -1008,7 +1233,11 @@
         },
         "traderepublic": {
           "title": "Trade Republic",
-          "description": "Sync your Trade Republic portfolio using your login. You'll add credentials when you create the account."
+          "description": "Sync your Trade Republic portfolio with your credentials. You will add them when creating the account."
+        },
+        "boursedirect": {
+          "title": "Bourse Direct",
+          "description": "Directly sync your PEA and securities-account positions with two-factor authentication."
         },
         "finary": {
           "title": "Finary",
@@ -1112,6 +1341,13 @@
       "continue": "Continue",
       "skip": "Skip for now"
     },
+    "bourseDirect": {
+      "title": "Bourse Direct is ready.",
+      "body": "After setup, sign in with your Bourse Direct credentials and the 6-digit security code.",
+      "tip": "Picsou only stores an encrypted session. Your password and 2FA code are never stored. Imported accounts remain attached to their PEA or securities account.",
+      "cta": "Enable Bourse Direct",
+      "skip": "Don't enable Bourse Direct"
+    },
     "tr": {
       "title": "Trade Republic is ready to go.",
       "body": "There's nothing to configure here — you'll sign in with your Trade Republic credentials when you add the account from Picsou.",
@@ -1128,7 +1364,7 @@
     },
     "crypto": {
       "title": "Encrypt your exchange API keys",
-      "body": "Your Binance / Kraken / Coinbase API keys are encrypted at rest. Picsou can generate the encryption key for you — it stays on your disk and is never transmitted.",
+      "body": "Your exchange API keys (Binance, Meria...) are encrypted at rest. Picsou can generate the encryption key for you — it stays on your disk and is never transmitted.",
       "generateCta": "Generate a key for me",
       "generating": "Generating...",
       "existed": "Your encryption key is already configured — nothing to do.",
@@ -1147,6 +1383,226 @@
       "cta": "Open my dashboard",
       "loginFallback": "Go to login",
       "loggingIn": "Logging you in..."
+    }
+  },
+  "import": {
+    "importCsv": "Import CSV",
+    "title": "Import transactions from CSV",
+    "uploadHint": "Drag & drop a CSV file here, or choose one",
+    "chooseFile": "Choose a file",
+    "mapColumns": "Map columns",
+    "delimiter": "Delimiter",
+    "delimiterComma": "Comma (,)",
+    "delimiterSemicolon": "Semicolon (;)",
+    "delimiterTab": "Tab",
+    "decimal": "Decimal separator",
+    "dateFormat": "Date format",
+    "feesIncluded": "Fees are already included in the amount",
+    "preview": "Preview",
+    "rowsTotal": "{{count}} rows",
+    "none": "— none —",
+    "back": "Back",
+    "import": "Import",
+    "rowsImported": "{{count}} transactions imported",
+    "rowsSkipped": "{{count}} rows skipped",
+    "rowLabel": "Row {{row}}",
+    "field": {
+      "date": "Date",
+      "side": "Buy / Sell",
+      "tickerOrIsin": "Ticker / ISIN",
+      "name": "Name",
+      "quantity": "Quantity",
+      "unitPrice": "Unit price",
+      "fees": "Fees",
+      "currency": "Currency",
+      "amount": "Amount"
+    }
+  },
+  "realized": {
+    "title": "Realized gains",
+    "realizedGains": "Realized",
+    "proceeds": "Proceeds",
+    "avgCost": "Avg cost",
+    "qtySold": "Qty sold"
+  },
+  "sidebarStylePrompt": {
+    "title": "Pick your sidebar style",
+    "description": "Two layouts to choose from — you can switch anytime.",
+    "hint": "Changeable anytime in Settings > Appearance."
+  },
+  "property": {
+    "kind": {
+      "HOUSE": "House",
+      "APARTMENT": "Apartment",
+      "BUILDING": "Building",
+      "LAND": "Land",
+      "PARKING": "Parking",
+      "COMMERCIAL": "Commercial"
+    },
+    "category": {
+      "PRIMARY_RESIDENCE": "Primary residence",
+      "SECONDARY_RESIDENCE": "Second home",
+      "RENTAL": "Buy-to-let",
+      "LAND": "Land",
+      "OTHER": "Other"
+    },
+    "address": {
+      "noMatch": "No matching address"
+    },
+    "form": {
+      "classification": "Property identity",
+      "propertyType": "Property type",
+      "category": "Category",
+      "description": "Description",
+      "choose": "Choose…",
+      "unknown": "Not set",
+      "address": "Address",
+      "street": "Street address",
+      "addressPlaceholder": "12 rue de la République",
+      "postalCode": "Postcode",
+      "city": "City",
+      "geocoded": "Address located (INSEE code {{insee}})",
+      "characteristics": "Characteristics",
+      "surfaceArea": "Living area (m²)",
+      "landArea": "Land area (m²)",
+      "rooms": "Rooms",
+      "bedrooms": "Bedrooms",
+      "constructionYear": "Year built",
+      "energyClass": "Energy rating (DPE)",
+      "details": "Details",
+      "floorNumber": "Floor",
+      "floorsTotal": "Floors in building",
+      "hasElevator": "Lift",
+      "garageCount": "Garages",
+      "parkingCount": "Parking spaces",
+      "hasGarden": "Garden",
+      "hasTerrace": "Terrace",
+      "hasBalcony": "Balcony",
+      "acquisition": "Acquisition",
+      "purchasePrice": "Purchase price (excl. fees)",
+      "purchaseDate": "Purchase date",
+      "agencyFees": "Agency fees",
+      "notaryFees": "Notary fees",
+      "worksCost": "Renovation costs",
+      "rentalIncome": "Monthly rent",
+      "valuationMode": "Valuation",
+      "autoValuation": "Automatic estimate",
+      "autoValuationHint": "Updates the property value monthly from French DVF open data. Turn off to freeze your own figure.",
+      "editTitle": "Edit property",
+      "createTitle": "Describe the property",
+      "intro": "Fill in the type, living area and address to enable automatic valuation.",
+      "saveError": "Could not save the property",
+      "bathrooms": "Bathrooms"
+    },
+    "details": {
+      "title": "Characteristics",
+      "costBasis": "Total cost",
+      "currentValue": "Current value",
+      "gain": "Gain",
+      "coOwnedNote": "You hold {{percent}}% of this property. Totals count only your share."
+    },
+    "valuation": {
+      "title": "Valuation",
+      "refresh": "Re-estimate",
+      "estimate": "Estimate",
+      "range": "Range:",
+      "pricePerSqm": "Price per m²",
+      "sampleSize": "Transactions",
+      "sourceYear": "Data year",
+      "scale": "Scale",
+      "method": "How this figure is built",
+      "methodDisclaimer": "These adjustments are rules of thumb: the DVF data records no floor, lift, garden or condition.",
+      "reindexed": "INSEE re-indexing",
+      "manualMode": "Manual valuation",
+      "manualNotApplied": "Manual mode is on: this estimate did not change the property value.",
+      "error": "The valuation failed",
+      "confidence": {
+        "HIGH": "High confidence",
+        "MEDIUM": "Medium confidence",
+        "LOW": "Low confidence"
+      },
+      "scaleValue": {
+        "communes": "Municipality",
+        "departements": "Department"
+      },
+      "status": {
+        "OK": "Estimate available",
+        "UNSUPPORTED_AREA": "Automatic valuation is not available in this area.",
+        "UNSUPPORTED_AREA_hint": "Alsace, Moselle and Mayotte use the livre foncier registry, so DVF holds no data there. Use the Patrim service on impots.gouv.fr and enter the value manually.",
+        "NOT_ESTIMABLE": "This property type has no reliable price per m². Enter the value manually.",
+        "INCOMPLETE_DATA": "Add the living area to enable the estimate.",
+        "GEOCODING_FAILED": "The address could not be located. Check it and try again.",
+        "NO_COMPARABLE_DATA": "No comparable transactions in this municipality.",
+        "PROVIDER_UNAVAILABLE": "The data service is temporarily unavailable. The previous value is kept."
+      }
+    },
+    "financing": {
+      "title": "Financing",
+      "gross": "Gross value",
+      "debt": "Outstanding debt",
+      "net": "Net value",
+      "equityShare": "{{pct}}% of the property is genuinely yours"
+    },
+    "summary": {
+      "title": "Property wealth",
+      "gross": "Gross",
+      "debt": "Debt",
+      "net": "Net",
+      "gain": "Gain",
+      "loanToValue": "Loan-to-value: {{pct}}% of the properties' value",
+      "rentalIncome": "Monthly rental income:"
+    },
+    "ownership": {
+      "title": "Ownership split",
+      "hint": "Set each member's share. Everyone counts only their own part in their net worth.",
+      "total": "Total assigned",
+      "overAllocated": "The shares add up to more than 100%.",
+      "unassigned": "{{percent}}% is assigned to nobody: that part is held outside Picsou and counts towards no one's net worth.",
+      "saveError": "Could not save the ownership split"
+    },
+    "chart": {
+      "title": "Estimate over time",
+      "estimate": "Estimate",
+      "range": "Range",
+      "costBasis": "Total cost"
+    },
+    "adjustments": {
+      "NO_ELEVATOR": "High floor without a lift",
+      "GROUND_FLOOR": "Ground floor",
+      "TOP_FLOOR_ELEVATOR": "Top floor with a lift",
+      "GARDEN": "Garden",
+      "TERRACE": "Terrace",
+      "BALCONY": "Balcony",
+      "GARAGE": "Garage",
+      "PARKING": "Parking space",
+      "LAND_SURPLUS": "Land beyond the reference plot",
+      "ENERGY_A": "EPC A",
+      "ENERGY_B": "EPC B",
+      "ENERGY_C": "EPC C",
+      "ENERGY_E": "EPC E",
+      "ENERGY_F": "EPC F (poor insulation)",
+      "ENERGY_G": "EPC G (poor insulation)",
+      "ERA_PRE_1949": "Built before 1949",
+      "ERA_1949_1974": "Built 1949-1974",
+      "ERA_2001_2012": "Built 2001-2012",
+      "ERA_POST_2012": "Built after 2012",
+      "EXTRA_BATHROOMS": "More than one bathroom"
+    },
+    "add": {
+      "source": "Real estate",
+      "title": "Add a property",
+      "action": "Add a property",
+      "submit": "Create property",
+      "progress": "Steps",
+      "step1Hint": "What kind of property are you adding?",
+      "step2Hint": "Where is it, and how big is it?",
+      "step3Hint": "What did it cost you?",
+      "name": "Property name",
+      "namePlaceholder": "Primary residence",
+      "addressHint": "The address locates the municipality and is what makes automatic valuation possible.",
+      "feesHint": "Fees make up the total cost: gain is measured against that, not against the purchase price alone.",
+      "notEstimable": "This property type has no reliable price per m², so its value stays manually entered.",
+      "error": "Could not create the property"
     }
   }
 }

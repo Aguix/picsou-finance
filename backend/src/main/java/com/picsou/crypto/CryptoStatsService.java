@@ -73,7 +73,7 @@ public class CryptoStatsService {
             holdings.merge(h.getAsset().getSymbol(), AggHolding.from(h), AggHolding::plus);
         }
 
-        List<Transaction> txs = transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(
+        List<Transaction> txs = transactionRepository.findByAccountIdAndTxTypeInOrderByDateAscIdAsc(
             account.getId(), TX_TYPES);
 
         return assemble(holdings, txs);

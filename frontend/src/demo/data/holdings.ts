@@ -18,6 +18,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       coingeckoId: null,
       coinmarketcapId: null,
       yahooSymbol: null,
+      priceAsOf: new Date().toISOString().slice(0, 10),
+      priceStale: false,
     },
     {
       ticker: 'MSFT',
@@ -35,6 +37,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       coingeckoId: null,
       coinmarketcapId: null,
       yahooSymbol: null,
+      priceAsOf: new Date().toISOString().slice(0, 10),
+      priceStale: false,
     },
     {
       ticker: 'AMZN',
@@ -52,6 +56,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       coingeckoId: null,
       coinmarketcapId: null,
       yahooSymbol: null,
+      priceAsOf: new Date().toISOString().slice(0, 10),
+      priceStale: false,
     },
     {
       ticker: 'NVDA',
@@ -69,6 +75,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       coingeckoId: null,
       coinmarketcapId: null,
       yahooSymbol: null,
+      priceAsOf: new Date().toISOString().slice(0, 10),
+      priceStale: false,
     },
   ],
   6: [
@@ -88,6 +96,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       coingeckoId: 'bitcoin',
       coinmarketcapId: '1',
       yahooSymbol: null,
+      priceAsOf: new Date().toISOString().slice(0, 10),
+      priceStale: false,
     },
     {
       ticker: 'ETH',
@@ -105,6 +115,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       coingeckoId: 'ethereum',
       coinmarketcapId: null,
       yahooSymbol: null,
+      priceAsOf: new Date().toISOString().slice(0, 10),
+      priceStale: false,
     },
     {
       ticker: 'SOL',
@@ -122,6 +134,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       coingeckoId: null,
       coinmarketcapId: null,
       yahooSymbol: null,
+      priceAsOf: new Date().toISOString().slice(0, 10),
+      priceStale: false,
     },
   ],
   3: [
@@ -141,6 +155,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       coingeckoId: null,
       coinmarketcapId: null,
       yahooSymbol: null,
+      priceAsOf: new Date().toISOString().slice(0, 10),
+      priceStale: false,
     },
     {
       ticker: 'EUNL',
@@ -158,6 +174,8 @@ export const mockHoldings: Record<number, HoldingResponse[]> = {
       coingeckoId: null,
       coinmarketcapId: null,
       yahooSymbol: null,
+      priceAsOf: new Date().toISOString().slice(0, 10),
+      priceStale: false,
     },
   ],
 }

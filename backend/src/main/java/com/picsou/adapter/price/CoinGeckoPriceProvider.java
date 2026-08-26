@@ -79,6 +79,11 @@ public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverP
     // Retry-After (CoinGecko's free-tier window is ~1 minute).
     private static final Duration DEFAULT_RETRY_AFTER = Duration.ofSeconds(60);
 
+    // Ceiling on a server-supplied Retry-After. A misconfigured (or hostile) "86400" would otherwise
+    // park a key for a day, long after the real limit lifted -- and with the LRU rotation that means
+    // the remaining keys absorb the whole load for that day.
+    private static final Duration MAX_RETRY_AFTER = Duration.ofMinutes(15);
+
     // The anonymous session (no key) is picked when no key is configured. It has no DB id, so it's
     // tracked in the breaker under this sentinel; a real session id is never negative.
     private static final long ANONYMOUS_SESSION = -1L;
@@ -191,7 +196,11 @@ public class CoinGeckoPriceProvider implements PriceProviderPort, AssetResolverP
             String header = e.getHeaders().getFirst("Retry-After");
             if (header != null && !header.isBlank()) {
                 try {
-                    return Optional.of(Duration.ofSeconds(Long.parseLong(header.trim())));
+                    long seconds = Long.parseLong(header.trim());
+                    // A zero or negative delay would put the breaker's deadline in the past, i.e.
+                    // silently not pause the key at all -- fall back to the default window instead.
+                    if (seconds <= 0) return Optional.empty();
+                    return Optional.of(Duration.ofSeconds(Math.min(seconds, MAX_RETRY_AFTER.toSeconds())));
                 } catch (NumberFormatException ignored) {
                     // Retry-After can also be an HTTP-date; we don't parse that — fall back to default.
                 }

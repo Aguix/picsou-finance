@@ -1,6 +1,7 @@
 package com.picsou.service;
 
 import com.picsou.model.FinancialAsset;
+import com.picsou.model.PriceSnapshot;
 import com.picsou.repository.FinancialAssetRepository;
 import com.picsou.repository.PriceSnapshotRepository;
 import org.junit.jupiter.api.Test;
@@ -11,10 +12,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -118,5 +121,145 @@ class PriceServiceTest {
         ArgumentCaptor<FinancialAsset> captor = ArgumentCaptor.forClass(FinancialAsset.class);
         org.mockito.Mockito.verify(priceRouter).getIntradayPricesEur(captor.capture(), any(), any());
         assertThat(captor.getValue().getYahooSymbol()).isEqualTo("MC.PA");
+    }
+
+    // ── Freshness and the last-known-price fallback ───────────────────────────
+
+    private static FinancialAsset registered(String symbol, long id) {
+        return FinancialAsset.builder().id(id).symbol(symbol).coingeckoId(symbol.toLowerCase()).build();
+    }
+
+    private static PriceSnapshot snapshot(FinancialAsset asset, String price, LocalDate date) {
+        return PriceSnapshot.builder().asset(asset).date(date).priceEur(new BigDecimal(price)).build();
+    }
+
+    @Test
+    void getQuotes_liveAggregatorAnswer_isQuotedAsFreshAndTodayDated() {
+        FinancialAsset btc = registered("BTC", 1L);
+        when(assetRepository.findBySymbolIn(any())).thenReturn(List.of(btc));
+        when(priceRouter.getPricesEur(any())).thenReturn(Map.of("BTC", new BigDecimal("50000")));
+
+        Map<String, PriceService.Quote> quotes = service.getQuotes(Set.of("BTC"));
+
+        assertThat(quotes.get("BTC").price()).isEqualByComparingTo("50000");
+        assertThat(quotes.get("BTC").live()).isTrue();
+        assertThat(quotes.get("BTC").asOf()).isEqualTo(LocalDate.now());
+    }
+
+    @Test
+    void getQuotes_noLivePrice_fallsBackToTheLastRecordedOne_markedStale() {
+        // The point of the fallback: an outage degrades the price's *age*, not its existence, so
+        // the callers that write a valuation into balance_snapshot do not engrave a hole.
+        FinancialAsset btc = registered("BTC", 1L);
+        LocalDate recorded = LocalDate.now().minusDays(2);
+        when(assetRepository.findBySymbolIn(any())).thenReturn(List.of(btc));
+        when(priceRouter.getPricesEur(any())).thenReturn(Map.of());
+        when(priceSnapshotRepository.findRecentByAssetIds(any(), any(), any()))
+            .thenReturn(List.of(snapshot(btc, "48000", recorded)));
+
+        Map<String, PriceService.Quote> quotes = service.getQuotes(Set.of("BTC"));
+
+        assertThat(quotes.get("BTC").price()).isEqualByComparingTo("48000");
+        assertThat(quotes.get("BTC").live()).isFalse();
+        assertThat(quotes.get("BTC").asOf()).isEqualTo(recorded);
+    }
+
+    @Test
+    void getQuotes_fallbackIsLookedUpByAssetId_notBySymbol() {
+        // A coin and a listed equity can share a symbol. Reading the fallback by id is what stops
+        // an unresolved coin from being valued at the stock's recorded price.
+        FinancialAsset sui = registered("SUI", 42L);
+        when(assetRepository.findBySymbolIn(any())).thenReturn(List.of(sui));
+        when(priceRouter.getPricesEur(any())).thenReturn(Map.of());
+        when(priceSnapshotRepository.findRecentByAssetIds(any(), any(), any())).thenReturn(List.of());
+
+        service.getQuotes(Set.of("SUI"));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Collection<Long>> ids = ArgumentCaptor.forClass(Collection.class);
+        org.mockito.Mockito.verify(priceSnapshotRepository)
+            .findRecentByAssetIds(ids.capture(), any(), any());
+        assertThat(ids.getValue()).containsExactly(42L);
+    }
+
+    @Test
+    void getQuotes_worthlessAsset_isAKnownZero_withNoAggregatorCallAndNoFallback() {
+        FinancialAsset dead = FinancialAsset.builder().id(7L).symbol("DEAD")
+            .status(com.picsou.model.AssetStatus.WORTHLESS).build();
+        when(assetRepository.findBySymbolIn(any())).thenReturn(List.of(dead));
+
+        Map<String, PriceService.Quote> quotes = service.getQuotes(Set.of("DEAD"));
+
+        assertThat(quotes.get("DEAD").price()).isEqualByComparingTo("0");
+        assertThat(quotes.get("DEAD").live()).isTrue();
+        org.mockito.Mockito.verifyNoInteractions(priceRouter);
+        org.mockito.Mockito.verifyNoInteractions(priceSnapshotRepository);
+    }
+
+    @Test
+    void getCryptoQuotes_unregisteredSymbol_isLeftUnpriced_ratherThanQuotedAsTheEquity() {
+        // The crypto-only guard: without it the symbol would ride a transient asset carrying
+        // yahoo_symbol = symbol, and an exchange coin would be valued at the share price of the
+        // company trading under the same ticker -- written into the balance, with nothing to show
+        // for it in the logs.
+        when(assetRepository.findBySymbolIn(any())).thenReturn(List.of());
+
+        Map<String, PriceService.Quote> quotes = service.getCryptoQuotes(Set.of("SUI"));
+
+        assertThat(quotes).doesNotContainKey("SUI");
+        // Neither an aggregator call nor a fallback lookup: with no registry row there is no id to
+        // read a history by, so the symbol simply stays unpriced.
+        org.mockito.Mockito.verifyNoInteractions(priceRouter);
+        org.mockito.Mockito.verifyNoInteractions(priceSnapshotRepository);
+    }
+
+    @Test
+    void getQuotes_sameSymbolUnregistered_stillReachesTheAggregatorThroughATransientAsset() {
+        // The plain (non-crypto) variant keeps the passthrough: a caller-supplied ticker is
+        // explicitly requested, so it is priced verbatim exactly as before.
+        when(assetRepository.findBySymbolIn(any())).thenReturn(List.of());
+        when(priceRouter.getPricesEur(any())).thenReturn(Map.of("SUI", new BigDecimal("3")));
+
+        assertThat(service.getQuotes(Set.of("SUI")).get("SUI").price()).isEqualByComparingTo("3");
+    }
+
+    @Test
+    void refreshCryptoQuotes_recordsOnlyLivePrices_butStillValuesFromTheFallback() {
+        // Re-recording a fallback under today's date would launder a stale price into a fresh one
+        // and let the fallback walk itself forward for good.
+        FinancialAsset btc = registered("BTC", 1L);
+        LocalDate recorded = LocalDate.now().minusDays(1);
+        when(assetRepository.findBySymbolIn(any())).thenReturn(List.of(btc));
+        when(priceRouter.getPricesEur(any())).thenReturn(Map.of());
+        when(priceSnapshotRepository.findRecentByAssetIds(any(), any(), any()))
+            .thenReturn(List.of(snapshot(btc, "48000", recorded)));
+
+        Map<String, PriceService.Quote> quotes = service.refreshCryptoQuotes(Set.of("BTC"));
+
+        assertThat(quotes.get("BTC").price()).isEqualByComparingTo("48000");
+        assertThat(quotes.get("BTC").live()).isFalse();
+        org.mockito.Mockito.verify(priceSnapshotRepository, org.mockito.Mockito.never())
+            .save(any(PriceSnapshot.class));
+    }
+
+    @Test
+    void refreshPrices_servesAStillFreshCacheEntry_insteadOfRefetchingIt() {
+        // GET /prices is polled by the frontend on an interval: bypassing the TTL here would turn
+        // every open dashboard tab into a steady stream of aggregator calls.
+        FinancialAsset btc = registered("BTC", 1L);
+        when(assetRepository.findBySymbolIn(any())).thenReturn(List.of(btc));
+        when(priceRouter.getPricesEur(any())).thenReturn(Map.of("BTC", new BigDecimal("50000")));
+        when(priceSnapshotRepository.findByAssetIdAndDate(any(), any())).thenReturn(Optional.empty());
+
+        Map<String, BigDecimal> first = service.refreshPrices(Set.of("BTC"));
+        Map<String, BigDecimal> second = service.refreshPrices(Set.of("BTC"));
+
+        assertThat(first.get("BTC")).isEqualByComparingTo("50000");
+        assertThat(second.get("BTC")).isEqualByComparingTo("50000");
+        // One aggregator round-trip for the two refreshes, and one snapshot write: the second pass
+        // was served from the cache, and a cache-served value is not re-recorded.
+        org.mockito.Mockito.verify(priceRouter, org.mockito.Mockito.times(1)).getPricesEur(any());
+        org.mockito.Mockito.verify(priceSnapshotRepository, org.mockito.Mockito.times(1))
+            .save(any(PriceSnapshot.class));
     }
 }

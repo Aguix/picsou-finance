@@ -1,5 +1,5 @@
 import { api } from '@/lib/api-client'
-import type { Account, AccountRequest, BalanceSnapshot, DebtRequest, DebtInfo, HoldingResponse, LoanScheduleResponse, RealEstateMetadataRequest, RealEstateMetadata, SecurityInsight, Transaction, TransactionRequest } from '@/types/api'
+import type { Account, AccountDeletionImpact, AccountRequest, BalanceSnapshot, DebtRequest, DebtInfo, HoldingResponse, LoanScheduleResponse, Ownership, OwnershipRequest, PropertyValuation, PropertyValuationHistoryEntry, RealEstateMetadataRequest, RealEstateMetadata, RealEstateSummary, RealizedPnlResponse, SecurityInsight, Transaction, TransactionImportPreviewResponse, TransactionImportRequest, TransactionImportResultResponse, TransactionRequest, ExchangePositionResponse } from '@/types/api'
 
 export const accountsApi = {
   list: () => api.get<Account[]>('/accounts').then(r => r.data),
@@ -7,10 +7,17 @@ export const accountsApi = {
   create: (data: AccountRequest) => api.post<Account>('/accounts', data).then(r => r.data),
   update: (id: number, data: AccountRequest) => api.put<Account>(`/accounts/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/accounts/${id}`),
+  deletionImpact: (id: number) =>
+    api.get<AccountDeletionImpact>(`/accounts/${id}/deletion-impact`).then(r => r.data),
   history: (id: number, from?: string, to?: string) =>
     api.get<BalanceSnapshot[]>(`/accounts/${id}/history`, { params: { from, to } }).then(r => r.data),
   holdings: (id: number) =>
     api.get<HoldingResponse[]>(`/accounts/${id}/holdings`).then(r => r.data),
+
+  // Empty for every account without a per-product breakdown (i.e. everything but a crypto
+  // exchange), in which case the caller keeps the flat holdings table.
+  positions: (id: number) =>
+    api.get<ExchangePositionResponse[]>(`/accounts/${id}/positions`).then(r => r.data),
   transactions: (id: number) =>
     api.get<Transaction[]>(`/accounts/${id}/transactions`).then(r => r.data),
   prices: (tickers: string[]) =>
@@ -41,4 +48,32 @@ export const accountsApi = {
     api.put<HoldingResponse>(`/accounts/${accountId}/holdings/${ticker}`, data).then(r => r.data),
   deleteHolding: (accountId: number, ticker: string) =>
     api.delete(`/accounts/${accountId}/holdings/${ticker}`),
+  importPreview: (id: number, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<TransactionImportPreviewResponse>(
+      `/accounts/${id}/transactions/import/preview`, form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    ).then(r => r.data)
+  },
+  importExecute: (id: number, data: TransactionImportRequest) =>
+    api.post<TransactionImportResultResponse>(`/accounts/${id}/transactions/import`, data).then(r => r.data),
+  realizedPnl: (id: number) =>
+    api.get<RealizedPnlResponse>(`/accounts/${id}/realized-pnl`).then(r => r.data),
+  /**
+   * Always resolves: a non-OK `status` in the body explains why no figure could be produced
+   * (uncovered area, missing living area) and is information to render, not an error.
+   */
+  refreshValuation: (id: number) =>
+    api.post<PropertyValuation>(`/accounts/${id}/valuation/refresh`).then(r => r.data),
+  ownership: (id: number) =>
+    api.get<Ownership>(`/accounts/${id}/ownership`).then(r => r.data),
+  updateOwnership: (id: number, data: OwnershipRequest) =>
+    api.put<Ownership>(`/accounts/${id}/ownership`, data).then(r => r.data),
+}
+
+export const realEstateApi = {
+  summary: () => api.get<RealEstateSummary>('/real-estate/summary').then(r => r.data),
+  valuations: (accountId: number) =>
+    api.get<PropertyValuationHistoryEntry[]>(`/real-estate/${accountId}/valuations`).then(r => r.data),
 }

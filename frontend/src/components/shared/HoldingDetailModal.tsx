@@ -16,18 +16,7 @@ import {
 import { TrendingUp, TrendingDown, Loader2 } from 'lucide-react'
 import { type TimeRange } from '@/components/shared/TimeRangeSelector'
 import { formatDate } from '@/lib/utils'
-
-const ACCOUNT_TYPE_I18N: Record<string, string> = {
-  PEA: 'accountTypes.pea',
-  COMPTE_TITRES: 'accountTypes.compteTitres',
-  CRYPTO: 'accountTypes.crypto',
-  CHECKING: 'accountTypes.checking',
-  SAVINGS: 'accountTypes.savings',
-  LEP: 'accountTypes.lep',
-  REAL_ESTATE: 'accountTypes.realEstate',
-  LOAN: 'accountTypes.loan',
-  OTHER: 'accountTypes.other',
-}
+import { accountTypeLabelKey } from '@/lib/constants'
 
 type ChartMode = 'holding' | 'price'
 
@@ -55,20 +44,31 @@ export function HoldingDetailModal({ line, onClose }: HoldingDetailModalProps) {
 
   const history = useMemo(() => {
     if (!rawHistory) return []
-    return rawHistory.map(p => ({
-      date: p.date,
-      total: mode === 'holding' && line ? p.priceEur * line.quantity : p.priceEur,
-      ...(investedRef !== undefined ? { invested: investedRef } : {}),
-    }))
+    return rawHistory.map(p => {
+      const total = mode === 'holding' && line ? p.priceEur * line.quantity : p.priceEur
+      return {
+        date: p.date,
+        total,
+        // For a pure holding, value − cost basis IS its debt-free investment
+        // pnl — emit it so the chart tooltip keeps its gain/loss row (the
+        // tooltip reads `pnl` and never recomputes total − invested).
+        ...(investedRef !== undefined ? { invested: investedRef, pnl: total - investedRef } : {}),
+      }
+    })
   }, [rawHistory, mode, line, investedRef])
 
   const intraday = useMemo(() => {
     if (!is24H || !rawHistory) return []
-    return rawHistory.map(p => ({
-      timestamp: p.date,
-      total: mode === 'holding' && line ? p.priceEur * line.quantity : p.priceEur,
-      ...(investedRef !== undefined ? { invested: investedRef } : {}),
-    }))
+    return rawHistory.map(p => {
+      const total = mode === 'holding' && line ? p.priceEur * line.quantity : p.priceEur
+      return {
+        timestamp: p.date,
+        total,
+        // Same as the history mapping above: value − cost basis is the holding's
+        // debt-free pnl; the tooltip reads `pnl` and never recomputes it.
+        ...(investedRef !== undefined ? { invested: investedRef, pnl: total - investedRef } : {}),
+      }
+    })
   }, [rawHistory, mode, line, is24H, investedRef])
 
   const priceChange = useMemo(() => {
@@ -209,7 +209,7 @@ export function HoldingDetailModal({ line, onClose }: HoldingDetailModalProps) {
                 <div>
                   <p className="text-xs text-muted-foreground mb-0.5">{t('holdings.type')}</p>
                   <Badge variant="outline">
-                    {t(ACCOUNT_TYPE_I18N[line.accountType] ?? `accountTypes.${line.accountType.toLowerCase()}`)}
+                    {t(accountTypeLabelKey(line.accountType))}
                   </Badge>
                 </div>
               </div>

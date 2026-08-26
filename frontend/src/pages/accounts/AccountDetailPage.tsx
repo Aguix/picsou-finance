@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  useAccount, useAccountHistory, useHoldingsWithLivePrices,
+  useAccount, useAccountHistory, useHoldingsWithLivePrices, useAccountPositions,
   useAccountTransactions, useAddTransaction, useDeleteTransaction,
   useUpdateTransaction, useUpdateHolding, useDeleteHolding
 } from '@/features/accounts/hooks'
@@ -11,23 +11,28 @@ import { BalanceHistoryChart } from '@/components/shared/BalanceHistoryChart'
 import { NetWorthChart } from '@/components/shared/NetWorthChart'
 import { HoldingsTable } from '@/components/shared/HoldingsTable'
 import { CryptoStatsSection } from '@/components/shared/CryptoStatsSection'
+import { PositionsByProduct } from '@/components/shared/PositionsByProduct'
+import { RealizedPnlSection } from '@/components/shared/RealizedPnlSection'
 import { TransactionsList } from '@/components/shared/TransactionsList'
 import { AddTransactionModal } from '@/components/shared/AddTransactionModal'
+import { ImportTransactionsModal } from '@/components/shared/ImportTransactionsModal'
 import { EditHoldingModal } from '@/components/shared/EditHoldingModal'
 import { MonthEndBalanceModal } from '@/components/shared/MonthEndBalanceModal'
 import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
 import { AccountTypeBadge } from '@/components/shared/AccountTypeBadge'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoanDetailSection } from '@/components/loan/LoanDetailSection'
+import { PropertyDetailSection } from '@/components/property/PropertyDetailSection'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ArrowLeft, Calendar, TrendingUp, TrendingDown } from 'lucide-react'
-import { formatLocalDate, accountTypeLabel } from '@/lib/utils'
+import { ArrowLeft, Calendar, TrendingUp, TrendingDown, Upload } from 'lucide-react'
+import { formatLocalDate } from '@/lib/utils'
+import { accountTypeLabelKey } from '@/lib/constants'
 import { type TimeRange } from '@/components/shared/TimeRangeSelector'
 import type { HoldingResponse, Transaction } from '@/types/api'
 
-const HOLDING_ACCOUNT_TYPES = ['PEA', 'COMPTE_TITRES', 'CRYPTO']
+const HOLDING_ACCOUNT_TYPES = ['PEA', 'COMPTE_TITRES', 'CRYPTO', 'EMPLOYEE_SAVINGS']
 
 export function AccountDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -38,6 +43,7 @@ export function AccountDetailPage() {
   const { data: account, isLoading } = useAccount(accountId)
   const { data: history } = useAccountHistory(accountId)
   const { data: holdings } = useHoldingsWithLivePrices(accountId)
+  const { data: positions } = useAccountPositions(accountId)
   const { data: transactions } = useAccountTransactions(accountId)
   const addTxMutation = useAddTransaction(accountId)
   const deleteTxMutation = useDeleteTransaction(accountId)
@@ -48,6 +54,7 @@ export function AccountDetailPage() {
 
   const [showHistory, setShowHistory] = useState(false)
   const [showAddTx, setShowAddTx] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [editingHolding, setEditingHolding] = useState<HoldingResponse | null>(null)
   const [range, setRange] = useState<TimeRange>('1Y')
@@ -56,15 +63,12 @@ export function AccountDetailPage() {
 
   const chartData = (history ?? []).map(s => ({ date: s.date, balance: s.balance }))
   const isLoan = account?.type === 'LOAN'
+  const isRealEstate = account?.type === 'REAL_ESTATE'
   const showHoldings = account ? HOLDING_ACCOUNT_TYPES.includes(account.type) : false
   const recentSnapshots = [...(history ?? [])].reverse().slice(0, 10)
 
-  // Live value from holdings (with live prices) — not from stale snapshots
-  const liveTotal = holdings ? holdings.reduce((sum, h) => sum + (h.currentValueEur ?? 0), 0) : 0
-  // For holding accounts, use live total value as the displayed balance
-  const displayBalance = (showHoldings && holdings && holdings.length > 0 && liveTotal > 0)
-    ? liveTotal
-    : (account?.currentBalanceEur ?? 0)
+  // The backend owns EUR valuation and falls back atomically to the broker snapshot.
+  const displayBalance = account?.currentBalanceEur ?? 0
 
   // PnL from unified history endpoint (pre-computed by backend)
   const pnlLatest = pnlData && pnlData.length > 0 ? pnlData[pnlData.length - 1] : null
@@ -78,7 +82,7 @@ export function AccountDetailPage() {
       <PageHeader
         surtitle={
           account
-            ? `${accountTypeLabel(account.type)}${account.provider ? ` · ${account.provider}` : ''}`
+            ? `${t(accountTypeLabelKey(account.type))}${account.provider ? ` · ${account.provider}` : ''}`
             : undefined
         }
         title={account?.name ?? ''}
@@ -128,6 +132,11 @@ export function AccountDetailPage() {
               value={displayBalance}
               className={`text-3xl font-bold ${isLoan ? 'text-red-500' : 'text-foreground'}`}
             />
+            {showHoldings && account.cashBalance != null && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t('accounts.cashBalance')}: <CurrencyDisplay value={account.cashBalance} />
+              </p>
+            )}
             {account.currency !== 'EUR' && (
               <p className="text-xs text-muted-foreground mt-0.5">
                 {account.currentBalance} {account.currency}
@@ -157,6 +166,9 @@ export function AccountDetailPage() {
       {/* Loan detail */}
       {isLoan && account && <LoanDetailSection accountId={account.id} />}
 
+      {/* Property detail: description, valuation, financing and ownership split */}
+      {isRealEstate && account && <PropertyDetailSection account={account} />}
+
       {/* History chart */}
       {!isLoan && showHoldings && pnlData && pnlData.length > 1 ? (
         <Card>
@@ -178,14 +190,19 @@ export function AccountDetailPage() {
         </Card>
       ) : null}
 
-      {/* Holdings */}
+      {/* Holdings — grouped by product when the connector reports one (crypto exchanges),
+          otherwise the flat table. */}
       {showHoldings && (
         holdings ? (
-          <HoldingsTable
-            holdings={holdings}
-            onEdit={setEditingHolding}
-            onDelete={(h) => deleteHoldingMutation.mutate(h.ticker)}
-          />
+          positions && positions.length > 0 ? (
+            <PositionsByProduct positions={positions} />
+          ) : (
+            <HoldingsTable
+              holdings={holdings}
+              onEdit={setEditingHolding}
+              onDelete={(h) => deleteHoldingMutation.mutate(h.ticker)}
+            />
+          )
         ) : (
           <Card>
             <CardContent className="pt-6">
@@ -197,15 +214,25 @@ export function AccountDetailPage() {
 
       {/* Per-crypto stats: rewards by program, cost-vs-price, accumulation, per-token donut */}
       {account?.type === 'CRYPTO' && <CryptoStatsSection accountId={account.id} />}
+      {/* Realized P&L on closed positions (investment accounts only) */}
+      {showHoldings && <RealizedPnlSection accountId={accountId} enabled={showHoldings} />}
 
       {/* Transactions */}
       {!isLoan && (transactions ? (
         <>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-base font-semibold">{t('accounts.transactions')}</h3>
-            <Button size="sm" variant="outline" onClick={() => setShowAddTx(true)}>
-              + Ajouter
-            </Button>
+            <div className="flex items-center gap-2">
+              {showHoldings && (
+                <Button size="sm" variant="outline" onClick={() => setShowImport(true)}>
+                  <Upload className="mr-1.5 size-4" />
+                  {t('import.importCsv')}
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={() => setShowAddTx(true)}>
+                + {t('common.add')}
+              </Button>
+            </div>
           </div>
           <TransactionsList
             transactions={transactions}
@@ -252,6 +279,15 @@ export function AccountDetailPage() {
           accountType={account.type}
           onSubmit={async (data) => { await addTxMutation.mutateAsync(data) }}
           isLoading={addTxMutation.isPending}
+        />
+      )}
+
+      {/* Import CSV modal (investment accounts) */}
+      {account && showHoldings && (
+        <ImportTransactionsModal
+          open={showImport}
+          onOpenChange={setShowImport}
+          accountId={account.id}
         />
       )}
 

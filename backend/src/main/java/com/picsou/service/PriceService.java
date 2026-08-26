@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -24,6 +25,20 @@ public class PriceService {
 
     private static final Logger log = LoggerFactory.getLogger(PriceService.class);
     private static final long CACHE_TTL_SECONDS = 900; // 15 minutes
+
+    /**
+     * How stale a {@code price_snapshot} row may be before it stops being an acceptable answer.
+     * A day-old crypto price is a slightly wrong number; a month-old one is fiction, and would be
+     * worse than the honest "unknown" it replaces.
+     */
+    private static final int MAX_FALLBACK_AGE_DAYS = 7;
+
+    /**
+     * The longest hole a recorded history may contain before the backfill considers it incomplete.
+     * Sized for closed markets, not for outages: a weekend is two days, and an Easter or Christmas
+     * week can reach five.
+     */
+    private static final int MAX_HISTORY_GAP_DAYS = 7;
 
     private final PriceRouter priceRouter;
     private final PriceSnapshotRepository priceSnapshotRepository;
@@ -139,8 +154,262 @@ public class PriceService {
         return getPriceEur(asset);
     }
 
+    /**
+     * A EUR price together with how current it is.
+     *
+     * @param price the EUR price, never null
+     * @param asOf  the day the price is for — today for a live quote, the snapshot's date for a
+     *              fallback
+     * @param live  true when the number came from an aggregator (or its 15-minute cache), false
+     *              when it is the last price we ever managed to record
+     */
+    public record Quote(BigDecimal price, LocalDate asOf, boolean live) {}
+
+    /** {@link #getPriceEur(String)} with the freshness attached. Null when nothing resolves. */
+    public Quote getQuote(String ticker) {
+        return singleQuote(ticker, false);
+    }
+
+    /** {@link #getQuote} for a ticker known to be crypto — see {@link #refreshCryptoPrices}. */
+    public Quote getCryptoQuote(String ticker) {
+        return singleQuote(ticker, true);
+    }
+
+    /**
+     * Like {@link #getPriceEur(String)}, for a ticker known to be crypto: an unregistered symbol
+     * returns {@code null} instead of being valued at the share price of the equity trading under
+     * the same name. See {@link #refreshCryptoPrices}.
+     */
+    public BigDecimal getCryptoPriceEur(String ticker) {
+        Quote quote = getCryptoQuote(ticker);
+        return quote == null ? null : quote.price();
+    }
+
+    /** Resolve a whole set at once — one batched router pass instead of one per ticker. */
+    public Map<String, Quote> getQuotes(Set<String> tickers) {
+        return resolve(tickers, false);
+    }
+
+    /** {@link #getQuotes} for tickers known to be crypto (see {@link #refreshCryptoPrices}). */
+    public Map<String, Quote> getCryptoQuotes(Set<String> tickers) {
+        return resolve(tickers, true);
+    }
+
+    private Quote singleQuote(String ticker, boolean cryptoOnly) {
+        if (ticker == null || ticker.isBlank() || "EUR".equalsIgnoreCase(ticker)) {
+            return new Quote(BigDecimal.ONE, LocalDate.now(), true);
+        }
+        return resolve(Set.of(ticker), cryptoOnly).get(ticker.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * Resolves EUR prices for {@code tickers}, in order: the in-memory cache, then one batched
+     * router pass for whatever is left, then the last recorded {@code price_snapshot}.
+     *
+     * <p>The third step is what keeps a rate-limited morning from blanking the interface. Every
+     * priced ticker already has a daily row in {@code price_snapshot}, so an aggregator outage
+     * degrades the number's <em>age</em> rather than its existence — and the callers that used to
+     * drop an unpriced asset from a total (and from its daily snapshot) get something to value it
+     * with. A ticker absent from that table too — a coin whose mapping is still PENDING, a currency
+     * we never priced — still resolves to nothing, which callers must keep handling.
+     *
+     * <p>{@code cryptoOnly} keeps a coin away from Yahoo: a symbol with no registry row is left
+     * unpriced rather than riding a {@link #transientAsset}, which fabricates a {@code yahoo_symbol}
+     * and would quote the equity trading under the same name. A <em>registered</em> coin needs no
+     * such guard — Yahoo refuses any asset whose {@code yahoo_symbol} is unresolved — and neither
+     * does the fallback, which reads history by asset id rather than by symbol.
+     */
+    private Map<String, Quote> resolve(Set<String> tickers, boolean cryptoOnly) {
+        if (tickers.isEmpty()) return Map.of();
+
+        LocalDate today = LocalDate.now();
+        Map<String, Quote> resolved = new HashMap<>();
+        Set<String> pending = new TreeSet<>();
+        Set<String> missCached = new TreeSet<>();
+
+        for (String ticker : tickers) {
+            if (ticker == null || ticker.isBlank()) continue;
+            String upper = ticker.toUpperCase(Locale.ROOT);
+
+            if ("EUR".equals(upper)) {
+                resolved.put(upper, new Quote(BigDecimal.ONE, today, true));
+                continue;
+            }
+            CachedPrice cached = priceCache.get(upper);
+            if (cached != null && !cached.isExpired()) {
+                if (cached.price() != null) {
+                    resolved.put(upper, new Quote(cached.price(), today, true));
+                    continue;
+                }
+                // A cached entry with no price is a remembered miss: the aggregator was asked
+                // recently and had nothing. Skip the network and go straight to the fallback.
+                missCached.add(upper);
+            }
+            pending.add(upper);
+        }
+
+        if (pending.isEmpty()) return resolved;
+
+        // One batched read for the whole set, as everywhere else in this service.
+        Map<String, FinancialAsset> assets = assetsForSymbols(pending);
+
+        List<FinancialAsset> fetchable = new ArrayList<>();
+        for (String upper : List.copyOf(pending)) {
+            FinancialAsset asset = assets.get(upper);
+            if (asset != null && asset.isWorthless()) {
+                // Known-zero, not a missing price: no aggregator call, and no fallback either.
+                resolved.put(upper, new Quote(BigDecimal.ZERO, today, true));
+                pending.remove(upper);
+                continue;
+            }
+            if (missCached.contains(upper)) continue;
+            if (asset == null) {
+                if (cryptoOnly) {
+                    log.warn("No registry entry for crypto ticker {} -- leaving it unpriced rather "
+                        + "than valuing it as the stock trading under that symbol", upper);
+                    continue;
+                }
+                asset = transientAsset(upper);
+            }
+            fetchable.add(asset);
+        }
+
+        if (!fetchable.isEmpty()) {
+            Map<String, BigDecimal> live = priceRouter.getPricesEur(fetchable);
+            Instant fetchedAt = Instant.now();
+            for (FinancialAsset asset : fetchable) {
+                String upper = asset.getSymbol().toUpperCase(Locale.ROOT);
+                BigDecimal price = live.get(upper);
+                // Misses are cached too: that null entry *is* the negative cache, and it expires on
+                // its own TTL instead of being re-asked on every page render.
+                priceCache.put(upper, new CachedPrice(price, fetchedAt));
+                if (price != null) resolved.put(upper, new Quote(price, today, true));
+            }
+        }
+
+        Set<String> unresolved = pending.stream()
+            .filter(t -> !resolved.containsKey(t))
+            .collect(Collectors.toCollection(TreeSet::new));
+        if (unresolved.isEmpty()) return resolved;
+
+        Map<String, PriceSnapshot> lastKnown = lastKnownPrices(unresolved, assets, today);
+        lastKnown.forEach((ticker, snapshot) ->
+            resolved.put(ticker, new Quote(snapshot.getPriceEur(), snapshot.getDate(), false)));
+
+        // Only trace the attempts that actually reached out: the negative cache means the same
+        // outage would otherwise log on every page render for as long as it lasts.
+        Set<String> tried = unresolved.stream()
+            .filter(t -> !missCached.contains(t))
+            .collect(Collectors.toCollection(TreeSet::new));
+        if (!tried.isEmpty()) {
+            Set<String> stale = tried.stream().filter(lastKnown::containsKey)
+                .collect(Collectors.toCollection(TreeSet::new));
+            Set<String> unknown = tried.stream().filter(t -> !lastKnown.containsKey(t))
+                .collect(Collectors.toCollection(TreeSet::new));
+            if (!stale.isEmpty()) {
+                log.warn("No live price for {} -- falling back to the last recorded one ({})",
+                    stale, stale.stream().map(t -> t + "=" + lastKnown.get(t).getDate()).toList());
+            }
+            if (!unknown.isEmpty()) {
+                log.warn("No price at all for {} -- not from any aggregator, and nothing recorded "
+                    + "in the last {} days", unknown, MAX_FALLBACK_AGE_DAYS);
+            }
+        }
+
+        return resolved;
+    }
+
+    /**
+     * The most recent {@code price_snapshot} per symbol within {@link #MAX_FALLBACK_AGE_DAYS}, in
+     * one query. Looked up by asset id — the snapshot table's own key since V85 — then mapped back
+     * to the symbol the caller asked with; a symbol with no registry row has no history either, so
+     * it simply doesn't appear. The reduction is order-independent on purpose: relying on the
+     * query's {@code ORDER BY} would make the fallback silently pick the wrong row if that clause
+     * were ever edited.
+     */
+    private Map<String, PriceSnapshot> lastKnownPrices(
+        Set<String> symbols, Map<String, FinancialAsset> assets, LocalDate today) {
+
+        Map<Long, String> symbolByAssetId = new HashMap<>();
+        for (String symbol : symbols) {
+            FinancialAsset asset = assets.get(symbol);
+            if (asset != null && asset.getId() != null) symbolByAssetId.put(asset.getId(), symbol);
+        }
+        if (symbolByAssetId.isEmpty()) return Map.of();
+
+        Map<String, PriceSnapshot> latest = new HashMap<>();
+        for (PriceSnapshot snapshot : priceSnapshotRepository.findRecentByAssetIds(
+            symbolByAssetId.keySet(), today.minusDays(MAX_FALLBACK_AGE_DAYS), today)) {
+            String symbol = symbolByAssetId.get(snapshot.getAsset().getId());
+            if (symbol == null) continue;
+            latest.merge(symbol, snapshot, (a, b) -> a.getDate().isAfter(b.getDate()) ? a : b);
+        }
+        return latest;
+    }
+
+    /**
+     * Bulk fetch and refresh cache for tickers known to be crypto.
+     *
+     * <p>Same as {@link #refreshPrices} except that a symbol with no registry row is left
+     * <em>unpriced</em> instead of being handed to Yahoo Finance verbatim. That passthrough is
+     * right for a caller-supplied ticker but wrong for an exchange or wallet: dozens of coins share
+     * a symbol with a listed equity (SUI, ATOM, TIA…), so an unregistered coin would be valued at
+     * the share price of an unrelated company and written into the balance and its daily snapshot,
+     * with nothing in the logs to reveal it. Callers already treat a missing price as "not valued
+     * this cycle".
+     */
+    public Map<String, BigDecimal> refreshCryptoPrices(Set<String> tickers) {
+        return refreshPrices(tickers, true);
+    }
+
+    /**
+     * {@link #refreshCryptoPrices} with the last-known-price fallback applied to whatever no
+     * aggregator could deliver, and with each result's freshness attached.
+     *
+     * <p>For sync paths, which both value an account <em>and</em> write that valuation into its
+     * daily {@code BalanceSnapshot}. Dropping an asset there does not merely blank a cell: it
+     * shrinks a number that is then engraved in the net-worth history, where nothing later corrects
+     * it. A day-old price is a far better record of the day than a hole.
+     *
+     * <p>Only live prices reach {@code price_snapshot} (that write lives in {@link #refreshPrices});
+     * re-recording a fallback under today's date would launder a stale price into a fresh-looking
+     * one and let the fallback drift forward forever.
+     */
+    public Map<String, Quote> refreshCryptoQuotes(Set<String> tickers) {
+        Map<String, BigDecimal> live = refreshPrices(tickers, true);
+        LocalDate today = LocalDate.now();
+
+        Map<String, Quote> quotes = new HashMap<>();
+        live.forEach((ticker, price) -> {
+            if (price != null) quotes.put(ticker, new Quote(price, today, true));
+        });
+
+        Set<String> unresolved = tickers.stream()
+            .filter(t -> t != null && !t.isBlank())
+            .map(t -> t.toUpperCase(Locale.ROOT))
+            .filter(t -> !quotes.containsKey(t))
+            .collect(Collectors.toCollection(TreeSet::new));
+        if (unresolved.isEmpty()) return quotes;
+
+        Map<String, PriceSnapshot> lastKnown =
+            lastKnownPrices(unresolved, assetsForSymbols(unresolved), today);
+        lastKnown.forEach((ticker, snapshot) ->
+            quotes.put(ticker, new Quote(snapshot.getPriceEur(), snapshot.getDate(), false)));
+
+        if (!lastKnown.isEmpty()) {
+            log.warn("No live price for {} -- valuing from the last recorded price instead ({})",
+                lastKnown.keySet(),
+                lastKnown.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue().getDate()).toList());
+        }
+        return quotes;
+    }
+
     /** Bulk fetch and refresh cache for all provided tickers. */
     public Map<String, BigDecimal> refreshPrices(Set<String> tickers) {
+        return refreshPrices(tickers, false);
+    }
+
+    private Map<String, BigDecimal> refreshPrices(Set<String> tickers, boolean cryptoOnly) {
         if (tickers.isEmpty()) return Map.of();
 
         Map<String, BigDecimal> result = new HashMap<>();
@@ -150,12 +419,21 @@ public class PriceService {
         Set<String> nonEurTickers = new HashSet<>();
 
         for (String ticker : tickers) {
-            String upper = ticker.toUpperCase();
+            String upper = ticker.toUpperCase(Locale.ROOT);
             if ("EUR".equals(upper)) {
                 result.put(upper, BigDecimal.ONE);
-            } else {
-                nonEurTickers.add(upper);
+                continue;
             }
+            // Serve a still-fresh cache entry rather than re-fetching it: GET /prices is polled by
+            // the frontend on an interval, so bypassing the TTL here would turn every open
+            // dashboard tab into a steady stream of aggregator calls. A cached miss (null price)
+            // counts too — it is the negative cache, and re-asking is exactly what it prevents.
+            CachedPrice cached = priceCache.get(upper);
+            if (cached != null && !cached.isExpired()) {
+                if (cached.price() != null) result.put(upper, cached.price());
+                continue;
+            }
+            nonEurTickers.add(upper);
         }
 
         // One batched read resolves every ticker's asset row up front; reused below for the
@@ -174,25 +452,40 @@ public class PriceService {
             }
         }
 
-        // The router partitions the set across providers (crypto → CoinGecko, else Yahoo) and batches
-        // each provider into a single call.
+        // The router partitions the set across aggregators by which one holds a ref for the asset,
+        // and batches each aggregator into a single call.
+        Map<String, BigDecimal> fetched = new HashMap<>();
         if (!toFetch.isEmpty()) {
-            // Hand the router the assets themselves (already loaded above); a symbol with no registry
-            // row rides a transient asset so it still routes to Yahoo verbatim, as before.
-            List<FinancialAsset> toFetchAssets = toFetch.stream()
-                .map(upper -> assets.getOrDefault(upper, transientAsset(upper)))
-                .toList();
-            priceRouter.getPricesEur(toFetchAssets).forEach((k, v) -> {
-                priceCache.put(k, new CachedPrice(v, Instant.now()));
-                result.put(k, v);
-            });
+            // Hand the router the assets themselves (already loaded above); a symbol with no
+            // registry row rides a transient asset so it still routes to Yahoo verbatim, as before
+            // — except under cryptoOnly, where that passthrough is exactly what must not happen.
+            List<FinancialAsset> toFetchAssets = new ArrayList<>();
+            for (String upper : toFetch) {
+                FinancialAsset asset = assets.get(upper);
+                if (asset == null) {
+                    if (cryptoOnly) {
+                        log.warn("No registry entry for crypto ticker {} -- leaving it unpriced "
+                            + "rather than valuing it as the stock trading under that symbol", upper);
+                        continue;
+                    }
+                    asset = transientAsset(upper);
+                }
+                toFetchAssets.add(asset);
+            }
+            if (!toFetchAssets.isEmpty()) {
+                priceRouter.getPricesEur(toFetchAssets).forEach((k, v) -> {
+                    priceCache.put(k, new CachedPrice(v, Instant.now()));
+                    fetched.put(k, v);
+                });
+            }
         }
 
-        log.debug("Refreshed prices for {} tickers", result.size());
+        result.putAll(fetched);
+        log.debug("Refreshed prices: {} fetched, {} served from cache", fetched.size(), result.size() - fetched.size());
 
         // Persist daily price snapshots + the asset's last known price (restart-surviving cache)
         LocalDate today = LocalDate.now();
-        for (var entry : result.entrySet()) {
+        for (var entry : fetched.entrySet()) {
             if ("EUR".equals(entry.getKey())) continue;
             if (worthlessTickers.contains(entry.getKey())) continue; // don't snapshot a fixed zero
             if (entry.getValue() == null) continue;
@@ -227,7 +520,19 @@ public class PriceService {
         BigDecimal price = asset != null ? getPriceEur(asset) : getPriceEur(currency);
 
         if (price == null) {
-            log.warn("No price available for {}, returning raw balance", asset != null ? asset.getSymbol() : currency);
+            // The returned number is now WRONG, not merely missing: an unconverted USD or GBP
+            // balance flows into net worth and its snapshots as though it were EUR. ERROR, because
+            // unlike a missing crypto price (which the wallet sync refuses to record) this one
+            // silently corrupts a figure the user reads as authoritative.
+            //
+            // Deliberately NOT thrown, and deliberately still returning the raw balance: toEur backs
+            // liveBalanceEur, the dashboard and the history charts, so throwing would 500 all of
+            // them on one missing FX rate, and substituting zero would understate net worth just as
+            // silently. Changing the number either way shifts every user's totals; making the
+            // failure loud does not.
+            log.error("No EUR rate for {} -- returning the balance UNCONVERTED, so any total "
+                + "including it is wrong until the rate is available",
+                asset != null ? asset.getSymbol() : currency);
             return balance;
         }
 
@@ -281,11 +586,15 @@ public class PriceService {
             Optional<PriceSnapshot> latest = priceSnapshotRepository.findLatestByAssetIdBeforeOrOnDate(asset.getId(), to);
             if (latest.isPresent()) {
                 LocalDate nextMissing = latest.get().getDate().plusDays(1);
-                if (!nextMissing.isBefore(to)) {   // covered up to (at least) yesterday
+                // Covered up to (at least) yesterday — but only skip when the range behind it has
+                // no hole either: reading the newest row alone declares an instance that was off
+                // for three months up to date forever, since the tail fills in on the first run
+                // back and the hole never gets asked for again.
+                if (!nextMissing.isBefore(to) && alreadyCovered(asset, from, to)) {
                     upToDate.add(upper);
                     continue;
                 }
-                if (nextMissing.isAfter(from)) {
+                if (nextMissing.isAfter(from) && alreadyCovered(asset, from, latest.get().getDate())) {
                     effectiveFrom = nextMissing;   // fetch only the gap since the last snapshot
                 }
             }
@@ -331,6 +640,46 @@ public class PriceService {
         }
 
         return saved;
+    }
+
+    /**
+     * Whether {@code ticker} already has continuous history over the requested range, in which
+     * case the backfill has nothing to add and the provider call is pure waste.
+     *
+     * <p>This runs at every boot, once per held ticker, against providers whose free tiers count
+     * requests per IP — and the previous version re-requested twelve months of history for tickers
+     * that already had all of it, only to discard every row as a duplicate. On this instance that
+     * burned the whole rate-limit budget seconds after startup and left the price cache (which
+     * does not survive a restart) with nothing to fill itself from.
+     *
+     * <p>It scans the whole range rather than probing its two ends. Checking the edges alone
+     * declares a ticker covered as soon as it has an old row and a recent one, so an instance that
+     * was off for three months — leaving a hole with history on both sides of it — would skip that
+     * ticker at every boot and never fill the hole, while {@code HistoryService} flat-lines the
+     * chart across it at the last pre-outage price. One query returns the range (at most ~370 rows,
+     * one per day by {@code uk_price_snapshot_ticker_date}) and the gaps are measured in memory.
+     *
+     * <p>Gaps are tolerated up to {@link #MAX_HISTORY_GAP_DAYS} because markets close: a weekend is
+     * a two-day hole in every equity series, and an Easter or Christmas week can stretch that to
+     * five. A ticker whose history simply starts late — an asset younger than the range — is
+     * reported uncovered and re-requested each boot, which is the pre-existing behaviour: we
+     * cannot tell "the provider has nothing before this date" from "we never fetched it" without
+     * asking.
+     */
+    private boolean alreadyCovered(FinancialAsset asset, LocalDate from, LocalDate to) {
+        if (asset.getId() == null) return false;
+        List<PriceSnapshot> rows =
+            priceSnapshotRepository.findByAssetIdInAndDateBetween(Set.of(asset.getId()), from, to);
+        if (rows.isEmpty()) return false;
+
+        // The query orders by date ascending; walk from the range start so a missing head, a
+        // missing tail and an interior hole are all the same check.
+        LocalDate cursor = from;
+        for (PriceSnapshot row : rows) {
+            if (ChronoUnit.DAYS.between(cursor, row.getDate()) > MAX_HISTORY_GAP_DAYS) return false;
+            cursor = row.getDate();
+        }
+        return ChronoUnit.DAYS.between(cursor, to) <= MAX_HISTORY_GAP_DAYS;
     }
 
     private record CachedPrice(BigDecimal price, Instant cachedAt) {

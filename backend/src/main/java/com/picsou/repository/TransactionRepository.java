@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -27,7 +28,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t WHERE t.account.id = :accountId AND t.date > :date")
     BigDecimal sumAmountByAccountIdAndDateAfter(@Param("accountId") Long accountId, @Param("date") LocalDate date);
 
-    List<Transaction> findByAccountIdAndTxTypeInOrderByDateAsc(Long accountId, List<TransactionType> types);
+    List<Transaction> findByAccountIdAndTxTypeInOrderByDateAscIdAsc(Long accountId, List<TransactionType> types);
 
     /** Same as above, pooled across several accounts — for the consolidated crypto stats view. */
     List<Transaction> findByAccountIdInAndTxTypeInOrderByDateAsc(List<Long> accountIds, List<TransactionType> types);
@@ -40,4 +41,33 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     @Query("SELECT t.ticker AS ticker, MIN(t.date) AS earliestDate FROM Transaction t "
         + "WHERE t.ticker IN :tickers GROUP BY t.ticker")
     List<TickerEarliestDate> findEarliestDatesByTickerIn(@Param("tickers") Set<String> tickers);
+    /**
+     * Manually entered transactions of manual accounts whose ticker is 12 characters long — the
+     * length of an ISIN, which the caller confirms with {@code OpenFigiIsinConverter.isIsin}
+     * before touching anything. Such a ticker is one an earlier ISIN resolution failed to convert:
+     * it can never be priced, since the Yahoo provider rejects ISIN-shaped strings outright.
+     *
+     * <p>Synced transactions and synced accounts are excluded on purpose: their adapters re-resolve
+     * every ISIN on each sync, so they repair themselves without rewriting rows a provider owns.
+     *
+     * <p>No {@code member_id} predicate, unlike every request-scoped query: this feeds a startup
+     * maintenance pass with no caller and no member context, in the same family as
+     * {@code PriceFxCleanupRunner} (purges {@code price_snapshot} wholesale) and
+     * {@code SchedulerService.dailySnapshots} (iterates every member). The tenant-isolation rule
+     * protects paths where a caller's identity decides what may be read; a member loop here would
+     * iterate all members and touch exactly the same rows.
+     */
+    @Query("SELECT t FROM Transaction t "
+        + "WHERE t.isManual = true AND t.account.isManual = true AND LENGTH(t.ticker) = 12")
+    List<Transaction> findManualTransactionsWithIsinLengthTicker();
+
+    /**
+     * Accounts holding the given manual tickers. Read before a repair pass rewrites those tickers,
+     * so the accounts whose holdings need recomputing are known while they can still be found by
+     * the old value. Ids rather than entities: the caller runs outside a transaction, where a lazy
+     * {@code t.account} would not be readable.
+     */
+    @Query("SELECT DISTINCT t.account.id FROM Transaction t "
+        + "WHERE t.isManual = true AND t.account.isManual = true AND t.ticker IN :tickers")
+    List<Long> findManualAccountIdsByTickerIn(@Param("tickers") Collection<String> tickers);
 }

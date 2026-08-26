@@ -7,6 +7,7 @@ import com.picsou.dto.GoalProgressResponse;
 import com.picsou.dto.GoalRequest;
 import com.picsou.exception.ResourceNotFoundException;
 import com.picsou.model.Account;
+import com.picsou.model.AccountType;
 import com.picsou.model.BalanceSnapshot;
 import com.picsou.model.FamilyMember;
 import com.picsou.model.Goal;
@@ -45,6 +46,7 @@ public class GoalService {
     private final GoalManualContributionRepository manualContributionRepository;
     private final FamilyMemberRepository familyMemberRepository;
     private final HistoryService historyService;
+    private final AccountAccessResolver accessResolver;
 
     public GoalService(
         GoalRepository goalRepository,
@@ -54,7 +56,8 @@ public class GoalService {
         GoalMonthOverrideRepository overrideRepository,
         GoalManualContributionRepository manualContributionRepository,
         FamilyMemberRepository familyMemberRepository,
-        HistoryService historyService
+        HistoryService historyService,
+        AccountAccessResolver accessResolver
     ) {
         this.goalRepository = goalRepository;
         this.accountRepository = accountRepository;
@@ -64,6 +67,7 @@ public class GoalService {
         this.manualContributionRepository = manualContributionRepository;
         this.familyMemberRepository = familyMemberRepository;
         this.historyService = historyService;
+        this.accessResolver = accessResolver;
     }
 
     public List<GoalProgressResponse> findAll(Long memberId) {
@@ -128,9 +132,18 @@ public class GoalService {
             .map(accountService::toResponse)
             .toList();
 
-        // Use live balance (with PnL from current prices) for each account
+        // Use live balance (with PnL from current prices) for each account.
+        // Signed: linked LOAN accounts count negatively against the goal.
+        // Weighted by the goal owner's share, so a goal backed by a half-owned property
+        // does not report twice the progress actually available to them.
+        Long goalMemberId = goal.getMember().getId();
+        // One query for the goal's accounts rather than one each: this runs for every goal on
+        // the goals page, so the per-account form multiplies out.
+        Map<Long, BigDecimal> shares = accessResolver.sharesFor(goal.getAccounts(), goalMemberId);
         BigDecimal currentTotal = goal.getAccounts().stream()
-            .map(accountService::liveBalanceEur)
+            .map(a -> AccountAccessResolver.weigh(
+                accountService.signedLiveBalanceEur(a),
+                shares.get(a.getId())))
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal target = goal.getTargetAmount();
@@ -190,8 +203,14 @@ public class GoalService {
                     snapshots.get(0).getDate(),
                     snapshots.get(snapshots.size() - 1).getDate()
                 ));
+                BigDecimal delta = last.subtract(first);
+                // Loan snapshots store outstanding debt (positive): paying it down
+                // shrinks the balance but is positive progress toward the goal.
+                if (account.getType() == AccountType.LOAN) {
+                    delta = delta.negate();
+                }
                 totalContribution = totalContribution.add(
-                    last.subtract(first).divide(BigDecimal.valueOf(months), 2, RoundingMode.HALF_UP)
+                    delta.divide(BigDecimal.valueOf(months), 2, RoundingMode.HALF_UP)
                 );
                 accountsWithData++;
             }
@@ -419,7 +438,13 @@ public class GoalService {
                 .findFirstByAccountIdAndDateLessThanEqualOrderByDateDesc(account.getId(), thisMonthEnd);
 
             if (prev.isPresent() && curr.isPresent()) {
-                total = total.add(curr.get().getBalance().subtract(prev.get().getBalance()));
+                BigDecimal delta = curr.get().getBalance().subtract(prev.get().getBalance());
+                // Same sign convention as calculateAvgMonthlyContribution: loan paydown
+                // (balance decrease) counts as positive progress.
+                if (account.getType() == AccountType.LOAN) {
+                    delta = delta.negate();
+                }
+                total = total.add(delta);
                 hasData = true;
             }
         }

@@ -24,14 +24,14 @@
 | Endpoint group | Limit |
 |---------------|-------|
 | Login (`/api/auth/login`) | 5 requests / IP / 15 min |
-| Bank sync (`/api/sync/initiate`) | Throttled |
+| Bank sync (`/api/sync/initiate`, `/complete`, `/{id}/reconnect`, `/countries`) | Throttled — each on its own bucket, keyed by `ip + endpoint` |
 | TR auth (`/api/tr/auth/initiate`) | Throttled |
 
 ## Shared Enums
 
 ### AccountType
 
-`LEP` · `PEA` · `COMPTE_TITRES` · `CRYPTO` · `CHECKING` · `SAVINGS` · `OTHER`
+`LEP` · `PEA` · `COMPTE_TITRES` · `CRYPTO` · `CHECKING` · `SAVINGS` · `REAL_ESTATE` · `LOAN` · `EMPLOYEE_SAVINGS` · `OTHER`
 
 ### Chain
 
@@ -39,7 +39,7 @@
 
 ### ExchangeType
 
-`BINANCE` · `KRAKEN`
+`BINANCE` · `KRAKEN` · `MERIA`
 
 ### FinaryMappingAction
 
@@ -207,10 +207,17 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
     "isManual": false,
     "color": "#6366f1",
     "ticker": null,
+    "logoUrl": null,
+    "logoKey": null,
     "createdAt": "2024-06-01T08:00:00Z"
   }
 ]
 ```
+
+`logoUrl` is the bank logo captured from the sync provider's institution catalog (Enable
+Banking only). `logoKey` names a logo bundled with the frontend — set on on-chain wallet
+accounts, whose `provider` is a bare ticker, and settable by a client only on an account
+that already carries one; see [the feature notes](../../docs/features/bank-logos.md).
 
 ---
 
@@ -239,6 +246,7 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 | `isManual` | `boolean` | | Whether manually managed |
 | `color` | `string` | Hex pattern | Display color, e.g. `"#6366f1"` |
 | `ticker` | `string` | max 20 | Ticker for price lookup (optional) |
+| `logoKey` | `string` | `^[a-z0-9-]{1,32}$` | Bundled frontend logo to show, e.g. `"ledger"` (optional). Honoured only on a `CRYPTO` account that already stores a key, i.e. an on-chain wallet — ignored on `POST` and on any other account, so a key can be swapped but never attached. Omitting it on `PUT` keeps the stored value: it is never cleared by a client that doesn't know about it |
 
 **Response `201` — `AccountResponse`.**
 
@@ -280,14 +288,35 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
     "name": "Apple Inc.",
     "quantity": 10,
     "averageBuyIn": 150.00,
-    "currentPrice": 180.00,
+    "currentPrice": 195.00,
+    "quoteCurrency": "USD",
     "currentValueEur": 1800.00,
     "costBasisEur": 1500.00,
     "pnlEur": 300.00,
-    "pnlPercent": 20.00
+    "pnlPercent": 20.00,
+    "priceUpdatedAt": "2026-07-20T10:00:00Z",
+    "priceAsOf": "2026-07-20",
+    "priceStale": false
   }
 ]
 ```
+
+`currentPrice` is expressed in `quoteCurrency`. `averageBuyIn`,
+`currentValueEur`, `costBasisEur` and `pnlEur` are EUR-denominated.
+
+`priceAsOf` is the day the EUR price is for, and `priceStale` is `true` when the price provider
+could not be reached and the last recorded price (up to 7 days old) was used instead. The value is
+still returned in that case — clients should display it and mark it, not hide it. Both are
+`null`/`false` when no price could be resolved at all.
+
+`priceUpdatedAt` answers a different question: it is the instant the stored price on the holding
+was last refreshed, whereas `priceAsOf` is the calendar day that price *is for*. A holding synced
+minutes ago can carry a `priceAsOf` of yesterday. It is `null` when the holding has never been
+priced — a manually entered position, or one whose ticker no provider resolves.
+
+> A crypto exchange account also exposes its per-product breakdown at
+> [`GET /api/accounts/{id}/positions`](#get-apiaccountsidpositions), documented with the crypto
+> exchange endpoints in section 9.
 
 ---
 
@@ -350,9 +379,122 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 ]
 ```
 
+#### `POST /api/accounts/{id}/valuation/refresh`
+
+Re-estimates a `REAL_ESTATE` account from open data. **Owner only** — a co-owner may read a
+property but not move its balance.
+
+- **Auth:** Required
+
+Always answers `200`. A non-`OK` `status` is not an error: it explains why no figure could be
+produced, which the UI renders as guidance.
+
+| `status` | Meaning |
+|---|---|
+| `OK` | An estimate was produced |
+| `UNSUPPORTED_AREA` | Outside coverage — Alsace-Moselle (57/67/68) and Mayotte keep the *livre foncier* registry |
+| `NOT_ESTIMABLE` | Building, land, parking or commercial: no reliable price per m² |
+| `INCOMPLETE_DATA` | Living area missing |
+| `GEOCODING_FAILED` | Address could not be resolved to an INSEE commune |
+| `NO_COMPARABLE_DATA` | Source answered with no usable sample |
+| `PROVIDER_UNAVAILABLE` | Source unreachable; the previous valuation is kept |
+
+**Response `200`:**
+```json
+{
+  "status": "OK",
+  "mode": "ESTIMATED",
+  "appliedToBalance": true,
+  "estimatedValue": 412000.00,
+  "lowValue": 362560.00,
+  "highValue": 469680.00,
+  "pricePerSqm": 4336.00,
+  "sampleSize": 1048,
+  "confidence": "HIGH",
+  "sourceYear": 2025,
+  "provider": "CEREMA_DV3F",
+  "scale": "communes",
+  "valuedAt": "2026-08-01",
+  "reindexRatio": 1.021,
+  "adjustments": [
+    { "code": "GARDEN", "factor": 0.02, "sqm": null, "amount": 8080.00 },
+    { "code": "GARAGE", "factor": null, "sqm": 12, "amount": 52032.00 }
+  ]
+}
+```
+
+#### `GET /api/accounts/{id}/ownership`
+
+Current split. Readable by co-owners.
+
+**Response `200`:**
+```json
+{
+  "shares": [
+    { "memberId": 1, "displayName": "Alice", "avatarColor": "#6366f1", "sharePercent": 50, "isOwner": true },
+    { "memberId": 2, "displayName": "Bob", "avatarColor": "#22c55e", "sharePercent": 50, "isOwner": false }
+  ],
+  "totalAssigned": 100,
+  "unassigned": 0
+}
+```
+
+#### `PUT /api/accounts/{id}/ownership`
+
+Replaces the whole split. **Owner only.** An empty `shares` array clears it, restoring the
+default where the owner holds 100%.
+
+Only `REAL_ESTATE` and `LOAN` accounts may be split. `unassigned` above zero is legitimate —
+that part is held outside Picsou and counts towards nobody's net worth.
+
+**Request:**
+```json
+{ "shares": [{ "memberId": 1, "sharePercent": 60 }, { "memberId": 2, "sharePercent": 40 }] }
+```
+
+**Errors:** `422` if the sum exceeds 100, if the owner is absent from the split, if a member
+appears twice, or if the account is not a property or a loan.
+
 ---
 
-### 4. Goals — `/api/goals`
+### 4. Real estate — `/api/real-estate`
+
+#### `GET /api/real-estate/summary`
+
+Property wealth, already weighted by the member's shares.
+
+**Response `200`:**
+```json
+{
+  "grossValue": 412000.00,
+  "outstandingDebt": 168400.00,
+  "netValue": 243600.00,
+  "costBasis": 368800.00,
+  "unrealizedGain": 43200.00,
+  "unrealizedGainPercent": 11.71,
+  "loanToValue": 40.87,
+  "monthlyRentalIncome": 0.00,
+  "properties": [{ "accountId": 8, "name": "Résidence principale", "sharePercent": 100, "loans": [] }]
+}
+```
+
+#### `GET /api/real-estate/{accountId}/valuations`
+
+Past estimates, newest first. Readable by co-owners.
+
+---
+
+### 5. Geocoding — `/api/geocode`
+
+#### `GET /api/geocode?q={query}&limit={n}`
+
+Address suggestions, proxied to the IGN Géoplateforme so the rate limit is enforceable.
+Queries shorter than 3 characters return `[]`. Rate-limited to 60 lookups/minute per member;
+exceeding it returns `429`.
+
+---
+
+### 6. Goals — `/api/goals`
 
 #### `GET /api/goals`
 
@@ -472,7 +614,7 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 
 ---
 
-### 5. Bank Sync (Enable Banking) — `/api/sync`
+### 7. Bank Sync (Enable Banking) — `/api/sync`
 
 #### `GET /api/sync/institutions`
 
@@ -488,14 +630,36 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 ```json
 [
   {
-    "id": "BNP_PARIBAS",
-    "name": "BNP Paribas",
-    "bic": "BNPAFRPP",
+    "id": "Swan::FR::business",
+    "name": "Swan",
+    "bic": "SWNBFR22",
     "logoUrl": "https://...",
-    "country": "FR"
+    "country": "FR",
+    "psuType": "business"
   }
 ]
 ```
+
+`id` is an opaque token encoding `name::country::psuType` — pass it back to
+`/sync/initiate` verbatim. `psuType` is `personal` or `business`; business-only
+banks (Swan and other BaaS providers) present a professional login at the
+consent step.
+
+---
+
+#### `GET /api/sync/countries`
+
+- **Auth:** Required
+- **Rate limit:** Throttled (own bucket per IP, separate from `/initiate`'s)
+
+Countries the active bank-sync provider supports, for the "which country" search filter/UI selector above — sourced from the provider (Enable Banking: `GET /application`'s `countries` field) rather than a hardcoded list. Enable Banking's result is cached in-memory for up to 6 hours.
+
+**Response `200` — `string[]`** (ISO 3166-1 alpha-2 codes, ~29 entries for Enable Banking):
+```json
+["AT", "BE", "DE", "EE", "FR"]
+```
+
+**Errors:** 429, 502
 
 ---
 
@@ -507,7 +671,7 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 **Request body:**
 | Field | Type | Description |
 |-------|------|-------------|
-| `institutionId` | `string` | Bank identifier from `/institutions` |
+| `institutionId` | `string` | Bank identifier from `/institutions`, passed back verbatim — it encodes the bank name, country, and PSU type |
 | `institutionName` | `string` | Display name |
 
 **Response `200` — `InitiateResponse`:**
@@ -518,7 +682,7 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 }
 ```
 
-**Errors:** 429, 502
+**Errors:** 422 (validation — both fields required), 429, 502
 
 ---
 
@@ -547,7 +711,7 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
   {
     "id": 1,
     "requisitionId": "uuid",
-    "institutionId": "BNP_PARIBAS",
+    "institutionId": "BNP Paribas::FR::personal",
     "institutionName": "BNP Paribas",
     "status": "LINKED",
     "authLink": null
@@ -579,7 +743,7 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 
 ---
 
-### 6. Trade Republic — `/api/tr`
+### 8. Trade Republic — `/api/tr`
 
 #### `POST /api/tr/auth/initiate`
 
@@ -661,7 +825,91 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 
 ---
 
-### 7. Crypto Wallets — `/api/crypto/wallet`
+### 9. Bourse Direct — `/api/bourse-direct`
+
+The connector is read-only. Authentication persists an encrypted browser
+session, then portfolio import continues asynchronously.
+
+#### `POST /api/bourse-direct/auth/initiate`
+
+- **Auth:** Required
+- **Rate limit:** Per IP
+
+**Request body:**
+```json
+{ "login": "client-id", "password": "secret" }
+```
+
+**Response `200` — `BourseDirectAuthInitResponse`:**
+```json
+{ "processId": "uuid", "mfaRequired": true, "mfaType": "OTP" }
+```
+
+When `mfaRequired` is false, the encrypted session is already stored and its
+first portfolio import is queued.
+
+---
+
+#### `POST /api/bourse-direct/auth/complete`
+
+- **Auth:** Required
+- **Rate limit:** Per IP
+
+**Request body:**
+```json
+{ "processId": "uuid", "code": "123456" }
+```
+
+**Response `200` — `BourseDirectSessionStatus`**, normally with
+`syncStatus: "QUEUED"`.
+
+---
+
+#### `POST /api/bourse-direct/sync`
+
+- **Auth:** Required
+- **Body:** none
+
+**Response `202` — `BourseDirectSessionStatus`.** An already queued or running
+job is not duplicated; its current status is returned.
+
+---
+
+#### `GET /api/bourse-direct/status`
+
+- **Auth:** Required
+
+**Response `200` — `BourseDirectSessionStatus`:**
+```json
+{
+  "isActive": true,
+  "expiresAt": null,
+  "syncStatus": "SUCCESS",
+  "lastSyncStartedAt": "2026-07-20T09:59:40Z",
+  "lastSyncCompletedAt": "2026-07-20T10:00:00Z",
+  "lastSyncError": null
+}
+```
+
+`syncStatus` is one of `IDLE`, `QUEUED`, `RUNNING`, `SUCCESS`, or `FAILED`.
+
+---
+
+#### `DELETE /api/bourse-direct/session`
+
+- **Auth:** Required
+
+**Response `204`.** Imported accounts and history are retained.
+
+Domain failures use `422` RFC 7807 responses with a stable `code` property:
+`INVALID_CREDENTIALS`, `INVALID_OTP`, `AUTH_ATTEMPT_EXPIRED`,
+`SESSION_EXPIRED`, `PORTFOLIO_INCOMPLETE`, `UPSTREAM_FORMAT_CHANGED`,
+`UPSTREAM_UNAVAILABLE`, `INVALID_DATA`, or `INTERNAL_ERROR`. Authentication
+rate limiting returns `429`.
+
+---
+
+### 10. Crypto Wallets — `/api/crypto/wallet`
 
 #### `POST /api/crypto/wallet`
 
@@ -714,7 +962,7 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 
 ---
 
-### 8. Crypto Exchanges — `/api/crypto/exchange`
+### 11. Crypto Exchanges — `/api/crypto/exchange`
 
 #### `POST /api/crypto/exchange`
 
@@ -723,11 +971,18 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 **Request body:**
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `ExchangeType` | `BINANCE` · `KRAKEN` |
-| `apiKey` | `string` | Exchange API key |
-| `apiSecret` | `string` | Exchange API secret |
+| `type` | `ExchangeType` | `BINANCE` · `KRAKEN` · `MERIA` |
+| `apiKey` | `string` | Exchange API key (required, max 200 chars) |
+| `apiSecret` | `string?` | Exchange API secret (max 300 chars). **Required** for `BINANCE` and `KRAKEN`; must be **omitted** for `MERIA`, which authenticates with a single read-only API key |
 
 **Response `200` — `AccountResponse`.**
+
+**Errors:**
+
+| Status | When |
+|--------|------|
+| `400` | Blank API key; missing secret for an exchange that needs one; secret supplied for a single-key exchange |
+| `422` | Bean-validation failure (`errors` map), the credentials were refused by the exchange, or the immediate sync failed |
 
 ---
 
@@ -737,6 +992,40 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 - **Body:** none
 
 **Response `200` — `AccountResponse`** (updated with latest holdings).
+
+---
+
+#### `GET /api/accounts/{id}/positions`
+
+- **Auth:** Required
+
+The per-product breakdown behind an account's holdings. **Empty** for every account that has none
+(anything but a crypto exchange), in which case the client shows the flat holdings table instead.
+
+**Response `200` — `ExchangePositionResponse[]`:**
+```json
+[
+  { "product": "SPOT", "ticker": "BTC", "quantity": 0.01204, "principal": null, "interest": null,
+    "averageBuyIn": 68000.0, "currentPriceEur": 92100.0, "currentValueEur": 1108.88,
+    "costBasisEur": 818.72, "pnlEur": 290.16, "pnlPercent": 35.4,
+    "priceAsOf": "2026-08-01", "priceStale": false },
+  { "product": "STAKING", "ticker": "ATOM", "quantity": 33.154, "principal": 19.73, "interest": 13.424,
+    "averageBuyIn": 6.4, "currentPriceEur": 5.65, "currentValueEur": 187.32,
+    "costBasisEur": 212.19, "pnlEur": -24.87, "pnlPercent": -11.7,
+    "priceAsOf": "2026-07-31", "priceStale": true }
+]
+```
+
+`interest` is the yield **already included** in `quantity` (`principal + interest = quantity`), not
+an amount to add. `principal`/`interest` are null for exchanges that don't report yield, and
+`currentPriceEur`/`currentValueEur` are null for an asset with no CoinGecko mapping.
+
+`priceAsOf` / `priceStale` carry the price's freshness, as on `HoldingResponse` above: the second
+line is valued from the price recorded on 2026-07-31 because the provider did not answer.
+
+Cost basis is tracked **per asset**, not per product: `averageBuyIn` comes from the asset's
+`AccountHolding` and every line of the same asset shares it, with `costBasisEur = averageBuyIn ×
+quantity`. The per-line figures therefore still add up to the holding's own cost and P&L.
 
 ---
 
@@ -750,6 +1039,12 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
   {
     "id": 1,
     "exchangeType": "BINANCE",
+    "status": "CONNECTED",
+    "lastSyncedAt": "2025-03-15T10:00:00Z"
+  },
+  {
+    "id": 2,
+    "exchangeType": "MERIA",
     "status": "CONNECTED",
     "lastSyncedAt": "2025-03-15T10:00:00Z"
   }
@@ -766,7 +1061,7 @@ Rotates `access_token`/`refresh_token` (old refresh token is invalidated) whenev
 
 ---
 
-### 9. Prices — `/api/prices`
+### 12. Prices — `/api/prices`
 
 #### `GET /api/prices`
 
@@ -790,7 +1085,7 @@ Prices are in EUR. Results are cached for 15 minutes.
 
 ---
 
-### 10. Finary — `/api/finary`
+### 13. Finary — `/api/finary`
 
 Two import modes: **file-based** (XLSX upload) and **API-based** (direct sync). Both use a two-phase flow: preview then execute with account mappings.
 
@@ -918,3 +1213,175 @@ Returns whether the Finary API credentials (`FINARY_EMAIL`, `FINARY_PASSWORD`) a
 ```
 
 **Response `200` — `FinaryImportResultResponse`** (same shape as file-based import).
+
+---
+
+### 12. Amundi Épargne Salariale — `/api/amundi`
+
+Read-only. Amundi gates its login behind a captcha and a mandatory second
+factor, so authentication is always interactive; it persists an encrypted
+sidecar session, then plan import continues asynchronously. One account is
+created per *dispositif* (PEE/PEG, PERCO, PER…), typed `EMPLOYEE_SAVINGS`.
+
+#### `POST /api/amundi/auth/initiate`
+
+- **Auth:** Required
+- **Rate limit:** 5 attempts per IP per 15 minutes
+
+**Request body:**
+```json
+{ "login": "identifiant", "password": "secret" }
+```
+
+**Response `200` — `AmundiAuthInitResponse`:**
+```json
+{ "processId": "uuid", "mfaRequired": true, "mfaType": "APP_PUSH" }
+```
+
+`mfaType` is `APP_PUSH` when the user must approve in the "Mon Épargne" app,
+or `SMS` when a code is texted.
+
+---
+
+#### `POST /api/amundi/auth/complete`
+
+- **Auth:** Required
+- **Rate limit:** 5 attempts per IP per 15 minutes
+
+**Request body** — `code` is omitted for an app push, since there is nothing
+for the user to type:
+```json
+{ "processId": "uuid", "code": "123456" }
+```
+
+**Response `200` — `AmundiSessionStatus`**, normally with
+`syncStatus: "QUEUED"`. For an app push the request stays open until the user
+approves on their phone, or fails with `APP_VALIDATION_TIMEOUT`.
+
+---
+
+#### `POST /api/amundi/sync`
+
+- **Auth:** Required
+- **Rate limit:** 10 requests per IP per minute (shared `syncBuckets`)
+- **Body:** none
+
+**Response `202` — `AmundiSessionStatus`.** An already queued or running job is
+not duplicated; its current status is returned.
+
+---
+
+#### `GET /api/amundi/status`
+
+- **Auth:** Required
+
+**Response `200` — `AmundiSessionStatus`:**
+```json
+{
+  "isActive": true,
+  "syncStatus": "SUCCESS",
+  "lastSyncStartedAt": "2026-08-09T09:59:40Z",
+  "lastSyncCompletedAt": "2026-08-09T10:00:00Z",
+  "lastSyncError": null
+}
+```
+
+`syncStatus` is one of `IDLE`, `QUEUED`, `RUNNING`, `SUCCESS`, or `FAILED`.
+
+---
+
+#### `DELETE /api/amundi/session`
+
+- **Auth:** Required
+
+**Response `204`.** Imported accounts and history are retained.
+
+Domain failures use `422` RFC 7807 responses with a stable `code` property:
+`INVALID_CREDENTIALS`, `CAPTCHA_BLOCKED`, `INVALID_OTP`,
+`APP_VALIDATION_TIMEOUT`, `AUTH_ATTEMPT_EXPIRED`, `SESSION_EXPIRED`,
+`PORTFOLIO_INCOMPLETE`, `UPSTREAM_FORMAT_CHANGED`, `UPSTREAM_UNAVAILABLE`,
+`INVALID_DATA`, or `INTERNAL_ERROR`. Authentication rate limiting returns `429`.
+
+---
+
+### 13. DEGIRO — `/api/degiro`
+
+The connector is read-only and **session-only**: DEGIRO's session cookie expires
+after ~30 minutes of inactivity and Picsou never stores the account's TOTP
+secret, so there is no scheduled background resync — every sync is user-initiated
+and may require reconnecting. See
+[`docs/decisions/2026-08-05-degiro-session-only-no-stored-totp.md`](../../docs/decisions/2026-08-05-degiro-session-only-no-stored-totp.md).
+
+#### `POST /api/degiro/auth/initiate`
+
+- **Auth:** Required
+- **Rate limit:** Per IP — 5 attempts / 15 min
+
+**Request body:**
+```json
+{ "username": "client-id", "password": "secret" }
+```
+
+**Response `200` — `DegiroAuthInitResponse`:**
+```json
+{ "processId": "uuid", "totpRequired": true }
+```
+
+When `totpRequired` is false, the encrypted session is already stored and a
+first portfolio import has run.
+
+---
+
+#### `POST /api/degiro/auth/complete`
+
+- **Auth:** Required
+- **Rate limit:** Per IP — 5 attempts / 15 min (anti-bruteforce on the 6-digit code)
+
+**Request body:**
+```json
+{ "processId": "uuid", "code": "123456" }
+```
+
+**Response `200` — `DegiroSessionStatus`.**
+
+---
+
+#### `POST /api/degiro/sync`
+
+- **Auth:** Required
+- **Body:** none
+
+**Response `200` — `AccountResponse`.** Synchronous: the portfolio is fetched
+with the stored session and the account is returned. Fails with `422` when the
+session has expired, and the stored status flips to `REAUTH_REQUIRED`.
+
+---
+
+#### `GET /api/degiro/status`
+
+- **Auth:** Required
+
+**Response `200` — `DegiroSessionStatus`:**
+```json
+{
+  "isActive": true,
+  "status": "ACTIVE",
+  "lastSyncedAt": "2026-08-05T10:00:00Z"
+}
+```
+
+`status` is one of `ACTIVE`, `REAUTH_REQUIRED`, or `FAILED`. `REAUTH_REQUIRED`
+is an expected, frequent state for this integration — not an error.
+
+---
+
+#### `DELETE /api/degiro/session`
+
+- **Auth:** Required
+
+**Response `204`.** Imported accounts and history are retained.
+
+Domain failures use `422` RFC 7807 responses. Unlike Bourse Direct and Amundi,
+DEGIRO does not yet set a stable `code` property — clients should treat the
+absence of a code as a generic sync failure rather than parsing `detail`.
+Authentication rate limiting returns `429`.

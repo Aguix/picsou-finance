@@ -22,6 +22,9 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Search, TrendingUp, TrendingDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { accountTypeLabelKey } from '@/lib/constants'
+import { ErrorState } from '@/components/shared/ErrorState'
+import { formatApiError } from '@/lib/errors'
 import { HoldingDetailModal } from '@/components/shared/HoldingDetailModal'
 import type { Account } from '@/types/api'
 
@@ -32,18 +35,9 @@ const FILTER_TABS: { value: FilterType; labelKey: string; match: (type: Account[
   { value: 'PEA', labelKey: 'accountTypes.pea', match: (t) => t === 'PEA' },
   { value: 'COMPTE_TITRES', labelKey: 'accountTypes.compteTitres', match: (t) => t === 'COMPTE_TITRES' },
   { value: 'CRYPTO', labelKey: 'accountTypes.crypto', match: (t) => t === 'CRYPTO' },
-  { value: 'cash', labelKey: 'portfolio.cash', match: (t) => ['CHECKING', 'SAVINGS', 'LEP', 'OTHER'].includes(t) },
+  { value: 'cash', labelKey: 'portfolio.cash', match: (t) => ['CHECKING', 'SAVINGS', 'LEP', 'LIVRET_A', 'LDDS', 'LIVRET_JEUNE', 'PEL', 'CEL', 'OTHER']
+      .includes(t) },
 ]
-
-const ACCOUNT_TYPE_BADGE: Record<string, string> = {
-  PEA: 'accountTypes.pea',
-  COMPTE_TITRES: 'accountTypes.compteTitres',
-  CRYPTO: 'accountTypes.crypto',
-  CHECKING: 'accountTypes.checking',
-  SAVINGS: 'accountTypes.savings',
-  LEP: 'accountTypes.lep',
-  OTHER: 'accountTypes.other',
-}
 
 function HoldingsItem({ line, onClick }: { line: PortfolioLine; onClick: () => void }) {
   const { t } = useTranslation()
@@ -65,7 +59,7 @@ function HoldingsItem({ line, onClick }: { line: PortfolioLine; onClick: () => v
       </ItemContent>
       <div className="flex shrink-0 items-center gap-6">
         <Badge variant="outline">
-          {t(ACCOUNT_TYPE_BADGE[line.accountType] ?? line.accountType)}
+          {t(accountTypeLabelKey(line.accountType))}
         </Badge>
         <div className="flex flex-col items-end gap-0.5">
           <span className="text-sm text-muted-foreground">
@@ -93,7 +87,7 @@ function HoldingsItem({ line, onClick }: { line: PortfolioLine; onClick: () => v
 
 export function HoldingsCard() {
   const { t } = useTranslation()
-  const { data: lines, isLoading } = usePortfolio()
+  const { data: lines, isLoading, isError, error, refetch } = usePortfolio()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<FilterType>('all')
   const [selectedLine, setSelectedLine] = useState<PortfolioLine | null>(null)
@@ -140,6 +134,25 @@ export function HoldingsCard() {
     )
   }
 
+  // Rendered rather than hidden: an empty dashboard card reads as "nothing to show",
+  // which is exactly the wrong conclusion when the holdings could not be loaded.
+  if (isError) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('dashboard.holdings')}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ErrorState
+            title={t('error.crashTitle')}
+            message={formatApiError(error, t)}
+            onRetry={() => void refetch()}
+          />
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (!lines || lines.length === 0) return null
 
   return (
@@ -163,7 +176,7 @@ export function HoldingsCard() {
                 key={tab.value}
                 onClick={() => setFilter(tab.value)}
                 className={cn(
-                  'inline-flex h-10 min-w-32 items-center justify-center whitespace-nowrap rounded-full border px-6 text-sm font-medium transition-[background-color,color,border-color]',
+                  'inline-flex h-10 min-w-32 items-center justify-center whitespace-nowrap rounded-md border px-6 text-sm font-medium transition-[background-color,color,border-color]',
                   filter === tab.value
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-background hover:bg-muted',

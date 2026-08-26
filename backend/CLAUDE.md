@@ -11,7 +11,14 @@ mvn test -Dtest=GoalServiceTest                       # Run a single test class
 mvn package -DskipTests                               # Build JAR
 ```
 
-Tests use H2 in-memory — no external database needed.
+Tests use H2 in-memory — no external database needed. The one exception is the Flyway
+migration tests, which need real PostgreSQL (Testcontainers, Docker Engine ≥ 25.0); they
+skip themselves when Docker is unreachable, so the rest of the suite still runs.
+
+That skip is invisible in a green build, so CI sets `PICSOU_REQUIRE_DOCKER_TESTS=true`,
+which turns "no Docker" into a hard failure instead — a red build there means the daemon
+was unreachable, not that a migration broke. Watch the **Skipped** count locally: one is
+normal, a handful means the migration tests silently sat out.
 
 ## Package structure
 
@@ -35,9 +42,9 @@ com.picsou/
 
 **Auth flow:** `JwtAuthenticationFilter` reads the `access_token` HttpOnly cookie, validates the `tv` (token-version) claim against `AppUser.tokenVersion`, and sets the `SecurityContext`. `AuthController` issues and rotates access/refresh tokens; `MfaController` issues `mfa_challenge` JWTs and verifies TOTP; `PersistentTokenAuthFilter` re-issues access tokens from rotating "Remember Me" tokens. CSRF is disabled — `SameSite=Lax` cookies + JSON-only API surface provide equivalent protection (`Lax` rather than `Strict` for Safari iOS compatibility).
 
-**Member-scoped authorization:** every controller resolves `UserContext.currentMemberId()` (or `currentMemberIdOverride()` for admin impersonation), and every service/repository scopes queries by `member_id`. Family-shared access goes through `SharingSettings` + `SharedResource`. Never query a repo without a member filter.
+**Member-scoped authorization:** every controller resolves `UserContext.currentMemberId()` (or `currentMemberIdOverride()` for admin impersonation), and every service/repository scopes queries by `member_id`. Family-shared access goes through `SharingSettings` + `SharedResource`. Never query a repo without a member filter — the sole exception is a lookup whose key is itself an unguessable single-use credential (e.g. `RequisitionRepository.findByOauthState`, see the OAuth-state ADR), where the member is derived from the resolved row.
 
-**Rate limiting:** `RateLimitConfig` configures Bucket4j buckets; the actual enforcement is in the controllers via annotations. Login: 5 attempts/15 min. Sync endpoints are also throttled.
+**Rate limiting:** `RateLimitConfig` exposes named `Map<String, Bucket>` beans (Bucket4j); controllers inject the relevant bucket map via `@Qualifier` and enforce manually with `tryConsume(1)` before doing rate-limited work (there is no annotation-based limiter — every controller uses this same explicit check). Login: 5 attempts/15 min. Sync endpoints are also throttled.
 
 **Scheduled tasks** (`SchedulerService`): daily balance snapshots and price cache refresh. `PriceService` holds a 15-minute in-memory cache to avoid hammering external APIs.
 

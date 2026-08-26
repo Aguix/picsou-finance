@@ -72,4 +72,7 @@ public class Transaction {
     @Enumerated(EnumType.STRING)
     @Column(name = "reward_kind", length = 20)
     private RewardKind rewardKind;
+    /** Broker/transaction fees. Null (no fee recorded) is treated as zero downstream. */
+    @Column(name = "fees", precision = 20, scale = 8)
+    private BigDecimal fees;
 }

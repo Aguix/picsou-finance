@@ -12,10 +12,22 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
-import { AccountForm } from '@/components/shared/AccountForm'
-import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
 import { Badge } from '@/components/ui/badge'
-import { ACCOUNT_COLORS, TR_VERIFICATION_CODE_LENGTH } from '@/lib/constants'
+import { AccountForm } from '@/components/shared/AccountForm'
+import { AddPropertyModal } from '@/components/property/AddPropertyModal'
+import { BankCountrySelect, DEFAULT_BANK_COUNTRY } from '@/components/shared/BankCountrySelect'
+import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
+import { BourseDirectPanel } from '@/components/sync/BourseDirectPanel'
+import { BoursoPanel } from '@/components/sync/BoursoPanel'
+import { DegiroPanel } from '@/components/sync/DegiroPanel'
+import { AmundiPanel } from '@/components/sync/AmundiPanel'
+import {
+  ACCOUNT_COLORS,
+  ACCOUNT_TYPES,
+  EXCHANGE_API_KEY_MAX_LENGTH,
+  EXCHANGE_API_SECRET_MAX_LENGTH,
+  TR_VERIFICATION_CODE_LENGTH,
+} from '@/lib/constants'
 import { extractErrorMessage, formatTrAuthError, getErrorStatus, getErrorDetail } from '@/lib/errors'
 import { useCreateAccount, useUpdateDebtMetadata } from '@/features/accounts/hooks'
 import {
@@ -38,6 +50,7 @@ import { aggregatorLabel, verifyUrl } from '@/features/assets/aggregators'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import {
   Landmark,
+  HousePlus,
   ArrowLeftRight,
   Wallet,
   Coins,
@@ -56,8 +69,12 @@ import {
   ShieldCheck,
   RefreshCw,
   ExternalLink,
+  BriefcaseBusiness,
+  TrendingUp,
+  PiggyBank,
 } from 'lucide-react'
 import type { ExchangeType, ChainType, AccountRequest, FinaryPreviewResponse, FinaryAccountMapping, FinaryMappingAction, FinaryImportResultResponse, AccountType, CryptoPreviewResponse, CryptoImportResult, ImportAssetChoice, ImportAssetMapping } from '@/types/api'
+import { SUPPORTED_CHAINS, SUPPORTED_EXCHANGES, exchangeRequiresApiSecret } from '@/types/api'
 
 // ---------------------------------------------------------------------------
 // Props & types
@@ -68,7 +85,9 @@ interface AddAccountModalProps {
   onOpenChange: (open: boolean) => void
 }
 
-type WizardStep = 'selector' | 'banks' | 'crypto' | 'exchanges' | 'wallets' | 'crypto-import' | 'tr' | 'finary' | 'manual'
+type WizardStep =
+  | 'selector' | 'banks' | 'crypto' | 'exchanges' | 'wallets' | 'crypto-import'
+  | 'tr' | 'bourso' | 'bourseDirect' | 'degiro' | 'amundi' | 'finary' | 'property' | 'manual'
 
 /**
  * Masked variant of InputOTPSlot — replaces the typed character with a bullet
@@ -108,7 +127,12 @@ const SOURCES: SourceItem[] = [
   { key: 'banks', icon: Landmark, labelKey: 'sync.banks.title', descKey: 'addAccount.desc.banks' },
   { key: 'crypto', icon: Coins, labelKey: 'addAccount.crypto', descKey: 'addAccount.desc.crypto' },
   { key: 'tr', icon: Smartphone, labelKey: 'sync.tr.title', descKey: 'addAccount.desc.tr' },
+  { key: 'bourso', icon: Landmark, labelKey: 'sync.bourso.title', descKey: 'addAccount.desc.bourso' },
+  { key: 'bourseDirect', icon: BriefcaseBusiness, labelKey: 'sync.bourseDirect.title', descKey: 'addAccount.desc.bourseDirect' },
+  { key: 'degiro', icon: TrendingUp, labelKey: 'sync.degiro.title', descKey: 'addAccount.desc.degiro' },
+  { key: 'amundi', icon: PiggyBank, labelKey: 'sync.amundi.title', descKey: 'addAccount.desc.amundi' },
   { key: 'finary', icon: FileSpreadsheet, labelKey: 'sync.finary.title', descKey: 'addAccount.desc.finary' },
+  { key: 'property', icon: HousePlus, labelKey: 'property.add.source', descKey: 'addAccount.desc.property' },
   { key: 'manual', icon: PenLine, labelKey: 'addAccount.manual', descKey: 'addAccount.desc.manual' },
 ]
 
@@ -152,6 +176,7 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
   const updateDebt = useUpdateDebtMetadata()
   const [step, setStep] = useState<WizardStep>('selector')
   const [showManualForm, setShowManualForm] = useState(false)
+  const [showPropertyForm, setShowPropertyForm] = useState(false)
 
   function handleSourceClick(key: WizardStep) {
     if (key === 'manual') {
@@ -159,7 +184,14 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
       setShowManualForm(true)
       return
     }
-    setStep(key)
+    if (key === 'property') {
+      // Its own guided flow rather than a step here: it creates the account, saves the
+      // description and runs the first estimate in one pass.
+      onOpenChange(false)
+      setShowPropertyForm(true)
+      return
+    }
+    setStep(key as WizardStep)
   }
 
   function handleDialogChange(open: boolean) {
@@ -176,13 +208,14 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
 
   async function handleManualSubmit(data: {
     name: string
-    type: 'LEP' | 'PEA' | 'COMPTE_TITRES' | 'CRYPTO' | 'CHECKING' | 'SAVINGS' | 'REAL_ESTATE' | 'LOAN' | 'OTHER'
+    type: AccountType
     provider?: string
     currency: string
     currentBalance?: number
     isManual: boolean
     color: string
     ticker?: string
+    institutionId?: string
     borrowedAmount?: number
     interestRatePct?: number
     monthlyPayment?: number
@@ -200,6 +233,8 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
       isManual: true,
       color: data.color,
       ticker: data.ticker || undefined,
+      // Set only when a bank was picked from the catalog; the backend resolves its logo from it.
+      institutionId: data.institutionId,
     }
     const created = await createAccount.mutateAsync(request)
 
@@ -225,7 +260,10 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={handleDialogChange}>
-        <DialogContent className="max-w-xl">
+        {/* sm:max-w-xl, not just max-w-xl: DialogContent's own `sm:max-w-sm` is a different
+            Tailwind variant, so tailwind-merge keeps it and an unprefixed max-w-xl silently has
+            no effect above 640px — which is what squeezed this wizard into 24rem. */}
+        <DialogContent className="max-w-xl sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
               {step === 'selector'
@@ -254,10 +292,38 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
               {step === 'wallets' && <WalletWizard onDone={handleDone} onBack={() => setStep('crypto')} />}
               {step === 'crypto-import' && <CryptoCsvWizard onDone={handleDone} onBack={() => setStep('crypto')} />}
               {step === 'tr' && <TradeRepublicWizard onDone={handleDone} onBack={() => setStep('selector')} />}
+              {step === 'bourso' && (
+                <>
+                  <BackButton onClick={() => setStep('selector')} />
+                  <BoursoPanel onConnected={handleDone} />
+                </>
+              )}
+              {step === 'bourseDirect' && (
+                <>
+                  <BackButton onClick={() => setStep('selector')} />
+                  <BourseDirectPanel onConnected={handleDone} />
+                </>
+              )}
+              {step === 'degiro' && (
+                <>
+                  <BackButton onClick={() => setStep('selector')} />
+                  <DegiroPanel onConnected={handleDone} />
+                </>
+              )}
+              {step === 'amundi' && (
+                <>
+                  <BackButton onClick={() => setStep('selector')} />
+                  <AmundiPanel onConnected={handleDone} />
+                </>
+              )}
               {step === 'finary' && <FinaryWizard onDone={handleDone} onBack={() => setStep('selector')} />}
             </>
         </DialogContent>
       </Dialog>
+
+      {showPropertyForm && (
+        <AddPropertyModal open onOpenChange={setShowPropertyForm} />
+      )}
 
       <AccountForm
         open={showManualForm}
@@ -311,6 +377,7 @@ function InstitutionLogo({ logoUrl }: { logoUrl?: string | null }) {
 function BankWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
   const { t } = useTranslation()
   const [searchQuery, setSearchQuery] = useState('')
+  const [country, setCountry] = useState(DEFAULT_BANK_COUNTRY)
   const [error, setError] = useState<string | null>(null)
 
   const {
@@ -318,7 +385,7 @@ function BankWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
     isError: searchFailed,
     isLoading: searchLoading,
     error: searchError,
-  } = useSearchInstitutions(searchQuery.trim())
+  } = useSearchInstitutions(searchQuery.trim(), country)
   const initiateMutation = useInitiateBankSync()
 
   const searchEnabled = searchQuery.trim().length >= 2
@@ -348,15 +415,18 @@ function BankWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
             <Button variant="ghost" size="sm" onClick={() => setError(null)}>x</Button>
           </div>
         )}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('sync.banks.searchPlaceholder')}
-            className="pl-10"
-            autoFocus
-          />
+        <div className="flex items-start gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('sync.banks.searchPlaceholder')}
+              className="pl-10"
+              autoFocus
+            />
+          </div>
+          <BankCountrySelect value={country} onChange={setCountry} />
         </div>
 
         {searchLoading && (
@@ -384,6 +454,11 @@ function BankWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
                 <div className="flex min-w-0 items-center gap-2">
                   <InstitutionLogo logoUrl={inst.logoUrl} />
                   <span className="min-w-0 text-sm font-medium leading-5">{inst.name}</span>
+                  {inst.psuType === 'business' && (
+                    <Badge variant="outline" title={t('sync.banks.proBadgeTitle')}>
+                      {t('sync.banks.proBadge')}
+                    </Badge>
+                  )}
                 </div>
                 <span className="justify-self-center text-xs text-muted-foreground">{inst.country}</span>
                 <Button
@@ -421,16 +496,29 @@ function ExchangeWizard({ onBack }: { onDone: () => void; onBack: () => void }) 
   const [error, setError] = useState<string | null>(null)
 
   const addMutation = useAddCryptoExchange()
+  const requiresSecret = exchangeRequiresApiSecret(exchangeType)
+
+  function selectExchange(type: ExchangeType) {
+    setExchangeType(type)
+    // Drop anything typed under the previous exchange: sending a secret to a single-key exchange
+    // is a 400, and it would be entirely self-inflicted.
+    setApiSecret('')
+    setShowSecret(false)
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     addMutation.mutate(
-      { type: exchangeType, apiKey, apiSecret },
+      { type: exchangeType, apiKey, apiSecret: requiresSecret ? apiSecret : undefined },
       {
         onSuccess: () => setDone(true),
         onError: (err: unknown) => {
-          setError(getErrorDetail(err) || (err as { message?: string })?.message || t('sync.exchanges.connectError'))
+          // The fallback names only the credentials this exchange actually takes — a Meria user
+          // told to check a secret goes looking for a field the form never showed them.
+          const fallback = requiresSecret
+            ? 'sync.exchanges.connectError' : 'sync.exchanges.connectErrorKeyOnly'
+          setError(getErrorDetail(err) || (err as { message?: string })?.message || t(fallback))
         },
       },
     )
@@ -457,16 +545,18 @@ function ExchangeWizard({ onBack }: { onDone: () => void; onBack: () => void }) 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
           <Label>{t('sync.exchanges.type')}</Label>
-          <div className="flex gap-2">
-            {(['BINANCE', 'KRAKEN'] as ExchangeType[]).map((type) => (
+          {/* wrap: these buttons are wide (px-8) and there is no room for three in a row on a
+              narrow viewport — without it the row stretches the whole form past the dialog. */}
+          <div className="flex flex-wrap gap-2">
+            {SUPPORTED_EXCHANGES.map((exchange) => (
               <Button
-                key={type}
+                key={exchange.type}
                 type="button"
-                variant={exchangeType === type ? 'default' : 'outline'}
+                variant={exchangeType === exchange.type ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setExchangeType(type)}
+                onClick={() => selectExchange(exchange.type)}
               >
-                {type}
+                {exchange.type}
               </Button>
             ))}
           </div>
@@ -480,30 +570,38 @@ function ExchangeWizard({ onBack }: { onDone: () => void; onBack: () => void }) 
             onChange={(e) => setApiKey(e.target.value)}
             placeholder={t('sync.exchanges.apiKey')}
             required
+            maxLength={EXCHANGE_API_KEY_MAX_LENGTH}
           />
+          {!requiresSecret && (
+            <p className="text-xs text-muted-foreground">{t('sync.exchanges.apiKeyOnly')}</p>
+          )}
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="exchange-api-secret">{t('sync.exchanges.apiSecret')}</Label>
-          <div className="relative">
-            <Input
-              id="exchange-api-secret"
-              type={showSecret ? 'text' : 'password'}
-              value={apiSecret}
-              onChange={(e) => setApiSecret(e.target.value)}
-              placeholder={t('sync.exchanges.apiSecret')}
-              required
-              className="pr-10"
-            />
-            <button
-              type="button"
-              onClick={() => setShowSecret((p) => !p)}
-              className="absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </button>
+        {requiresSecret && (
+          <div className="space-y-2">
+            <Label htmlFor="exchange-api-secret">{t('sync.exchanges.apiSecret')}</Label>
+            <div className="relative">
+              <Input
+                id="exchange-api-secret"
+                type={showSecret ? 'text' : 'password'}
+                value={apiSecret}
+                onChange={(e) => setApiSecret(e.target.value)}
+                placeholder={t('sync.exchanges.apiSecret')}
+                required
+                maxLength={EXCHANGE_API_SECRET_MAX_LENGTH}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowSecret((p) => !p)}
+                aria-label={t(showSecret ? 'sync.exchanges.hideSecret' : 'sync.exchanges.showSecret')}
+                className="absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         <Button type="submit" disabled={addMutation.isPending} className="w-full">
           {addMutation.isPending && <Loader2 className="size-4 animate-spin" />}
@@ -520,7 +618,7 @@ function ExchangeWizard({ onBack }: { onDone: () => void; onBack: () => void }) 
 
 function WalletWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
   const { t } = useTranslation()
-  const [chain, setChain] = useState<ChainType>('ETHEREUM')
+  const [chain, setChain] = useState<ChainType>('EVM')
   const [address, setAddress] = useState('')
   const [label, setLabel] = useState('')
   const [done, setDone] = useState(false)
@@ -564,7 +662,7 @@ function WalletWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
         <div className="space-y-2">
           <Label>{t('sync.wallets.chain')}</Label>
           <div className="flex gap-2">
-            {(['BITCOIN', 'ETHEREUM', 'SOLANA'] as ChainType[]).map((c) => (
+            {SUPPORTED_CHAINS.map((c) => (
               <Button
                 key={c}
                 type="button"
@@ -576,6 +674,9 @@ function WalletWizard({ onBack }: { onDone: () => void; onBack: () => void }) {
               </Button>
             ))}
           </div>
+          {chain === 'EVM' && (
+            <p className="text-xs text-muted-foreground">{t('sync.wallets.evmHint')}</p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -1631,7 +1732,7 @@ function FinaryWizard({ onDone, onBack }: { onDone: () => void; onBack: () => vo
 
                 {mappings[index]?.action === 'MAP_EXISTING' && (
                   <select
-                    className="h-10 w-full rounded-xl border border-input bg-input/20 px-4 text-sm outline-none dark:bg-input/30"
+                    className="h-10 w-full rounded-xl border border-input bg-background text-foreground px-4 text-sm outline-none [color-scheme:light] dark:[color-scheme:dark]"
                     value={mappings[index].targetAccountId ?? ''}
                     onChange={(e) => {
                       const val = e.target.value
@@ -1659,12 +1760,15 @@ function FinaryWizard({ onDone, onBack }: { onDone: () => void; onBack: () => vo
                     <div className="space-y-1">
                       <Label>{t('sync.exchanges.type')}</Label>
                       <select
-                        className="h-10 w-full rounded-xl border border-input bg-input/20 px-4 text-sm outline-none dark:bg-input/30"
+                        className="h-10 w-full rounded-xl border border-input bg-background text-foreground px-4 text-sm outline-none [color-scheme:light] dark:[color-scheme:dark]"
                         value={mappings[index].newAccount!.type}
                         onChange={(e) => updateNewAccountField(index, 'type', e.target.value)}
                       >
-                        {(['CHECKING', 'SAVINGS', 'LEP', 'PEA', 'COMPTE_TITRES', 'CRYPTO', 'REAL_ESTATE', 'LOAN', 'OTHER'] as const).map((type) => (
-                          <option key={type} value={type}>{t(`accountTypes.${type === 'COMPTE_TITRES' ? 'compteTitres' : type === 'REAL_ESTATE' ? 'realEstate' : type.toLowerCase()}`)}</option>
+                        {/* The shared list, not a local copy: deriving a label key from the
+                            type name only held while every key was the lowercased value, and
+                            broke the moment a type needed its own (livretA, employeeSavings). */}
+                        {ACCOUNT_TYPES.map((at) => (
+                          <option key={at.value} value={at.value}>{t(at.labelKey)}</option>
                         ))}
                       </select>
                     </div>

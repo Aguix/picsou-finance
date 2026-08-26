@@ -8,7 +8,10 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
+import { ErrorState } from '@/components/shared/ErrorState'
+import { formatApiError } from '@/lib/errors'
 import { cn } from '@/lib/utils'
+import { accountTypeLabelKey } from '@/lib/constants'
 import { Search } from 'lucide-react'
 
 type SortBy = 'value' | 'pnl'
@@ -17,16 +20,6 @@ const SORT_OPTIONS: { value: SortBy; labelKey: string }[] = [
   { value: 'value', labelKey: 'portfolio.sortByValue' },
   { value: 'pnl', labelKey: 'portfolio.sortByPnl' },
 ]
-
-const ACCOUNT_TYPE_I18N: Record<string, string> = {
-  PEA: 'accountTypes.pea',
-  COMPTE_TITRES: 'accountTypes.compteTitres',
-  CRYPTO: 'accountTypes.crypto',
-  CHECKING: 'accountTypes.checking',
-  SAVINGS: 'accountTypes.savings',
-  LEP: 'accountTypes.lep',
-  OTHER: 'accountTypes.other',
-}
 
 function PortfolioItem({ line }: { line: PortfolioLine }) {
   const { t } = useTranslation()
@@ -55,7 +48,7 @@ function PortfolioItem({ line }: { line: PortfolioLine }) {
       {/* Right side */}
       <div className="flex shrink-0 items-center gap-5">
         <Badge variant="outline">
-          {t(ACCOUNT_TYPE_I18N[line.accountType] ?? line.accountType)}
+          {t(accountTypeLabelKey(line.accountType))}
         </Badge>
 
         {/* PnL */}
@@ -85,7 +78,7 @@ function PortfolioItem({ line }: { line: PortfolioLine }) {
 
 export function PortfolioView() {
   const { t } = useTranslation()
-  const { data: lines, isLoading } = usePortfolio()
+  const { data: lines, isLoading, isError, error, refetch } = usePortfolio()
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<SortBy>('value')
 
@@ -137,6 +130,25 @@ export function PortfolioView() {
     )
   }
 
+  // Before the empty check: a failed load has no lines either, and "no holdings" is the
+  // one message that must never stand in for "we could not read your holdings".
+  if (isError) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{t('portfolio.title')}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ErrorState
+            title={t('error.crashTitle')}
+            message={formatApiError(error, t)}
+            onRetry={() => void refetch()}
+          />
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (!lines || lines.length === 0) {
     return (
       <Card>
@@ -179,7 +191,7 @@ export function PortfolioView() {
                 key={opt.value}
                 onClick={() => setSortBy(opt.value)}
                 className={cn(
-                  'inline-flex h-10 min-w-32 items-center justify-center whitespace-nowrap rounded-full border px-6 text-sm font-medium transition-[background-color,color,border-color]',
+                  'inline-flex h-10 min-w-32 items-center justify-center whitespace-nowrap rounded-md border px-6 text-sm font-medium transition-[background-color,color,border-color]',
                   sortBy === opt.value
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-background hover:bg-muted',

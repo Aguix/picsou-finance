@@ -23,6 +23,7 @@ public record TransactionResponse(
     String name,
     BigDecimal quantity,
     BigDecimal pricePerUnit,
+    BigDecimal fees,
     RewardKind rewardKind
 ) {
     public static TransactionResponse from(Transaction t) {
@@ -41,6 +42,7 @@ public record TransactionResponse(
             t.getName(),
             t.getQuantity(),
             t.getPricePerUnit(),
+            t.getFees(),
             t.getRewardKind()
         );
     }

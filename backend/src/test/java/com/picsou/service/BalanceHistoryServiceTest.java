@@ -184,7 +184,7 @@ class BalanceHistoryServiceTest {
             .quantity(new BigDecimal("2")).amount(new BigDecimal("-1000")).build();
         Transaction tickerless = Transaction.builder()
             .date(TODAY).txType(TransactionType.BUY).quantity(new BigDecimal("1")).build();
-        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(5L), any()))
+        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAscIdAsc(eq(5L), any()))
             .thenReturn(List.of(buy, tickerless));
         // The BTC buy of 2 exactly reproduces the account's holding → the gate passes and it rebuilds.
         when(accountHoldingRepository.findByAccount_Id(5L)).thenReturn(List.of(holding("BTC", "2")));
@@ -207,7 +207,7 @@ class BalanceHistoryServiceTest {
         Transaction btcBuy = Transaction.builder()
             .date(TODAY).ticker("BTC").txType(TransactionType.BUY)
             .quantity(new BigDecimal("2")).amount(new BigDecimal("-1000")).build();
-        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(9L), any()))
+        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAscIdAsc(eq(9L), any()))
             .thenReturn(List.of(btcBuy));
         when(accountHoldingRepository.findByAccount_Id(9L))
             .thenReturn(List.of(holding("BTC", "2"), holding("AAPL", "10")));

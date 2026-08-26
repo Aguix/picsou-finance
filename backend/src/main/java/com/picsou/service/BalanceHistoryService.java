@@ -100,7 +100,7 @@ public class BalanceHistoryService {
     @Transactional
     public void rebuildFromTransactions(Account account) {
         List<HistoryLeg> legs = transactionRepository
-            .findByAccountIdAndTxTypeInOrderByDateAsc(account.getId(),
+            .findByAccountIdAndTxTypeInOrderByDateAscIdAsc(account.getId(),
                 List.of(TransactionType.BUY, TransactionType.SELL, TransactionType.REWARD))
             .stream()
             .filter(t -> t.getTicker() != null && !t.getTicker().isBlank())

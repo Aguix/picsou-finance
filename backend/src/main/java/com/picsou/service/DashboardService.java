@@ -33,6 +33,8 @@ public class DashboardService {
     private final PriceService priceService;
     private final AccountHoldingRepository holdingRepository;
     private final HistoryService historyService;
+    private final AccountService accountService;
+    private final AccountAccessResolver accessResolver;
 
     public DashboardService(
         AccountRepository accountRepository,
@@ -40,7 +42,9 @@ public class DashboardService {
         GoalRepository goalRepository,
         PriceService priceService,
         AccountHoldingRepository holdingRepository,
-        HistoryService historyService
+        HistoryService historyService,
+        AccountService accountService,
+        AccountAccessResolver accessResolver
     ) {
         this.accountRepository = accountRepository;
         this.goalService = goalService;
@@ -48,10 +52,14 @@ public class DashboardService {
         this.priceService = priceService;
         this.holdingRepository = holdingRepository;
         this.historyService = historyService;
+        this.accountService = accountService;
+        this.accessResolver = accessResolver;
     }
 
     public DashboardResponse getDashboard(Long memberId, String range) {
-        List<Account> accounts = accountRepository.findAllByMemberIdOrderByCreatedAtAsc(memberId);
+        // Owned accounts plus any the member co-owns; each contributes only their share.
+        List<Account> accounts = accessResolver.readableAccounts(memberId);
+        Map<Long, BigDecimal> shares = accessResolver.sharesFor(accounts, memberId);
 
         // Pre-load all holdings and group by account
         Map<Long, List<AccountHolding>> holdingsByAccount = new HashMap<>();
@@ -63,6 +71,7 @@ public class DashboardService {
         BigDecimal totalAssets = BigDecimal.ZERO;
         BigDecimal totalLiabilities = BigDecimal.ZERO;
         BigDecimal totalInvested = BigDecimal.ZERO;
+        Map<Long, BigDecimal> accountValues = new HashMap<>();
 
         for (Account account : accounts) {
             List<AccountHolding> holdings = holdingsByAccount.get(account.getId());
@@ -70,24 +79,35 @@ public class DashboardService {
             BigDecimal accountValue;
             BigDecimal accountInvested;
 
-            if (holdings.isEmpty()) {
+            if (account.getType() == AccountType.LOAN) {
+                // Same valuation source as HistoryService's live point: amortized
+                // remaining capital when a Debt row exists, stored balance otherwise.
+                // Keeps the hero's liabilities consistent with the chart's today point.
+                accountValue = accountService.liveBalanceEur(account);
+                accountInvested = BigDecimal.ZERO;
+            } else if (holdings.isEmpty()) {
                 accountValue = priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getAsset());
                 accountInvested = accountValue;
             } else {
-                BigDecimal liveValue = BigDecimal.ZERO;
-                BigDecimal investedValue = BigDecimal.ZERO;
-                for (AccountHolding h : holdings) {
-                    BigDecimal qty = h.getQuantity();
-                    BigDecimal avgBuy = h.getAverageBuyIn() != null ? h.getAverageBuyIn() : BigDecimal.ZERO;
-
-                    liveValue = liveValue.add(holdingValueEur(h));
-                    investedValue = investedValue.add(qty.multiply(avgBuy));
-                }
-                log.info("getDashboard: account={} holdings={} liveValue={} investedValue={}",
-                    account.getId(), holdings.size(), liveValue, investedValue);
-                accountValue = liveValue;
-                accountInvested = investedValue;
+                // One pass for both figures. Summing the cost basis here while taking the value
+                // from liveBalanceEur is exactly the asymmetry that reported an untouched account
+                // at -85%: the value drops a holding it cannot price, the inline loop kept that
+                // holding's full purchase cost. valuation() excludes it from both sides, and
+                // still falls back atomically to a provider's own EUR total (Bourse Direct,
+                // Amundi) when a price lookup fails.
+                AccountService.Valuation valuation = accountService.valuation(account);
+                accountValue = valuation.liveEur();
+                accountInvested = valuation.investedEur();
             }
+
+            // Apply the member's share once, here: accountValues feeds both the hero totals
+            // and buildDistribution, so weighting in one place keeps the pie consistent with
+            // the headline figure. Accounts with no split resolve to 100% and are untouched.
+            BigDecimal share = shares.get(account.getId());
+            accountValue = AccountAccessResolver.weigh(accountValue, share);
+            accountInvested = AccountAccessResolver.weigh(accountInvested, share);
+
+            accountValues.put(account.getId(), accountValue);
 
             if (account.getType() == AccountType.LOAN) {
                 totalLiabilities = totalLiabilities.add(accountValue);
@@ -113,8 +133,12 @@ public class DashboardService {
         };
         List<NetWorthPoint> updatedHistory = historyService.buildHistory(allAccountIds, months, memberId);
 
-        List<DistributionItem> distribution = buildDistribution(accounts, totalNetWorth, holdingsByAccount, false);
-        List<DistributionItem> liabilities = buildDistribution(accounts, totalNetWorth, holdingsByAccount, true);
+        // Percentages are shares of their own side of the balance sheet:
+        // assets divide by totalAssets, liabilities by totalLiabilities (issue #18).
+        List<DistributionItem> distribution = buildDistribution(
+            accounts, totalAssets, holdingsByAccount, accountValues, false);
+        List<DistributionItem> liabilities = buildDistribution(
+            accounts, totalLiabilities, holdingsByAccount, accountValues, true);
 
         List<GoalProgressResponse> goals = goalRepository.findAllByMemberIdOrderByCreatedAtAsc(memberId).stream()
             .map(goalService::toProgressResponse)
@@ -123,8 +147,9 @@ public class DashboardService {
         return new DashboardResponse(totalNetWorth, totalLiabilities, updatedHistory, distribution, liabilities, goals);
     }
 
-    private List<DistributionItem> buildDistribution(List<Account> accounts, BigDecimal totalNetWorth,
+    private List<DistributionItem> buildDistribution(List<Account> accounts, BigDecimal divisor,
                                                        Map<Long, List<AccountHolding>> holdingsByAccount,
+                                                       Map<Long, BigDecimal> accountValues,
                                                        boolean liabilitiesOnly) {
         List<DistributionItem> items = new ArrayList<>();
 
@@ -133,18 +158,12 @@ public class DashboardService {
             if (liabilitiesOnly != isLoan) continue;
 
             List<AccountHolding> holdings = holdingsByAccount.getOrDefault(account.getId(), List.of());
-            BigDecimal balanceEur;
-            if (holdings.isEmpty()) {
-                balanceEur = priceService.toEur(account.getCurrentBalance(), account.getCurrency(), account.getAsset());
-            } else {
-                balanceEur = BigDecimal.ZERO;
-                for (AccountHolding h : holdings) {
-                    balanceEur = balanceEur.add(holdingValueEur(h));
-                }
-            }
+            // Reuse the exact value that fed the hero total. Repricing here could mix two
+            // market snapshots or turn a broker fallback into a partial Yahoo valuation.
+            BigDecimal balanceEur = accountValues.getOrDefault(account.getId(), BigDecimal.ZERO);
 
-            double percentage = totalNetWorth.compareTo(BigDecimal.ZERO) > 0
-                ? balanceEur.divide(totalNetWorth, 6, RoundingMode.HALF_UP)
+            double percentage = divisor.compareTo(BigDecimal.ZERO) > 0
+                ? balanceEur.divide(divisor, 6, RoundingMode.HALF_UP)
                     .multiply(BigDecimal.valueOf(100))
                     .doubleValue()
                 : 0.0;
@@ -161,16 +180,5 @@ public class DashboardService {
         }
 
         return items;
-    }
-
-    private BigDecimal holdingValueEur(AccountHolding holding) {
-        FinancialAsset asset = holding.getAsset();
-        BigDecimal livePrice = priceService.getPriceEur(asset);
-        if (livePrice == null) {
-            log.warn("No live price for ticker '{}' — holding {} valued at zero until a quote is available",
-                asset.getSymbol(), holding.getId());
-            return BigDecimal.ZERO;
-        }
-        return holding.getQuantity().multiply(livePrice);
     }
 }

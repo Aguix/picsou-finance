@@ -1,6 +1,6 @@
 # Feature: Trade Republic Sync
 
-> Last updated: 2026-07-07
+> Last updated: 2026-08-09
 
 ## Context
 
@@ -33,7 +33,7 @@ failures:
 
 `TradeRepublicSyncService.completeAuth()` stores tokens in a `TradeRepublicSession` entity and returns immediately with a `SessionStatusResponse`. The initial sync runs **in the background** on a daemon thread (`tr-sync`) using `TransactionTemplate` for programmatic transaction management — the background thread has no Spring-managed EntityManager, so `@Transactional` would not work.
 
-Both `sessionToken` and `refreshToken` are **encrypted at rest** with AES-256-GCM via `CryptoEncryption` before storage, and decrypted on read. The refresh token has ~2-hour validity. On sync, if the session token is expired (`SESSION_EXPIRED` error), the service attempts to refresh using the stored refresh token. If refresh also fails, the session is cleared and the user must re-authenticate. See [encryption-at-rest.md](./encryption-at-rest.md) for encryption details.
+Both `sessionToken` and `refreshToken` are **encrypted at rest** with AES-256-GCM via `CryptoEncryption` before storage, and decrypted on read. The stored `expiresAt` (+2 h at auth/refresh time) is a **heuristic hint, not a hard gate**: on sync, if the session token is expired (`SESSION_EXPIRED` error), the service refreshes using the stored refresh token — this is the normal path for any sync happening hours after auth. Only a refresh **rejected by TR** (401/403 from the sidecar, which relays TR's status verbatim → `SyncException("SESSION_EXPIRED")`) clears the session and forces re-authentication; anything else (TR 429 rate-limit, sidecar 5xx, timeout, empty body) is transient and keeps the session so the next sync can retry. `getSessionStatus` therefore reports the session as active while a refresh token exists, even past `expiresAt`. See [encryption-at-rest.md](./encryption-at-rest.md) for encryption details.
 
 ### Data fetching (WebSocket, no sidecar)
 
@@ -41,7 +41,7 @@ The `TradeRepublicAdapter.fetchAccounts()` connects directly to `wss://api.trade
 
 1. Sends a `connect` message with locale, platform info, and client version.
 2. Subscribes to `availableCash` (cash balance) and `compactPortfolio`/`compactPortfolioByType` (list of positions with ISIN, netSize, averageBuyIn).
-3. For each position, subscribes to `ticker` to get the live market price. `compactPortfolioByType` positions carry no `exchangeId`, so the adapter appends one itself: `.LSX` (Lang & Schwarz Exchange, TR's home exchange for equities/ETFs) by default, or `.TRD0` for TR-native crypto ISINs (`XF000...`), which LSX doesn't list. Using the wrong suffix makes TR reject the subscription (`FORBIDDEN`), so the position's ticker price is never received and the sync silently falls back to `averageBuyIn` — see GH issue #23.
+3. For each position, subscribes to `ticker` to get the live market price. Positions with `instrumentType: "privateFund"` (private equity funds) are skipped — TR never sends a price tick for these non-publicly-traded assets, and subscribing would inflate `expectedTickers` causing the reactive stream to hang until the 45s timeout kills the entire sync. Skipped positions fall back to `averageBuyIn` pricing downstream. For all other positions, `compactPortfolioByType` positions carry no `exchangeId`, so the adapter appends one itself: `.LSX` (Lang & Schwarz Exchange, TR's home exchange for equities/ETFs) by default, or `.TRD0` for TR-native crypto ISINs (`XF000...`), which LSX doesn't list. Using the wrong suffix makes TR reject the subscription (`FORBIDDEN`), so the position's ticker price is never received and the sync silently falls back to `averageBuyIn` — see GH issue #23.
 4. Computes portfolio value as `sum(ticker.last.price * position.netSize)`.
 5. Extracts secAccNo (securities account numbers) from the JWT to handle multiple sub-portfolios. The normal brokerage account is exposed under `act.acc.owner.default`; French PEA accounts are exposed under `act.acc.owner.tax_wrapper_fr`.
 6. Builds `TrPosition` records from `positionsByIsin` map: each position includes ISIN, quantity (netSize), averageBuyIn, and currentPrice (from ticker, or averageBuyIn as fallback if ticker price is missing).
@@ -57,21 +57,51 @@ holdings for a TR account are deleted and recreated on every WebSocket sync; if 
 portfolio is returned with an empty position list, stale holdings are cleared. The
 CSV fallback imports balances only and therefore does not replace holdings.
 
+### Broker valuation fallback (`provider_value_eur`)
+
+Each persisted holding also stores TR's own EUR valuation of the position in
+`provider_value_eur`, with `quote_currency = "EUR"`. The value is
+`currentPrice × quantity`, falling back to `averageBuyIn × quantity` when TR's
+ticker stream returned no live price — mirroring exactly how `TradeRepublicAdapter`
+already builds the account-level `TrAccountData.balanceEur`, so the sum of the
+holdings agrees with the **securities subtotal** of that figure by construction.
+When several ISINs deduplicate to one ticker, this value is the sum of their
+individually rounded broker values rather than the aggregate quantity multiplied
+by the first position's price. This preserves the broker subtotal even when the
+merged positions carry different live prices.
+For a compte-titres that subtotal *is* the account total; for a PEA the total also
+includes a scoped cash amount Picsou never persists, so the holdings sum falls
+short of `current_balance` by exactly that cash. This is why `V64` can only
+backfill accounts that reconcile, and why PEAs are left to self-heal on sync.
+
+This exists because `AccountService.liveBalanceEur` re-values holdings from Yahoo
+and **drops** any it cannot price, while the invested side keeps their full cost
+basis — an asymmetry that fabricates a loss (GH issue #76). TR positions Yahoo
+cannot resolve (unmappable ISINs, thin US OTC listings for Irish/Luxembourg UCITS
+ETFs — see [ISIN_TO_TICKER_CONVERSION.md](./ISIN_TO_TICKER_CONVERSION.md) and GH
+issue #78) now fall back to this broker figure instead of vanishing.
+
+Treating TR quotes as EUR is not a new assumption: the adapter already sums them
+unconverted into `balanceEur`. Writing `quote_currency` makes that assumption
+explicit in the schema rather than implicit in the adapter, which is what the
+[FX-conversion ADR](../decisions/2026-05-19-yahoo-fx-conversion.md) asked for when
+it rejected using the untagged `current_price` column as a fallback.
+
 ### CSV import fallback
 
 `TradeRepublicSyncService.importCsv()` parses a CSV file with columns `name,type,balance`. Accounts are deduplicated via a stable external ID derived from the name (`tr_csv_` prefix + slugified name).
 
 ### Scheduled sync
 
-`SchedulerService.dailyBankSync()` calls `TradeRepublicSyncService.resyncIfSessionActive()`, which is a no-op if no session exists or if the session has expired.
+`SchedulerService.dailyBankSync()` calls `TradeRepublicSyncService.resyncIfSessionActive()`, which is a no-op if no session exists. An expired session token is not a reason to skip: the sync attempts the stored refresh token first (the daily 08:00 run is always past the 2 h token window, so the refresh path IS the scheduled-sync path).
 
 ### Key files
 
-- `adapter/TradeRepublicAdapter.java` -- WebSocket data fetching + sidecar auth delegation
-- `port/TradeRepublicPort.java` -- Port interface with `TrTokens`, `TrAccountData`, `TrPosition` records
-- `service/TradeRepublicSyncService.java` -- Auth flow, sync orchestration, CSV import, session management
-- `controller/TradeRepublicController.java` -- REST endpoints under `/api/tr/`
-- `model/TradeRepublicSession.java` -- Session entity with token storage
+- `backend/src/main/java/com/picsou/adapter/TradeRepublicAdapter.java` -- WebSocket data fetching + sidecar auth delegation
+- `backend/src/main/java/com/picsou/port/TradeRepublicPort.java` -- Port interface with `TrTokens`, `TrAccountData`, `TrPosition` records
+- `backend/src/main/java/com/picsou/service/TradeRepublicSyncService.java` -- Auth flow, sync orchestration, CSV import, session management
+- `backend/src/main/java/com/picsou/controller/TradeRepublicController.java` -- REST endpoints under `/api/tr/`
+- `backend/src/main/java/com/picsou/model/TradeRepublicSession.java` -- Session entity with token storage
 
 ### Flow
 
@@ -172,8 +202,8 @@ Both compose files (`docker-compose.yml` at repo root and `docker/docker-compose
   phone/PIN step and clear any stale process id. Only `/tr/auth/complete` errors
   should keep the verification-code step visible for retry.
 - **Frontend API field mapping**: Frontend sends `phoneNumber` and `pin` (not `phone` and `pin`). The API uses ISO field names; if frontend is updated, verify the DTO record field names match.
-- **Error message parsing on frontend**: Error handling extracts specific error codes from deeply nested JSON responses (e.g., `NUMBER_INVALID`, `PIN_INVALID`, `VALIDATION_CODE_INVALID`). If the sidecar changes the error response format, frontend error messages must be updated to match. See `TradeRepublicTab.tsx` `formatAuthError()`.
-- **Session expires ~2h**: The refresh token validity is approximately 2 hours. If auto-sync fails after 2h of inactivity, the user must re-authenticate manually.
+- **Error message parsing on frontend**: Error handling extracts specific error codes from deeply nested JSON responses (e.g., `NUMBER_INVALID`, `PIN_INVALID`, `VALIDATION_CODE_INVALID`). The backend wraps every TR error in a `SyncException`, which `GlobalExceptionHandler` maps to **HTTP 422** with the code in the ProblemDetail `detail` — so the shared `formatTrAuthError()` (`frontend/src/lib/errors.ts`) matches TR codes on both 422 and 5xx via a single `matchTrDetail()` helper. It is used by `TradeRepublicTab`, `AddAccountModal` **and** `SyncAllModal` (the modal surfaces auth and per-row sync errors inline). If the sidecar changes the error response format, update `matchTrDetail()`.
+- **Session lifetime is TR's call, not ours**: the stored `expiresAt` (+2 h) is a heuristic; sync always *tries* (refreshing on `SESSION_EXPIRED`) and only a TR-rejected refresh clears the session. If TR invalidates refresh tokens quickly, the user still has to re-authenticate — but that decision now comes from TR's actual response, not a hard-coded clock.
 - **WebSocket protocol is reverse-engineered**: The TR WebSocket API is undocumented. Raw responses are logged at INFO level. If TR changes the protocol, the adapter will break and need updating.
 - **timeout-driven completion**: The WebSocket session completes when either all data is received (cash + all portfolios + all tickers) or a 30-second timeout is hit.
 - **Multiple sub-portfolios / PEA**: The adapter extracts wrapper-specific `secAccNo` values from the JWT and subscribes to each one separately. `default` maps to `TR Titres` (`COMPTE_TITRES`); `tax_wrapper_fr` maps to `TR PEA` (`PEA`). This avoids merging CTO and PEA holdings into a single securities account.
@@ -186,6 +216,7 @@ Both compose files (`docker-compose.yml` at repo root and `docker/docker-compose
 - **`holdingRepository.flush()` is required after delete**: `deleteByAccountId` does not guarantee immediate DB flush. Without an explicit `flush()` call before inserting new holdings, Hibernate may execute INSERT before DELETE, causing duplicate key violations on `(account_id, ticker)`.
 - **SyncAllModal detects TR via accounts**: TR appears in the SyncAllModal when the user has any account with `provider === "Trade Republic"`, even without an active session. When the session is expired, clicking sync opens an inline phone + PIN + verification-code form. After successful auth, the backend sync runs in background and the frontend picks up results via existing `refetchInterval`.
 - **Ticker subscription exchange suffix is guessed, not provided**: `compactPortfolioByType` gives no `exchangeId`, so `TradeRepublicAdapter` appends `.LSX` for equities/ETFs and `.TRD0` for TR-native crypto. Crypto is detected via `OpenFigiIsinConverter.isTrCryptoIsin()` (prefix `XF000`), the single shared predicate so the adapter's exchange choice and the converter's ISIN parsing can't drift. If TR introduces another on-platform product family with its own dedicated exchange, it will hit the same `FORBIDDEN` symptom as issue #23 until this default is extended.
+- **Private equity funds (`privateFund`) are excluded from ticker subscriptions**: TR positions with `instrumentType: "privateFund"` are not publicly traded and TR never streams a price tick for them. The adapter checks `pos.path("instrumentType")` and skips the ticker subscription for these ISINs. Their valuation falls back to `averageBuyIn` in the portfolio value calculation. Without this skip, the `expectedTickers` counter would be inflated, causing the reactive stream to block until the 45s timeout aborts the entire sync.
 - **Ticker completion counts distinct subscriptions, not messages**: A *successful* TR `ticker` subscription is a stream — an initial full state followed by continuous delta updates under the same `wsId`. The stream's `takeUntil` completes once every ticker subscription has answered, tracked as a set of answered `wsId`s (`answeredTickerSubs`), and only the first message per `wsId` is read (it carries the full state a sync snapshot needs). Counting raw messages instead let a fast-ticking position push the total to the expected count before slower positions had answered even once, closing the socket early and dropping their prices to the `averageBuyIn` fallback — the same symptom as issue #23. (The reference `pytr` client `unsub`s after the first message; we simply ignore later ones.)
 
 ## Tests

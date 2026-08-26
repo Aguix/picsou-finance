@@ -1,6 +1,6 @@
 # Feature: Price Service
 
-> Last updated: 2026-07-15
+> Last updated: 2026-08-25
 
 ## Context
 
@@ -87,11 +87,25 @@ Two surfaces consume these. **Per-holding**: the `AggregatorLinkCard` appears bo
 These are the *same* `FinancialAssetService` entry points the import path calls, so a mapping made from a holding and one confirmed during an import are identical (both land `USER`/`WORTHLESS`, and re-pinning to a different id purges + refetches price history and rebuilds the holders' value history exactly as above). `HoldingResponse` carries `assetType`/`assetStatus`/`coingeckoId` (read straight off the already-loaded asset), so the badge and the card render without an extra round-trip.
 ### Caching
 
-`PriceService` maintains a `ConcurrentHashMap<String, CachedPrice>` where the key is the uppercase ticker. Each entry stores the price and the cache timestamp. Entries expire after 900 seconds (15 minutes). On a cache miss, the price is fetched from the provider and cached.
+`PriceService.resolve(tickers, cryptoOnly)` answers every on-demand read, in this order:
 
-`refreshPrices(Set<String> tickers)` bulk-fetches prices, partitions tickers into crypto and stock sets, calls each provider once, and updates the cache.
+1. **In-memory cache** — `ConcurrentHashMap<String, CachedPrice>` keyed by uppercase ticker, 900 s TTL. Hits are returned as a live `Quote` dated today.
+2. **One batched pass through `PriceRouter`** for everything still missing — each aggregator gets the subset it holds a ref for, in one call. Skipped for a ticker whose last attempt came back empty and is still inside its TTL (the *negative cache*, below), and skipped per aggregator while its breaker is open (CoinGecko pauses only the key that hit a 429).
+3. **Last recorded price** — `price_snapshot`, most recent row per asset within 7 days, one query for the whole set (`findRecentByAssetIds`). Returned as a `Quote` with `live = false` and `asOf` = the snapshot's date.
 
-Every successful fetch also persists `financial_asset.last_eur_value`/`price_synced_at`, so the latest known price survives a restart (the in-memory cache does not). Nothing reads it back yet — the multi-aggregator fallback chain (step C of the crypto plan) will.
+Anything still unresolved returns nothing. A `WORTHLESS` asset short-circuits the whole chain at a live zero.
+
+The fallback is looked up **by asset id, not by symbol** — an unresolved coin therefore cannot read the history a stock of the same name wrote, which is what makes step 3 safe to run for every asset rather than only for the ones an aggregator knows.
+
+**Failures are remembered, not just successes.** A miss is cached in that same map as a `CachedPrice` with a `null` price, so a ticker no aggregator can resolve is not re-fetched on *every* read: the dashboard, the account cards, the holdings table and the history chart each iterate the same holdings, so one permanently-unresolvable ticker produced dozens of identical Yahoo 404s per minute across Tomcat threads (GH issue #76). A cached miss does not end resolution: step 3 still runs, so an outage degrades a price's *age* rather than its existence.
+
+`Quote(price, asOf, live)` is the shape callers get from `getQuote`/`getCryptoQuote`/`getQuotes`/`getCryptoQuotes`. `getPriceEur`/`getCryptoPriceEur` delegate to it and drop the freshness, so existing callers gained the fallback without changing. See [ADR 2026-08-01](../decisions/2026-08-01-last-known-price-fallback.md).
+
+**The `crypto…` variants are about the passthrough, not about a "crypto aggregator".** They differ from their plain siblings on exactly one point: a symbol with **no registry row** is left unpriced instead of riding a transient asset (which carries `yahoo_symbol = symbol` and would quote the equity trading under the same name — the SUI/ATOM/TIA collision). A *registered* coin needs no such guard: Yahoo refuses any asset whose `yahoo_symbol` is unresolved, so the separation is structural rather than a routing rule.
+
+`refreshPrices(Set<String> tickers)` is the *write* path: it serves still-fresh cache entries (the frontend polls `GET /prices`), fetches the rest through the router, updates the cache and records the day's `price_snapshot` rows — for freshly fetched prices only, since a cache-served value was already persisted when it was fetched. `refreshCryptoQuotes` layers the last-known-price fallback on top for sync paths — but only live prices are ever written back to `price_snapshot`, or a stale price would be laundered into a fresh-looking one and the fallback would walk itself forward indefinitely.
+
+Every successful fetch also persists `financial_asset.last_eur_value`/`price_synced_at`, so the latest known price survives a restart (the in-memory cache does not); the registry table displays it as a sanity check on a mapping.
 
 ### Currency conversion
 
@@ -103,9 +117,11 @@ The asset path goes straight through `getPriceEur(FinancialAsset)`. A bare curre
 
 ### Scheduler & backfill
 
-`SchedulerService.refreshPrices()` runs every hour (`fixedDelay = 3600000`). It collects all tickers from accounts that have a non-null ticker, then calls `PriceService.refreshPrices()`. This keeps the cache warm for the dashboard.
+`SchedulerService.refreshPrices()` runs every hour (`fixedDelay = 3600000`). It builds **one** global set — `account.ticker` for accounts that are themselves one asset, **union** `AccountHoldingRepository.findDistinctTickers()` for everything held inside brokerage/exchange/wallet accounts — and calls `PriceService.refreshPrices()` once. Prices are global (no member scoping anywhere in the cache, the table or the providers), so iterating members would only re-fetch shared tickers once per member.
 
-`PriceBackfillRunner` (boot) backfills each holding ticker's daily history **anchored to its own earliest transaction** (12-month fallback), and the backfill is gap-aware: only the missing tail since the latest stored snapshot is fetched, so a warm restart is a no-op instead of re-downloading whole windows.
+Both halves are split by account type before the call: `AccountRepository.findDistinctTickersByType(CRYPTO)` joins the crypto holding tickers, and `findDistinctTickersExcludingType(CRYPTO)` feeds the rest. A manual crypto account tracking one coin carries its symbol on the account row and has no holdings at all, so reading only holdings sent it down the Yahoo Finance branch — the exact contamination the split below exists to prevent. Both are repository projections rather than `findAll()`: one column is read, and loading every account entity hourly to reach it is waste.
+
+`PriceBackfillRunner` (boot) backfills each holding ticker's daily history **anchored to its own earliest transaction** (12-month fallback), and the backfill is gap-aware: only the missing tail since the latest stored snapshot is fetched, so a warm restart is a no-op instead of re-downloading whole windows. The "already covered" test scans the whole range rather than reading the newest row alone — an instance that was off for three months would otherwise fill the tail on its first run back and never ask for the hole again — tolerating gaps of up to 7 days, since a weekend is a two-day hole in every equity series.
 
 ### Key files
 
@@ -130,7 +146,7 @@ The asset path goes straight through `getPriceEur(FinancialAsset)`. A bare curre
 ### Flow
 
 ```
-Dashboard loads --> needs EUR prices
+Account page loads --> needs EUR prices for its holdings
         |
         v
 PriceService.getPriceEur(asset)   // getPriceEur(String) is the seam for callers with only a ticker
@@ -138,11 +154,18 @@ PriceService.getPriceEur(asset)   // getPriceEur(String) is the seam for callers
         +-- asset.isWorthless() --> return 0
         |
         v
-Check cache: CachedPrice for "BTC"
+PriceService.getQuotes({BTC, SOL, ATOM, ...})
         |
-        +-- hit (not expired) --> return cached price
+        +-- in cache, not expired ------------> Quote(price, today, live=true)
         |
-        +-- miss or expired
+        +-- missing
+                |
+                +-- attempted < 60s ago, or CoinGecko cooling down --> skip the network
+                |
+                +-- otherwise: ONE batched call
+                |       GET /simple/price?ids=bitcoin,solana,cosmos&vs_currencies=eur
+                |               |
+                |               +-- answered --> cache + Quote(price, today, live=true)
                 |
                 v
         PriceRouter waterfall: each provider gets the still-unpriced assets it holds a ref for
@@ -206,6 +229,8 @@ each resolver setRef()s its own column --> USER --> TAO now has a price fallback
 
 ## Gotchas / Pitfalls
 
+- **`supports()` enforces a symbol shape**: beyond rejecting 12-char ISINs, `YahooFinancePriceProvider.supports()` accepts an optional leading `^` for indices, then alphanumerics and the separators Yahoo uses for exchange suffixes, share classes and FX pairs (`IWDA.AS`, `BRK-B`, `USDEUR=X`), with a 20-character limit for the complete symbol. Anything containing whitespace or a slash is not a symbol. This matters because OpenFIGI returns Bloomberg *bond descriptions* in its `ticker` field (`AIRBAL 14.5 08/14/29 REGS`): WebClient percent-encodes the spaces but **not** the slashes, so the request lands on `/v8/finance/chart/AIRBAL%2014.5%2008/14/29%20REGS` — a different API path entirely — and 404s forever.
+- **`GET /api/prices` bypasses the cache**: `PriceController` calls `refreshPrices()`, which on `main` always hits the providers regardless of TTL. The negative cache only covers the `getPriceEur` path. PR #33 makes `refreshPrices` honor the TTL; this was left alone here to avoid a conflict.
 - **Yahoo Finance is unofficial**: The Yahoo Finance API is undocumented and can break or get rate-limited without notice. FX conversion is now applied inside `YahooFinancePriceProvider` using the `{CURRENCY}EUR=X` chart endpoint; `GBp`/`GBX` is treated as `GBP / 100`. If the FX call fails the ticker is omitted from the result map (no fabricated rate) — downstream consumers must tolerate a missing key.
 - **CoinGecko rate limits**: the anonymous tier 429s within ~5-6 requests (Cloudflare serves `Retry-After: 60`). The circuit breaker is now **per session (key)**: a 429 pauses only the key that hit it, so the next request rolls over to another enabled key; all calls stop only once every key is paused. Adding one or more Demo keys from the admin panel (**Administration → Price aggregators**) raises the limit to ~100 req/min per key and is the real fix.
 - **CoinGecko free history is age-limited**: `market_chart/range` 401s when `from` is older than ~365 days, so historical requests are clamped to 364 days (`MAX_FREE_HISTORY_DAYS`). Older history would need a paid Pro key.

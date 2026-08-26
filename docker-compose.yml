@@ -32,9 +32,20 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      BOURSO_AUTH_URL: http://bourso-auth:8001
+      BOURSE_DIRECT_AUTH_URL: http://bourse-direct-auth:8001
+      AMUNDI_AUTH_URL: http://amundi-auth:8001
     depends_on:
       db:
         condition: service_healthy
+      bourso-auth:
+        condition: service_started
+      bourse-direct-auth:
+        condition: service_started
+      degiro-auth:
+        condition: service_started
+      amundi-auth:
+        condition: service_started
     networks:
       - picsou-net
 
@@ -46,16 +57,43 @@ services:
     networks:
       - picsou-net
 
-  # bourso-auth sidecar disabled for 1.0.0 — integration is not finished.
-  # Re-enable along with the BoursoBank UI entry points in the frontend
-  # (setup wizard catalog, sync tab, admin integrations) when ready.
-  # bourso-auth:
-  #   build:
-  #     context: ./services/bourso-auth
-  #     dockerfile: Dockerfile
-  #   restart: unless-stopped
-  #   networks:
-  #     - picsou-net
+  bourse-direct-auth:
+    build:
+      context: ./services/bourse-direct-auth
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8001"
+    networks:
+      - picsou-net
+
+  amundi-auth:
+    build:
+      context: ./services/amundi-auth
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8001"
+    networks:
+      - picsou-net
+
+  bourso-auth:
+    build:
+      context: ./services/bourso-auth
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8001"
+    networks:
+      - picsou-net
+
+  degiro-auth:
+    build:
+      context: ./services/degiro-auth
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - picsou-net
 
   frontend:
     build:

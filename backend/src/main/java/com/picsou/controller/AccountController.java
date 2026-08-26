@@ -4,17 +4,27 @@ import com.picsou.dto.AccountRequest;
 import com.picsou.dto.AccountResponse;
 import com.picsou.dto.DebtRequest;
 import com.picsou.dto.DebtResponse;
+import com.picsou.dto.ExchangePositionResponse;
 import com.picsou.dto.HoldingRequest;
 import com.picsou.dto.HoldingResponse;
 import com.picsou.dto.RealEstateMetadataRequest;
 import com.picsou.dto.RealEstateMetadataResponse;
+import com.picsou.dto.RealizedPnlResponse;
 import com.picsou.dto.SnapshotRequest;
 import com.picsou.dto.TransactionRequest;
 import com.picsou.dto.TransactionResponse;
 import com.picsou.model.BalanceSnapshot;
+import com.picsou.dto.OwnershipRequest;
+import com.picsou.dto.OwnershipResponse;
+import com.picsou.dto.PropertyValuationResponse;
+import com.picsou.service.AccountConnectionService;
+import com.picsou.service.AccountOwnershipService;
 import com.picsou.service.AccountService;
+import com.picsou.service.CryptoExchangeSyncService;
 import com.picsou.service.LoanAmortizationService;
 import com.picsou.service.ManualTransactionService;
+import com.picsou.service.PropertyValuationService;
+import com.picsou.service.RealizedPnlService;
 import com.picsou.service.UserContext;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -32,11 +42,27 @@ public class AccountController {
     private final AccountService accountService;
     private final UserContext userContext;
     private final ManualTransactionService manualTransactionService;
+    private final RealizedPnlService realizedPnlService;
+    private final CryptoExchangeSyncService cryptoExchangeSyncService;
+    private final PropertyValuationService propertyValuationService;
+    private final AccountOwnershipService ownershipService;
+    private final AccountConnectionService accountConnectionService;
 
-    public AccountController(AccountService accountService, UserContext userContext, ManualTransactionService manualTransactionService) {
+    public AccountController(AccountService accountService, UserContext userContext,
+                            ManualTransactionService manualTransactionService,
+                            RealizedPnlService realizedPnlService,
+                            CryptoExchangeSyncService cryptoExchangeSyncService,
+                            PropertyValuationService propertyValuationService,
+                            AccountOwnershipService ownershipService,
+                            AccountConnectionService accountConnectionService) {
+        this.accountConnectionService = accountConnectionService;
         this.accountService = accountService;
         this.userContext = userContext;
         this.manualTransactionService = manualTransactionService;
+        this.realizedPnlService = realizedPnlService;
+        this.cryptoExchangeSyncService = cryptoExchangeSyncService;
+        this.propertyValuationService = propertyValuationService;
+        this.ownershipService = ownershipService;
     }
 
     @GetMapping
@@ -60,10 +86,24 @@ public class AccountController {
         return accountService.update(id, req, userContext.currentMemberId());
     }
 
+    /**
+     * What deleting this account would also remove, so the confirmation can name it before the
+     * user commits. Read-only companion to {@link #delete}.
+     */
+    @GetMapping("/{id}/deletion-impact")
+    public AccountConnectionService.DeletionImpact deletionImpact(@PathVariable Long id) {
+        return accountConnectionService.describeDeletion(id, userContext.currentMemberId());
+    }
+
+    /**
+     * Goes through {@link AccountConnectionService}, not {@code accountService.delete}: the
+     * connection feeding this account is removed with it when no other account is left on it,
+     * otherwise it keeps syncing and rebuilding what the user just deleted.
+     */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
-        accountService.delete(id, userContext.currentMemberId());
+        accountConnectionService.deleteAccount(id, userContext.currentMemberId());
     }
 
     @GetMapping("/{id}/history")
@@ -89,9 +129,23 @@ public class AccountController {
         return accountService.getHoldings(id, userContext.currentMemberId());
     }
 
+    /**
+     * The per-product breakdown (spot / staking / lending) behind this account's holdings, or an
+     * empty list for accounts that have none — the client falls back to the flat holdings table.
+     */
+    @GetMapping("/{id}/positions")
+    public List<ExchangePositionResponse> getPositions(@PathVariable Long id) {
+        return cryptoExchangeSyncService.getPositions(id, userContext.currentMemberId());
+    }
+
     @GetMapping("/{id}/transactions")
     public List<TransactionResponse> getTransactions(@PathVariable Long id) {
         return accountService.getTransactions(id, userContext.currentMemberId());
+    }
+
+    @GetMapping("/{id}/realized-pnl")
+    public RealizedPnlResponse getRealizedPnl(@PathVariable Long id) {
+        return realizedPnlService.compute(id, userContext.currentMemberId());
     }
 
     @PostMapping("/{id}/transactions")
@@ -139,6 +193,31 @@ public class AccountController {
         @Valid @RequestBody RealEstateMetadataRequest req
     ) {
         return accountService.updateRealEstateMetadata(id, userContext.currentMemberId(), req);
+    }
+
+    /**
+     * Re-values a property from open data.
+     *
+     * <p>Always 200: a non-OK {@code status} in the body ("no data for this commune",
+     * "Alsace-Moselle is not covered") is information the user needs, not a request failure.
+     */
+    @PostMapping("/{id}/valuation/refresh")
+    public PropertyValuationResponse refreshValuation(@PathVariable Long id) {
+        return propertyValuationService.estimate(id, userContext.currentMemberId());
+    }
+
+    @GetMapping("/{id}/ownership")
+    public OwnershipResponse getOwnership(@PathVariable Long id) {
+        return ownershipService.get(id, userContext.currentMemberId());
+    }
+
+    /** Replaces the whole split; an empty list restores "owner holds 100%". */
+    @PutMapping("/{id}/ownership")
+    public OwnershipResponse updateOwnership(
+        @PathVariable Long id,
+        @Valid @RequestBody OwnershipRequest req
+    ) {
+        return ownershipService.replace(id, userContext.currentMemberId(), req);
     }
 
     @PutMapping("/{id}/debt")

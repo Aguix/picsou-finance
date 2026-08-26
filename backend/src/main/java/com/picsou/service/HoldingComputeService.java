@@ -30,7 +30,7 @@ public class HoldingComputeService {
     @Transactional
     public void recomputeHoldings(Account account) {
         List<Transaction> transactions = transactionRepository
-                .findByAccountIdAndTxTypeInOrderByDateAsc(
+                .findByAccountIdAndTxTypeInOrderByDateAscIdAsc(
                         account.getId(),
                         List.of(TransactionType.BUY, TransactionType.SELL, TransactionType.REWARD));
 
@@ -61,7 +61,9 @@ public class HoldingComputeService {
                 // (free coins lower the cost basis). For a BUY, a null price is treated as 0.
                 netQuantity.merge(ticker, qty, BigDecimal::add);
                 BigDecimal price = tx.getPricePerUnit() != null ? tx.getPricePerUnit() : BigDecimal.ZERO;
-                vwapNumerator.merge(ticker, qty.multiply(price), BigDecimal::add);
+                // Fees fold into the VWAP numerator (PMP cost basis), null fees treated as 0.
+                BigDecimal fees = tx.getFees() != null ? tx.getFees() : BigDecimal.ZERO;
+                vwapNumerator.merge(ticker, qty.multiply(price).add(fees), BigDecimal::add);
                 vwapDenominator.merge(ticker, qty, BigDecimal::add);
             } else { // SELL
                 netQuantity.merge(ticker, qty.negate(), BigDecimal::add);

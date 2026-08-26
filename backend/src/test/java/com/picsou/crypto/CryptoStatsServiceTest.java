@@ -190,7 +190,7 @@ class CryptoStatsServiceTest {
         when(accountRepository.findByIdAndMemberId(1L, 7L)).thenReturn(java.util.Optional.of(cryptocom));
         when(accountHoldingRepository.findByAccount_Id(1L))
             .thenReturn(List.of(holding("BTC", "1", "20000", "30000")));
-        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), any()))
+        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAscIdAsc(eq(1L), any()))
             .thenReturn(List.of(buy(1L, "BTC", "2024-01-10", "1", "20000", "20000")));
         when(assetRepository.findBySymbolIn(any())).thenReturn(List.of());
 
@@ -211,7 +211,7 @@ class CryptoStatsServiceTest {
         when(accountRepository.findByIdAndMemberId(1L, 7L)).thenReturn(java.util.Optional.of(cryptocom));
         when(accountHoldingRepository.findByAccount_Id(1L))
             .thenReturn(List.of(holding("BTC", "1.1", "20000", "30000")));
-        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAsc(eq(1L), any()))
+        when(transactionRepository.findByAccountIdAndTxTypeInOrderByDateAscIdAsc(eq(1L), any()))
             .thenReturn(List.of(
                 buy(1L, "BTC", "2024-01-10", "1", "20000", "20000"),
                 reward(1L, "BTC", "2024-06-10", "0.1", "1000", RewardKind.EARN)));

@@ -5,6 +5,7 @@ import com.picsou.model.FinancialAsset;
 import com.picsou.port.AssetCandidate;
 import com.picsou.port.AssetResolverPort;
 import com.picsou.port.PriceProviderPort;
+import com.picsou.port.SymbolCatalogPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
@@ -40,11 +41,27 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Component
 @Order(20)   // last resort — tried once the aggregators ahead of it have no ref for the asset
-public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolverPort {
+public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolverPort, SymbolCatalogPort {
 
     private static final Logger log = LoggerFactory.getLogger(YahooFinancePriceProvider.class);
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
+
+    /**
+     * Timeout for the {@link SymbolCatalogPort} calls, shorter than the one a price read gets.
+     *
+     * <p>The two are not worth the same wait. A price that fails to arrive leaves a holding with no
+     * value, so it is worth waiting for. A verification that fails to arrive costs nothing — the
+     * caller keeps the ticker it already had — but it is paid on the write path, inside the
+     * transaction of a user saving a transaction or importing a CSV. Three seconds is already an
+     * order of magnitude above what the chart endpoint answers in.
+     */
+    private static final Duration VERIFY_TIMEOUT = Duration.ofSeconds(3);
+
     private static final Duration FX_CACHE_TTL = Duration.ofMinutes(15);
+
+    private static final java.util.regex.Pattern SYMBOL_PATTERN =
+        java.util.regex.Pattern.compile("(?:\\^[A-Z0-9][A-Z0-9.=-]{0,18}|[A-Z0-9][A-Z0-9.=-]{0,19})");
+
 
     private final WebClient webClient;
     private final Map<String, CachedFx> fxCache = new ConcurrentHashMap<>();
@@ -81,16 +98,32 @@ public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolv
      */
     @Override
     public boolean canPrice(FinancialAsset asset) {
-        String sym = yahooSymbol(asset);
-        if (sym == null || sym.isBlank()) {
+        return supports(yahooSymbol(asset));
+    }
+
+    /**
+     * Whether Yahoo can be queried with this symbol at all.
+     *
+     * <p>The string-level half of {@link #canPrice}, kept separate because the
+     * {@link SymbolCatalogPort} calls need it before any asset carries the symbol: they verify a
+     * <em>candidate</em> ticker, so there is nothing to read a {@code yahoo_symbol} off yet.
+     */
+    // Package-private, not private: the symbol-catalog tests drive it directly with raw strings.
+    boolean supports(String ticker) {
+        if (ticker == null || ticker.isBlank()) {
             return false;
         }
-        String upper = sym.toUpperCase();
+        String upper = ticker.toUpperCase(Locale.ROOT);
 
         // Don't price plain ISIN codes (12-character alphanumeric starting with a 2-letter country
         // code). ISIN format: AA########X (2 letters, 9 digits, 1 check digit).
         if (upper.length() == 12 && upper.matches("[A-Z]{2}[A-Z0-9]{9}[A-Z0-9]")) {
-            log.debug("Rejecting unsupported ISIN: {}", sym);
+            log.debug("Rejecting unsupported ISIN: {}", ticker);
+            return false;
+        }
+
+        if (!SYMBOL_PATTERN.matcher(upper).matches()) {
+            log.debug("Rejecting non-symbol ticker: {}", ticker);
             return false;
         }
 
@@ -158,8 +191,8 @@ public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolv
      * fuzzy and also returns name matches, which would be noise in a symbol picker.
      */
     private static boolean matchesTicker(String candidateSymbol, String query) {
-        String candidate = candidateSymbol.toUpperCase();
-        String upper = query.toUpperCase();
+        String candidate = candidateSymbol.toUpperCase(Locale.ROOT);
+        String upper = query.toUpperCase(Locale.ROOT);
         return candidate.equals(upper) || candidate.startsWith(upper + ".");
     }
 
@@ -210,7 +243,7 @@ public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolv
             if (!canPrice(asset)) continue;
             try {
                 BigDecimal price = fetchSinglePrice(yahooSymbol(asset));
-                if (price != null) result.put(asset.getSymbol().toUpperCase(), price);
+                if (price != null) result.put(asset.getSymbol().toUpperCase(Locale.ROOT), price);
             } catch (Exception ex) {
                 log.warn("Yahoo Finance price fetch failed for {}: {}", asset.getSymbol(), ex.getMessage());
             }
@@ -220,25 +253,99 @@ public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolv
     }
 
     private BigDecimal fetchSinglePrice(String ticker) {
+        Meta meta = fetchMeta(ticker);
+        if (meta == null) return null;
+
+        double price = meta.regularMarketPrice();
+        if (price <= 0) return null;
+
+        return applyFx(price, meta.currency());
+    }
+
+    /**
+     * The {@code meta} block of the chart endpoint — quote, currency and instrument type in one
+     * response. Null when Yahoo has no data for {@code ticker}. Propagates transport failures to
+     * the caller, which decides between logging a price miss and reporting "no such symbol".
+     */
+    private Meta fetchMeta(String ticker) {
+        return fetchMeta(ticker, TIMEOUT);
+    }
+
+    private Meta fetchMeta(String ticker, Duration timeout) {
         YahooResponse response = webClient.get()
             .uri("/v8/finance/chart/{ticker}?range=1d&interval=1d", ticker)
             .retrieve()
             .bodyToMono(YahooResponse.class)
-            .timeout(TIMEOUT)
+            .timeout(timeout)
             .block();
 
         if (response == null || response.chart() == null || response.chart().result() == null
             || response.chart().result().isEmpty()) {
             return null;
         }
+        return response.chart().result().get(0).meta();
+    }
 
-        var result = response.chart().result().get(0);
-        if (result.meta() == null) return null;
+    /**
+     * Whether Yahoo currently quotes {@code ticker} at all — a symbol check, not a price read.
+     *
+     * <p>Used by {@link OpenFigiIsinConverter} to verify that the symbol it derived from an ISIN
+     * is one Yahoo actually carries, before that symbol is persisted on a holding and every later
+     * valuation depends on it. FX is deliberately not applied: an unavailable EUR rate says
+     * nothing about whether the symbol exists, and treating it as "no such symbol" would send a
+     * perfectly good ticker to the search fallback.
+     *
+     * <p>False on any failure — a rate-limited or unreachable Yahoo must never be read as
+     * "this symbol is dead", since the caller only ever <em>replaces</em> a symbol on a positive
+     * quote from a different one.
+     */
+    @Override
+    public boolean hasQuote(String ticker) {
+        if (!supports(ticker)) return false;
+        try {
+            Meta meta = fetchMeta(ticker, VERIFY_TIMEOUT);
+            return meta != null && meta.regularMarketPrice() > 0;
+        } catch (Exception ex) {
+            log.debug("Yahoo quote probe failed for {}: {}", ticker, ex.getMessage());
+            return false;
+        }
+    }
 
-        double price = result.meta().regularMarketPrice();
-        if (price <= 0) return null;
+    /**
+     * The symbols Yahoo's own search returns for {@code query} — an ISIN, in practice — in Yahoo's
+     * relevance order, restricted to entries it indexes itself ({@code isYahooFinance}) and to
+     * symbols this provider can request.
+     *
+     * <p>This is the authority OpenFIGI cannot be: OpenFIGI knows every listing of an instrument,
+     * Yahoo knows which of them <em>it</em> quotes. Searching an ISIN that Yahoo does not know
+     * returns nothing rather than a fuzzy near-match ({@code enableFuzzyQuery=false}), so a miss
+     * stays a miss.
+     */
+    @Override
+    public List<SymbolMatch> searchSymbols(String query) {
+        if (query == null || query.isBlank()) return List.of();
+        try {
+            SearchResponse response = webClient.get()
+                .uri("/v1/finance/search?q={query}&quotesCount=6&newsCount=0&listsCount=0"
+                    + "&enableFuzzyQuery=false", query)
+                .retrieve()
+                .bodyToMono(SearchResponse.class)
+                .timeout(VERIFY_TIMEOUT)
+                .block();
 
-        return applyFx(price, result.meta().currency());
+            if (response == null || response.quotes() == null) return List.of();
+
+            return response.quotes().stream()
+                .filter(q -> Boolean.TRUE.equals(q.isYahooFinance()))
+                .filter(q -> supports(q.symbol()))
+                .map(q -> new SymbolMatch(
+                    q.symbol().toUpperCase(Locale.ROOT),
+                    q.longname() != null ? q.longname() : q.shortname()))
+                .toList();
+        } catch (Exception ex) {
+            log.debug("Yahoo symbol search failed for {}: {}", query, ex.getMessage());
+            return List.of();
+        }
     }
 
     /**
@@ -247,22 +354,11 @@ public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolv
      * chart endpoint already used for prices. Empty if unavailable.
      */
     public Optional<String> getInstrumentType(String ticker) {
-        if (ticker == null || ticker.isBlank()) return Optional.empty();
+        if (!supports(ticker)) return Optional.empty();
         try {
-            YahooResponse response = webClient.get()
-                .uri("/v8/finance/chart/{ticker}?range=1d&interval=1d", ticker)
-                .retrieve()
-                .bodyToMono(YahooResponse.class)
-                .timeout(TIMEOUT)
-                .block();
-
-            if (response == null || response.chart() == null || response.chart().result() == null
-                || response.chart().result().isEmpty()) {
-                return Optional.empty();
-            }
-            var result = response.chart().result().get(0);
-            if (result.meta() == null) return Optional.empty();
-            return Optional.ofNullable(result.meta().instrumentType()).filter(s -> !s.isBlank());
+            Meta meta = fetchMeta(ticker);
+            if (meta == null) return Optional.empty();
+            return Optional.ofNullable(meta.instrumentType()).filter(s -> !s.isBlank());
         } catch (Exception ex) {
             log.debug("Yahoo instrumentType fetch failed for {}: {}", ticker, ex.getMessage());
             return Optional.empty();
@@ -303,7 +399,7 @@ public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolv
             return gbpRate.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP);
         }
 
-        String upper = currency.toUpperCase();
+        String upper = currency.toUpperCase(Locale.ROOT);
         CachedFx cached = fxCache.get(upper);
         if (cached != null && cached.isFresh()) {
             return cached.rate();
@@ -363,9 +459,16 @@ public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolv
     @JsonIgnoreProperties(ignoreUnknown = true)
     record SearchResponse(List<SearchQuote> quotes) {}
 
-    /** One hit in a {@code /v1/finance/search} response. */
+    /**
+     * One hit in a {@code /v1/finance/search} response.
+     *
+     * <p>{@code quoteType} tells an equity from an ETF or a currency pair (the resolver's asset
+     * typing); {@code isYahooFinance} is Yahoo's own flag for "I index this one", which the symbol
+     * catalog filters on. Both fields come from the same payload — Jackson binds by name.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record SearchQuote(String symbol, String shortname, String longname, String quoteType) {}
+    record SearchQuote(String symbol, String shortname, String longname, String quoteType,
+                       Boolean isYahooFinance) {}
 
     private record CachedFx(BigDecimal rate, Instant cachedAt) {
         boolean isFresh() { return Instant.now().isBefore(cachedAt.plus(FX_CACHE_TTL)); }
@@ -378,6 +481,9 @@ public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolv
     @Override
     public Map<LocalDateTime, BigDecimal> getIntradayPricesEur(FinancialAsset asset, LocalDateTime from, LocalDateTime to) {
         String ticker = yahooSymbol(asset);
+        // The router gates on canPrice, but a direct caller does not: a non-symbol string (an
+        // unresolved ISIN, a bond description) must never become a Yahoo request.
+        if (!supports(ticker)) return Map.of();
         try {
             YahooResponse response = webClient.get()
                 .uri("/v8/finance/chart/{ticker}?range=1d&interval=1h", ticker)
@@ -439,6 +545,7 @@ public class YahooFinancePriceProvider implements PriceProviderPort, AssetResolv
     @Override
     public Map<LocalDate, BigDecimal> getHistoricalPricesEur(FinancialAsset asset, LocalDate from, LocalDate to) {
         String ticker = yahooSymbol(asset);
+        if (!supports(ticker)) return Map.of();
         long days = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
         String range = days <= 7 ? "5d" : days <= 30 ? "1mo" : days <= 90 ? "3mo" : days <= 365 ? "1y" : "5y";
 

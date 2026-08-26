@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { useAppStore, type DateFormat } from "@/stores/app-store"
+import { DEFAULT_LOCALE, resolveLocale } from "@/i18n/locales"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -18,21 +19,23 @@ export function parseAmount(value: string | null | undefined): number {
 
 export function getLocale(): string {
   try {
+    // <html lang> is kept in sync with the active i18next language (see i18n/index.ts).
     return localeFromLanguage(document.documentElement.lang || navigator.language)
   } catch {
-    return 'fr-FR'
+    return DEFAULT_LOCALE.intlLocale
   }
 }
 
+/** Intl locale for a raw language tag, resolved through the SUPPORTED_LOCALES registry. */
 export function localeFromLanguage(language: string | null | undefined): string {
-  return language?.startsWith('fr') ? 'fr-FR' : 'en-US'
+  return resolveLocale(language).intlLocale
 }
 
 function normalizeIntlLocale(locale: string): string {
   try {
-    return Intl.NumberFormat.supportedLocalesOf(locale).length > 0 ? locale : 'fr-FR'
+    return Intl.NumberFormat.supportedLocalesOf(locale).length > 0 ? locale : DEFAULT_LOCALE.intlLocale
   } catch {
-    return 'fr-FR'
+    return DEFAULT_LOCALE.intlLocale
   }
 }
 
@@ -48,17 +51,40 @@ export function formatCurrency(value: number, currency = 'EUR', locale = getLoca
   }
 }
 
+/** ISO 3166-1 alpha-2 code → localized country name (e.g. "EE" → "Estonia"). Falls back to the raw code for an unknown/invalid one. */
+export function formatCountryName(code: string, locale = getLocale()): string {
+  try {
+    const name = new Intl.DisplayNames([normalizeIntlLocale(locale)], { type: 'region' }).of(code)
+    return name && name !== code ? name : code
+  } catch {
+    return code
+  }
+}
+
+/**
+ * Parses an API date, anchoring a date-only value at *local* midnight.
+ *
+ * `new Date('2026-07-31')` is specified to parse as UTC midnight, so anywhere west of UTC the
+ * rendered day is the one before. A date-only string carries no zone because it denotes a calendar
+ * day rather than an instant — which is exactly why the backend sends `LocalDate` for `priceAsOf`,
+ * transaction dates and goal deadlines. Values that do carry a time are left to `Date` untouched:
+ * there the offset is real information.
+ */
+function toDate(dateStr: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? new Date(`${dateStr}T00:00:00`) : new Date(dateStr)
+}
+
 export function formatDate(dateStr: string | null | undefined, locale = getLocale(), format?: DateFormat): string {
   if (!dateStr) return '—'
   const resolvedFormat = format ?? useAppStore.getState().dateFormat
   if (resolvedFormat === 'iso') {
-    const d = new Date(dateStr)
+    const d = toDate(dateStr)
     const day = String(d.getDate()).padStart(2, '0')
     const month = String(d.getMonth() + 1).padStart(2, '0')
     const year = d.getFullYear()
     return `${day}-${month}-${year}`
   }
-  return new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(dateStr))
+  return new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', year: 'numeric' }).format(toDate(dateStr))
 }
 
 /**
@@ -98,7 +124,7 @@ export function parseDate(
 
 export function formatDateTime(dateStr: string | null | undefined, locale = getLocale(), format?: DateFormat): string {
   if (!dateStr) return '—'
-  const d = new Date(dateStr)
+  const d = toDate(dateStr)
   const resolvedFormat = format ?? useAppStore.getState().dateFormat
   if (resolvedFormat === 'iso') {
     const day = String(d.getDate()).padStart(2, '0')
@@ -128,7 +154,7 @@ export function todayLabel(locale = getLocale(), date = new Date()): string {
 
 export function formatLocalDate(dateStr: string | null | undefined, locale = getLocale()): string {
   if (!dateStr) return '—'
-  return new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(dateStr))
+  return new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'long', year: 'numeric' }).format(toDate(dateStr))
 }
 
 export function formatTimeAgo(dateStr: string | null | undefined, locale = getLocale()): string {
@@ -143,19 +169,46 @@ export function formatTimeAgo(dateStr: string | null | undefined, locale = getLo
   return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(-days, 'day')
 }
 
-export function accountTypeLabel(type: string): string {
-  const labels: Record<string, string> = {
-    LEP: 'LEP',
-    PEA: 'PEA',
-    COMPTE_TITRES: 'Compte-titres',
-    CRYPTO: 'Crypto',
-    CHECKING: 'Compte courant',
-    SAVINGS: 'Épargne',
-    REAL_ESTATE: 'Immobilier',
-    LOAN: 'Emprunt',
-    OTHER: 'Autre',
-  }
-  return labels[type] ?? type
+export type FreshnessLevel = 'fresh' | 'recent' | 'stale' | 'old' | 'unknown'
+
+/** Upper bound of each level, in ms. See the two scales in `lib/constants.ts`. */
+export interface FreshnessBounds {
+  fresh: number
+  recent: number
+  stale: number
+}
+
+/**
+ * How old a date is, bucketed. `unknown` covers a missing date — never synced, never valued —
+ * which is not the same as "very old" and must not read as an alarm.
+ *
+ * `now` is a parameter rather than a `Date.now()` call so callers stay pure and testable; the
+ * card that uses this re-renders on a timer to cross a boundary without a remount.
+ */
+export function freshnessLevel(
+  dateStr: string | null | undefined,
+  bounds: FreshnessBounds,
+  now: number = Date.now(),
+): FreshnessLevel {
+  if (!dateStr) return 'unknown'
+  const age = now - toDate(dateStr).getTime()
+  // A date in the future (clock skew between the server and this browser) is as fresh as it gets.
+  if (age < bounds.fresh) return 'fresh'
+  if (age < bounds.recent) return 'recent'
+  if (age < bounds.stale) return 'stale'
+  return 'old'
+}
+
+/**
+ * Text colour per level. Both themes are spelled out: the 600 shades are unreadable on a dark
+ * background and the 400s wash out on a light one.
+ */
+export const FRESHNESS_TEXT_CLASS: Record<FreshnessLevel, string> = {
+  fresh: 'text-emerald-600 dark:text-emerald-400',
+  recent: 'text-yellow-600 dark:text-yellow-400',
+  stale: 'text-orange-600 dark:text-orange-400',
+  old: 'text-red-600 dark:text-red-400',
+  unknown: 'text-muted-foreground',
 }
 
 export function safeRedirect(redirect: string | null, fallback = '/'): string {

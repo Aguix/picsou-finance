@@ -3,12 +3,15 @@ import { useForm, useWatch, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
+import type { Account } from '@/types/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumericInput } from '@/components/shared/NumericInput'
 import { DateInput } from '@/components/shared/DateInput'
 import { Label } from '@/components/ui/label'
 import { ColorPicker } from '@/components/shared/ColorPicker'
+import { LogoPicker } from '@/components/shared/LogoPicker'
+import { BankPicker } from '@/components/shared/BankPicker'
 import { parseAmount, getLocale } from '@/lib/utils'
 import { ACCOUNT_TYPES, SUPPORTED_CURRENCIES } from '@/lib/constants'
 
@@ -26,13 +29,21 @@ import {
 
 const accountSchema = z.object({
   name: z.string().min(1).max(100),
-  type: z.enum(['LEP', 'PEA', 'COMPTE_TITRES', 'CRYPTO', 'CHECKING', 'SAVINGS', 'REAL_ESTATE', 'LOAN', 'OTHER']),
+  type: z.enum([
+    'LEP', 'LIVRET_A', 'LDDS', 'LIVRET_JEUNE', 'PEL', 'CEL',
+    'PEA', 'COMPTE_TITRES', 'CRYPTO', 'CHECKING', 'SAVINGS',
+    'REAL_ESTATE', 'LOAN', 'EMPLOYEE_SAVINGS', 'OTHER',
+  ]),
   provider: z.string().max(100).optional(),
   currency: z.string().min(1),
   currentBalance: z.number().min(0).optional(),
   isManual: z.boolean(),
   color: z.string(),
   ticker: z.string().max(20).optional(),
+  logoKey: z.string().optional(),
+  // Not an account field: the id of the bank picked in BankPicker, forwarded to the backend
+  // once so it can resolve that bank's logo server-side. Undefined for a hand-typed name.
+  institutionId: z.string().optional(),
   // Loan-only fields (validated as numbers but optional at the form level — required-ness is enforced at submit when type=LOAN)
   borrowedAmount: z.number().min(0).optional(),
   interestRatePct: z.number().min(0).max(100).optional(),
@@ -41,6 +52,9 @@ const accountSchema = z.object({
   fileFees: z.number().min(0).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  // Ties a mortgage to the property it finances, which is what makes gross vs net
+  // property equity computable.
+  linkedAccountId: z.number().optional(),
 })
 
 type AccountFormData = z.infer<typeof accountSchema>
@@ -52,6 +66,16 @@ interface AccountFormProps {
   defaultValues?: Partial<AccountFormData>
   title?: string
   loading?: boolean
+  /**
+   * The caller's account list, used to offer a property to link a loan to.
+   *
+   * Passed in rather than fetched here: this form is also rendered by AddAccountModal, and a
+   * shared presentational component that issues its own query forces every consumer (and
+   * every test) to provide a QueryClient. The bank field is the one exception — searching a
+   * catalog as the user types cannot be answered by a prop — and it keeps its query inside
+   * BankPicker rather than lifting it here, so only the field that needs it pays for it.
+   */
+  accounts?: Account[]
 }
 
 const EMPTY_DEFAULTS: AccountFormData = {
@@ -63,6 +87,8 @@ const EMPTY_DEFAULTS: AccountFormData = {
   isManual: false,
   color: '#6366f1',
   ticker: '',
+  logoKey: '',
+  institutionId: undefined,
   borrowedAmount: undefined,
   interestRatePct: undefined,
   monthlyPayment: undefined,
@@ -72,17 +98,23 @@ const EMPTY_DEFAULTS: AccountFormData = {
   endDate: '',
 }
 
-const selectControlClassName = "flex h-10 w-full rounded-xl border border-input bg-input/20 px-4 text-sm outline-none dark:bg-input/30"
+const selectControlClassName = "flex h-10 w-full rounded-xl border border-input bg-background text-foreground px-4 text-sm outline-none [color-scheme:light] dark:[color-scheme:dark]"
 
-export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title, loading }: AccountFormProps) {
+export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title, loading, accounts = [] }: AccountFormProps) {
   const { t } = useTranslation()
+  const propertyAccounts = accounts.filter(a => a.type === 'REAL_ESTATE')
   const { register, handleSubmit, setValue, reset, control } = useForm<AccountFormData>({
     resolver: zodResolver(accountSchema),
     defaultValues: { ...EMPTY_DEFAULTS, ...defaultValues },
   })
 
   const selectedColor = useWatch({ control, name: 'color' })
+  // Doubles as the "does this account get a logo choice at all" test: only an on-chain wallet
+  // is created with a key (WalletSyncService), and the picker only ever swaps one key for
+  // another, so an account that has none never grows one here.
+  const selectedLogoKey = useWatch({ control, name: 'logoKey' })
   const selectedType = useWatch({ control, name: 'type' })
+  const selectedProvider = useWatch({ control, name: 'provider' })
   const selectedCurrency = useWatch({ control, name: 'currency' })
 
   // Build the currency dropdown options. Labels are resolved live via Intl.DisplayNames
@@ -115,6 +147,13 @@ export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title
       reset({ ...EMPTY_DEFAULTS, ...defaultValues })
     }
   }, [open, defaultValues, reset])
+
+  // The lender field and the provider field are the same form value: a loan's provider IS its
+  // bank, and it gets a logo on the same terms as any other account.
+  function handleBankChange(bankName: string, institutionId?: string) {
+    setValue('provider', bankName)
+    setValue('institutionId', institutionId)
+  }
 
   function handleFormSubmit(data: AccountFormData) {
     onSubmit(data)
@@ -175,7 +214,12 @@ export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="provider">{t('accounts.provider')}</Label>
-                <Input id="provider" {...register('provider')} placeholder="Boursorama" />
+                <BankPicker
+                  id="provider"
+                  value={selectedProvider ?? ''}
+                  placeholder="Boursorama"
+                  onChange={handleBankChange}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="ticker">{t('accounts.ticker')}</Label>
@@ -188,8 +232,31 @@ export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title
             <>
               <div className="space-y-2">
                 <Label htmlFor="provider">{t('debt.lenderName')}</Label>
-                <Input id="provider" {...register('provider')} placeholder={t('debt.lenderName')} />
+                <BankPicker
+                  id="provider"
+                  value={selectedProvider ?? ''}
+                  placeholder={t('debt.lenderName')}
+                  onChange={handleBankChange}
+                />
               </div>
+              {propertyAccounts.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="linkedAccountId">{t('debt.linkedAccount')}</Label>
+                  <select
+                    id="linkedAccountId"
+                    className={selectControlClassName}
+                    {...register('linkedAccountId', {
+                      setValueAs: v => (v === '' || v == null ? undefined : Number(v)),
+                    })}
+                  >
+                    <option value="">{t('debt.noLinkedAsset')}</option>
+                    {propertyAccounts.map(property => (
+                      <option key={property.id} value={property.id}>{property.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">{t('debt.linkedAssetHint')}</p>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="borrowedAmount">{t('debt.borrowedAmount')}</Label>
@@ -268,6 +335,16 @@ export function AccountForm({ open, onOpenChange, onSubmit, defaultValues, title
             <Label>{t('accounts.color')}</Label>
             <ColorPicker value={selectedColor} onChange={(c) => setValue('color', c)} />
           </div>
+
+          {/* Also gated on the type: AccountService keeps a key only on a crypto account that
+              already stores one, so the picker has to disappear the moment the type changes
+              rather than offer a choice the save is about to discard. */}
+          {selectedLogoKey && selectedType === 'CRYPTO' && (
+            <div className="space-y-2">
+              <Label>{t('accounts.logo')}</Label>
+              <LogoPicker value={selectedLogoKey} onChange={(k) => setValue('logoKey', k)} />
+            </div>
+          )}
 
           {selectedType !== 'REAL_ESTATE' && selectedType !== 'LOAN' && (
             <div className="flex min-h-10 items-center gap-2">

@@ -29,15 +29,18 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -188,10 +191,16 @@ public class TradeRepublicSyncService {
             log.info("TR session refreshed -- retrying sync");
             return syncWithToken(newTokens.sessionToken(), null, memberId); // null = no retry on next expiry
         } catch (SyncException ex) {
-            log.warn("TR refresh failed -- clearing session");
-            sessionRepository.findByMemberId(memberId).ifPresent(sessionRepository::delete);
-            throw new SyncException(
-                "Your Trade Republic session has expired and could not be refreshed. Please reconnect.");
+            if ("SESSION_EXPIRED".equals(ex.getMessage())) {
+                log.warn("TR refresh rejected -- clearing session");
+                sessionRepository.findByMemberId(memberId).ifPresent(sessionRepository::delete);
+                throw new SyncException(
+                    "Your Trade Republic session has expired and could not be refreshed. Please reconnect.");
+            }
+            // Transient failure (sidecar down, timeout): keep the session so the
+            // next sync can retry the refresh instead of forcing a re-auth.
+            log.warn("TR refresh failed transiently -- keeping session: {}", ex.getMessage());
+            throw ex;
         }
     }
 
@@ -279,7 +288,11 @@ public class TradeRepublicSyncService {
             return new SessionStatusResponse(false, null);
         }
         TradeRepublicSession s = session.get();
-        boolean active = s.getExpiresAt() == null || s.getExpiresAt().isAfter(Instant.now());
+        // A session past its (heuristic) expiry is still operationally active as
+        // long as a refresh token exists: the next sync refreshes it transparently,
+        // and a genuinely rejected refresh deletes the row — making this false.
+        boolean withinWindow = s.getExpiresAt() == null || s.getExpiresAt().isAfter(Instant.now());
+        boolean active = withinWindow || s.getRefreshToken() != null;
         return new SessionStatusResponse(active, s.getExpiresAt());
     }
 
@@ -290,21 +303,25 @@ public class TradeRepublicSyncService {
 
     // --- Scheduler entry point ---
 
-    /** Called by SchedulerService. No-op if no active session for this member. */
+    /**
+     * Called by SchedulerService. No-op if no session exists for this member.
+     * An expired session token is not a reason to skip: syncWithToken routes
+     * SESSION_EXPIRED through refreshAndRetry using the stored refresh token,
+     * which is the normal path for any sync happening hours after auth.
+     */
     public void resyncIfSessionActive(Long memberId) {
         Optional<TradeRepublicSession> session = sessionRepository.findByMemberId(memberId);
         if (session.isEmpty()) return;
 
         TradeRepublicSession s = session.get();
-        if (s.getExpiresAt() != null && !s.getExpiresAt().isAfter(Instant.now())) {
-            log.warn("Trade Republic session expired for member {} -- skipping auto-sync. Re-authenticate via the UI.", memberId);
-            return;
-        }
-
         try {
             syncWithToken(encryption.decrypt(s.getSessionToken()), s, memberId);
-        } catch (Exception ex) {
+        } catch (SyncException ex) {
+            // Expected upstream flakiness (expired session, sidecar down) — WARN, as elsewhere.
             log.warn("Trade Republic auto-sync failed for member {}: {}", memberId, ex.getMessage());
+        } catch (RuntimeException ex) {
+            // Anything else is a bug: the message alone is "null" for an NPE, so log the trace.
+            log.error("Unexpected Trade Republic auto-sync failure for member {}", memberId, ex);
         }
     }
 
@@ -362,11 +379,19 @@ public class TradeRepublicSyncService {
             // A ticker is stock-context (OpenFIGI-resolved Yahoo symbol) unless it came from a
             // TR-native crypto ISIN (XF000...), which resolveCrypto already owns.
             Map<String, Boolean> stockTicker = new HashMap<>();
+            Map<String, BigDecimal> providerValuesEur = new HashMap<>();
+            Set<String> incompleteProviderValues = new HashSet<>();
             for (TrPosition p : data.positions()) {
                 var result = isinConverter.resolve(p.isin());
                 String ticker = result.ticker();
                 String name = result.name();
                 stockTicker.put(ticker, !OpenFigiIsinConverter.isTrCryptoIsin(p.isin()));
+                BigDecimal positionValueEur = providerValueEur(p);
+                if (positionValueEur == null) {
+                    incompleteProviderValues.add(ticker);
+                } else {
+                    providerValuesEur.merge(ticker, positionValueEur, BigDecimal::add);
+                }
                 deduped.merge(
                     ticker,
                     new HoldingDedup.HoldingAgg(p.quantity(), p.averageBuyIn(), p.currentPrice(), name),
@@ -374,6 +399,15 @@ public class TradeRepublicSyncService {
             }
             for (Map.Entry<String, HoldingDedup.HoldingAgg> entry : deduped.entrySet()) {
                 HoldingDedup.HoldingAgg agg = entry.getValue();
+                if (agg.quantity().signum() == 0) {
+                    // vwapMerge is sign-aware and can net two positions to exactly zero
+                    // (shared with IBKR, which can carry short quantities) -- a flat
+                    // position, not a holding to persist. TR only ever feeds positive
+                    // quantities today, so this is unreachable here but keeps the
+                    // invariant true regardless. Checked before the asset is registered, so
+                    // a flat position doesn't mint a registry row nothing points at.
+                    continue;
+                }
                 FinancialAsset asset = Boolean.TRUE.equals(stockTicker.get(entry.getKey()))
                     ? financialAssetService.getOrCreateStock(entry.getKey())
                     : financialAssetService.getOrCreate(entry.getKey());
@@ -384,12 +418,29 @@ public class TradeRepublicSyncService {
                     .quantity(agg.quantity())
                     .averageBuyIn(agg.averageBuyIn())
                     .currentPrice(agg.currentPrice())
+                    .quoteCurrency("EUR")
+                    .providerValueEur(incompleteProviderValues.contains(entry.getKey())
+                        ? null
+                        : providerValuesEur.get(entry.getKey()).setScale(8, RoundingMode.HALF_UP))
                     .lastSyncedAt(Instant.now())
                     .build());
             }
         }
 
         return Optional.of(accountService.toResponse(account));
+    }
+
+    private static BigDecimal providerValueEur(TrPosition position) {
+        BigDecimal price = position.currentPrice() != null && position.currentPrice().signum() > 0
+            ? position.currentPrice()
+            : position.averageBuyIn();
+        if (price == null || price.signum() <= 0) {
+            return null;
+        }
+        // TradeRepublicAdapter builds balanceEur by rounding each original position
+        // to cents. Preserve that exact subtotal even when several ISINs collapse to
+        // one persisted ticker with different market prices.
+        return price.multiply(position.quantity()).setScale(2, RoundingMode.HALF_UP);
     }
 
     private String colorFor(AccountType type) {

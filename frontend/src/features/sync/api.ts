@@ -4,6 +4,7 @@ import type {
   ExchangeType,
   ChainType,
   ExchangeStatus,
+  Institution,
   WalletStatus,
   FinaryPreviewResponse,
   FinaryConnectionStatus,
@@ -13,26 +14,34 @@ import type {
   FinaryAutoSyncResponse,
   BoursoSessionStatus,
   BoursoAuthInitResponse,
+  BourseDirectSessionStatus,
+  BourseDirectAuthInitResponse,
+  DegiroSessionStatus,
+  DegiroAuthInitResponse,
+  AmundiSessionStatus,
+  AmundiAuthInitResponse,
+  IbkrConnectionStatus,
 } from '@/types/api'
 
 // --- Bank Sync (Enable Banking) ---
 
 export const bankSyncApi = {
-  searchInstitutions: (query: string) =>
+  searchInstitutions: (query: string, country: string) =>
     api
-      .get<{ id: string; name: string; bic: string | null; logoUrl?: string | null; country: string }[]>(
-        '/sync/institutions',
-        { params: { query }, skipGlobalErrorRedirect: true },
-      )
+      .get<Institution[]>('/sync/institutions', { params: { query, country }, skipGlobalErrorRedirect: true })
       .then(r => r.data),
+
+  listCountries: () => api.get<string[]>('/sync/countries', { skipGlobalErrorRedirect: true }).then(r => r.data),
 
   initiate: (institutionId: string, institutionName: string) =>
     api
       .post<{ requisitionId: string; authLink: string }>('/sync/initiate', { institutionId, institutionName })
       .then(r => r.data),
 
-  complete: (code: string) =>
-    api.post<Account[]>('/sync/complete', { code }).then(r => r.data),
+  complete: (code: string, state?: string | null) =>
+    api
+      .get<Account[]>('/sync/complete', { params: { code, state: state ?? undefined } })
+      .then(r => r.data),
 
   getStatus: () =>
     api
@@ -51,6 +60,9 @@ export const bankSyncApi = {
 
   retry: (id: number) =>
     api.post<Account[]>(`/sync/${id}/retry`).then(r => r.data),
+
+  reconnect: (id: number) =>
+    api.post<{ requisitionId: string; authLink: string }>(`/sync/${id}/reconnect`).then(r => r.data),
 
   deleteConnection: (id: number) =>
     api.delete(`/sync/${id}`),
@@ -84,13 +96,15 @@ export const trApi = {
   },
 
   clearSession: () =>
-    api.post('/tr/logout'),
+    api.delete('/tr/session'),
 }
 
 // --- Crypto Exchanges ---
 
 export const cryptoExchangeApi = {
-  add: (type: ExchangeType, apiKey: string, apiSecret: string) =>
+  // apiSecret is optional: single-key exchanges (Meria) must not send one, and axios drops an
+  // undefined field from the JSON body entirely.
+  add: (type: ExchangeType, apiKey: string, apiSecret?: string) =>
     api
       .post<Account>('/crypto/exchange', { type, apiKey, apiSecret })
       .then(r => r.data),
@@ -135,19 +149,109 @@ export const boursoApi = {
       .post<BoursoAuthInitResponse>('/bourso/auth/initiate', { customerId, password })
       .then(r => r.data),
 
-  completeAuth: (processId: string, code: string) =>
+  // No code: the user approves the push in the BoursoBank app, and the request
+  // stays open until they do.
+  completeAuth: (processId: string) =>
     api
-      .post<BoursoSessionStatus>('/bourso/auth/complete', { processId, code })
+      .post<BoursoSessionStatus>('/bourso/auth/complete', { processId })
       .then(r => r.data),
 
   sync: () =>
-    api.post<Account[]>('/bourso/sync').then(r => r.data),
+    api.post<BoursoSessionStatus>('/bourso/sync').then(r => r.data),
 
   getStatus: () =>
-    api.get<BoursoSessionStatus>('/bourso/status').then(r => r.data),
+    api
+      .get<BoursoSessionStatus>('/bourso/status', { skipGlobalErrorRedirect: true })
+      .then(r => r.data),
 
   clearSession: () =>
     api.delete('/bourso/session'),
+}
+
+// --- DEGIRO ---
+
+export const degiroApi = {
+  initiateAuth: (username: string, password: string) =>
+    api
+      .post<DegiroAuthInitResponse>('/degiro/auth/initiate', { username, password })
+      .then(r => r.data),
+
+  completeAuth: (processId: string, code: string) =>
+    api
+      .post<DegiroSessionStatus>('/degiro/auth/complete', { processId, code })
+      .then(r => r.data),
+
+  sync: () =>
+    api.post<Account>('/degiro/sync').then(r => r.data),
+
+  getStatus: () =>
+    api.get<DegiroSessionStatus>('/degiro/status').then(r => r.data),
+
+  clearSession: () =>
+    api.delete('/degiro/session'),
+}
+
+// --- Bourse Direct ---
+
+export const bourseDirectApi = {
+  initiateAuth: (login: string, password: string) =>
+    api
+      .post<BourseDirectAuthInitResponse>('/bourse-direct/auth/initiate', { login, password })
+      .then(r => r.data),
+
+  completeAuth: (processId: string, code: string) =>
+    api
+      .post<BourseDirectSessionStatus>('/bourse-direct/auth/complete', { processId, code })
+      .then(r => r.data),
+
+  sync: () =>
+    api.post<BourseDirectSessionStatus>('/bourse-direct/sync').then(r => r.data),
+
+  getStatus: () =>
+    api
+      .get<BourseDirectSessionStatus>('/bourse-direct/status', {
+        skipGlobalErrorRedirect: true,
+      })
+      .then(r => r.data),
+
+  clearSession: () => api.delete('/bourse-direct/session'),
+}
+
+// --- Amundi Épargne Salariale ---
+
+export const amundiApi = {
+  initiateAuth: (login: string, password: string) =>
+    api
+      .post<AmundiAuthInitResponse>('/amundi/auth/initiate', { login, password })
+      .then(r => r.data),
+
+  // `code` is omitted for an app push: the user approves on their phone.
+  completeAuth: (processId: string, code?: string) =>
+    api
+      .post<AmundiSessionStatus>('/amundi/auth/complete', { processId, code })
+      .then(r => r.data),
+
+  sync: () => api.post<AmundiSessionStatus>('/amundi/sync').then(r => r.data),
+
+  getStatus: () =>
+    api
+      .get<AmundiSessionStatus>('/amundi/status', {
+        skipGlobalErrorRedirect: true,
+      })
+      .then(r => r.data),
+
+  clearSession: () => api.delete('/amundi/session'),
+}
+
+export const ibkrApi = {
+  getStatus: () => api.get<IbkrConnectionStatus>('/ibkr/status').then(r => r.data),
+
+  connect: (token: string, queryId: string) =>
+    api.post('/ibkr/connect', { token, queryId }).then(r => r.data),
+
+  sync: () => api.post<Account[]>('/ibkr/sync').then(r => r.data),
+
+  disconnect: () => api.delete('/ibkr/connection').then(r => r.data),
 }
 
 // --- Finary ---
